@@ -1,0 +1,40 @@
+# --- 构建产物 (Build Artifacts) ---
+# 忽略我们之前配置的 Build 目录
+Build/
+# 忽略旧的或默认的 x64/Debug 目录（以防万一）
+x64/
+Debug/
+Release/
+
+# --- Visual Studio 特定文件 ---
+# 忽略用户特定的文件（每个人可能不同，不应提交）
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+ipch/
+
+# 忽略 VS 的辅助文件（通常可以重新生成）
+*.aps
+*.ncb
+*.opt
+*.plg
+*.bak
+*.cache
+*.pch
+*.exp
+*.ilk
+*.lib (如果是生成的库)
+
+# --- VSCode 特定文件 ---
+# 忽略本地历史和个人状态
+.VS/
+.code-workspace (除非这是多人共享的工作区文件)
+
+# --- 操作系统文件 ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- 第三方库 (可选) ---
+# ThirdParty/
