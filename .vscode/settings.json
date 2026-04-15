@@ -1,0 +1,21 @@
+{
+    "editor.formatOnSave": true, // 保存时自动格式化
+    "editor.tabSize": 4,         // 缩进 4 空格
+    "editor.insertSpaces": true, // 使用空格而不是 Tab
+    "files.associations": {
+        "*.hlsl": "hlsl",
+        "*.inl": "cpp"
+    },
+    "[cpp]": {
+        "editor.defaultFormatter": "ms-vscode.cpptools"
+    },
+    "[c]": {
+        "editor.defaultFormatter": "ms-vscode.cpptools"
+    },
+    "C_Cpp.errorSquiggles": "Enabled",
+    "C_Cpp.intelliSenseEngine": "Default",
+    
+    // 确保 VSCode 使用与项目一致的 C++ 标准
+    "C_Cpp.default.cppStandard": "c++14",
+    "C_Cpp.default.cStandard": "c11"
+}
