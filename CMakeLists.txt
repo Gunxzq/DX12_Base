@@ -9,11 +9,14 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Bin/x64/${CMAKE_BUILD_TYP
 
 # 2. 查找依赖
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(DirectXTK12 CONFIG REQUIRED)
+find_package(concurrentqueue CONFIG REQUIRED)
+find_package(EnTT CONFIG REQUIRED)
 
 # 3. 定义可执行文件
 add_executable(${PROJECT_NAME}
     Runtime/DX12_Base.cpp
-    # 添加更多源文件...
+ 
 )
 
 # 4. 包含目录
@@ -27,6 +30,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 # 5. 链接库
 target_link_libraries(${PROJECT_NAME} PRIVATE 
     nlohmann_json::nlohmann_json
+    DirectXTK12::DirectXTK12
+    concurrentqueue::concurrentqueue
+    EnTT::EnTT
     d3d12.lib
     dxgi.lib
     dxguid.lib

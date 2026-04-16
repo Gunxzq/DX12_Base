@@ -46,4 +46,13 @@
       <Filter>资源文件</Filter>
     </ResourceCompile>
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" />
+    <None Include=".gitignore" />
+    <None Include=".vscode\c_cpp_properties.json" />
+    <None Include=".vscode\settings.json" />
+  </ItemGroup>
 </Project>
