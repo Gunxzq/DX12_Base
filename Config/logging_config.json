@@ -1,0 +1,30 @@
+{
+  "logging": {
+    "global_level": "debug",
+    "flush_level": "err",
+    "format_pattern": "[%Y-%m-%d %H:%M:%S.%e] [%l] [thread %t] %v",
+    
+    "sinks": {
+      "console": {
+        "enabled": true,
+        "level": "info",
+        "colorize": true
+      },
+      "file": {
+        "enabled": true,
+        "level": "debug",
+        "path": "logs/engine.log",
+        "rotation": {
+          "policy": "size",
+          "max_size_mb": 10,
+          "max_files": 5
+        }
+      },
+      "async": {
+        "enabled": true,
+        "queue_size": 8192,
+        "overflow_policy": "discard"
+      }
+    }
+  }
+}

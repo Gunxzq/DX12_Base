@@ -19,10 +19,15 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Engine\Include\Core\Logger\LoggerConfig.h" />
     <ClCompile Include="Runtime\DX12_Base.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Content\Resource.h" />
+    <ClInclude Include="Engine\Include\Core\Config\ConfigManager.h" />
+    <ClInclude Include="Engine\Include\Core\Logger\Logger.h" />
+    <ClInclude Include="Engine\Src\Core\Config\ConfigManager.cpp" />
+    <ClInclude Include="Engine\Src\Core\Logger\Logger.cpp" />
     <ClInclude Include="Runtime\DX12_Base.h" />
     <ClInclude Include="Runtime\framework.h" />
     <ClInclude Include="Runtime\targetver.h" />
@@ -41,6 +46,7 @@
     <None Include=".gitignore" />
     <None Include=".vscode\c_cpp_properties.json" />
     <None Include=".vscode\settings.json" />
+    <None Include="Config\logging_config.json" />
     <None Include="README.md" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

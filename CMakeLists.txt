@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.14)
 project(DX12_Base LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17) # 建议升级到 17
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 1. 设置输出目录 (让 exe 跑到 Build/Bin/x64/Debug 下，方便管理)
+# 1. 设置输出目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Bin/x64/${CMAKE_BUILD_TYPE})
 
 # 2. 查找依赖
@@ -12,19 +12,34 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(DirectXTK12 CONFIG REQUIRED)
 find_package(concurrentqueue CONFIG REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
-# 3. 定义可执行文件
-add_executable(${PROJECT_NAME}
-    Runtime/DX12_Base.cpp
- 
+# 3. 自动收集源文件
+# 收集 Engine/Src 和 Runtime 目录下的所有 .cpp 和 .h 文件
+file(GLOB_RECURSE PROJECT_SOURCES 
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/*.h"
 )
 
+# 如果 Config 或 Include 目录下也有需要编译的源文件（较少见，但以防万一）
+# file(GLOB_RECURSE CONFIG_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Config/*.cpp")
+# list(APPEND PROJECT_SOURCES ${CONFIG_SOURCES})
+
+# 定义可执行文件
+add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
+
 # 4. 包含目录
-# 链接 nlohmann_json 会自动包含它的头文件
-# 这里添加你自己的公共头文件目录
 target_include_directories(${PROJECT_NAME} PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}/Include 
-    ${CMAKE_CURRENT_SOURCE_DIR}/Engine
+    # 推荐：将 Include 目录作为根，这样代码中可以写 #include "Core/Logger.h"
+    ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Include
+    
+    # 如果 Engine/Src 中的头文件互相包含，且路径是相对于 Src 的，则可能需要添加
+    # ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Src
+    
+    # 如果 Runtime 中有共享头文件被其他模块包含
+    # ${CMAKE_CURRENT_SOURCE_DIR}/Runtime
 )
 
 # 5. 链接库
@@ -33,13 +48,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     DirectXTK12::DirectXTK12
     concurrentqueue::concurrentqueue
     EnTT::EnTT
+    spdlog::spdlog
     d3d12.lib
     dxgi.lib
     dxguid.lib
 )
 
-# 6. (进阶) 如果你需要复制 Content 文件夹到输出目录
-# 这样你的 exe 才能找到模型和贴图
+# 6. 复制 Content 文件夹
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_SOURCE_DIR}/Content

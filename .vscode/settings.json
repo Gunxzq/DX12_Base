@@ -1,7 +1,8 @@
 {
-    "editor.formatOnSave": true, // 保存时自动格式化
-    "editor.tabSize": 4,         // 缩进 4 空格
-    "editor.insertSpaces": true, // 使用空格而不是 Tab
+    "editor.formatOnSave": true,
+    // 确保这里与 .clang-format 中的 IndentWidth 一致
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
     "files.associations": {
         "*.hlsl": "hlsl",
         "*.inl": "cpp"
@@ -9,13 +10,17 @@
     "[cpp]": {
         "editor.defaultFormatter": "ms-vscode.cpptools"
     },
-    "[c]": {
-        "editor.defaultFormatter": "ms-vscode.cpptools"
-    },
-    "C_Cpp.errorSquiggles": "Enabled",
-    "C_Cpp.intelliSenseEngine": "Default",
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.default.cppStandard": "c++17",
     
-    // 确保 VSCode 使用与项目一致的 C++ 标准
-    "C_Cpp.default.cppStandard": "c++14",
-    "C_Cpp.default.cStandard": "c11"
+    // --- 关键配置开始 ---
+    "cmake.configureArgs": [
+        "-DCMAKE_TOOLCHAIN_FILE=D:/Dev/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    ],
+    "C_Cpp.clang_format_path": "D:\\Dev\\vs2022\\VC\\Tools\\Llvm\\bin\\clang-format.exe",
+    // 强制指定为 x64，这会覆盖默认的 win32
+    "cmake.architecture": "x64", 
+    "cmake.generator": "Visual Studio 17 2022"
+    // --- 关键配置结束 ---
 }
