@@ -18,14 +18,12 @@ find_package(spdlog CONFIG REQUIRED)
 # 收集 Engine/Src 和 Runtime 目录下的所有 .cpp 和 .h 文件
 file(GLOB_RECURSE PROJECT_SOURCES 
     "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Src/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Include/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/*.h"
 )
 
-# 如果 Config 或 Include 目录下也有需要编译的源文件（较少见，但以防万一）
-# file(GLOB_RECURSE CONFIG_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Config/*.cpp")
-# list(APPEND PROJECT_SOURCES ${CONFIG_SOURCES})
+
 
 # 定义可执行文件
 add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
@@ -35,17 +33,14 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     # 推荐：将 Include 目录作为根，这样代码中可以写 #include "Core/Logger.h"
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Include
     
-    # 如果 Engine/Src 中的头文件互相包含，且路径是相对于 Src 的，则可能需要添加
-    # ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Src
-    
-    # 如果 Runtime 中有共享头文件被其他模块包含
-    # ${CMAKE_CURRENT_SOURCE_DIR}/Runtime
+ 
 )
 
 # 5. 链接库
+# 5. 链接库
 target_link_libraries(${PROJECT_NAME} PRIVATE 
     nlohmann_json::nlohmann_json
-    DirectXTK12::DirectXTK12
+    Microsoft::DirectXTK12
     concurrentqueue::concurrentqueue
     EnTT::EnTT
     spdlog::spdlog

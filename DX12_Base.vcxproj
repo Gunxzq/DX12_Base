@@ -26,6 +26,7 @@
     <ClInclude Include="Content\Resource.h" />
     <ClInclude Include="Engine\Include\Core\Config\ConfigManager.h" />
     <ClInclude Include="Engine\Include\Core\Logger\Logger.h" />
+    <ClInclude Include="Engine\Include\Core\Logger\LoggerConfig.hpp" />
     <ClInclude Include="Engine\Src\Core\Config\ConfigManager.cpp" />
     <ClInclude Include="Engine\Src\Core\Logger\Logger.cpp" />
     <ClInclude Include="Runtime\DX12_Base.h" />
@@ -43,10 +44,13 @@
     <Text Include="CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
+    <None Include=".clang-format" />
     <None Include=".gitignore" />
     <None Include=".vscode\c_cpp_properties.json" />
     <None Include=".vscode\settings.json" />
+    <None Include="CMakeSettings.json" />
     <None Include="Config\logging_config.json" />
+    <None Include="format_staged.bat" />
     <None Include="README.md" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

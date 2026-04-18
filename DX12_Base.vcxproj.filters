@@ -47,6 +47,9 @@
     <ClInclude Include="Engine\Src\Core\Logger\Logger.cpp">
       <Filter>源文件\头文件</Filter>
     </ClInclude>
+    <ClInclude Include="Engine\Include\Core\Logger\LoggerConfig.hpp">
+      <Filter>源文件\头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="Content\DX12_Base.ico">
@@ -70,5 +73,10 @@
     <None Include=".vscode\c_cpp_properties.json" />
     <None Include=".vscode\settings.json" />
     <None Include="Config\logging_config.json" />
+    <None Include=".clang-format" />
+    <None Include="format_staged.bat">
+      <Filter>源文件</Filter>
+    </None>
+    <None Include="CMakeSettings.json" />
   </ItemGroup>
 </Project>
