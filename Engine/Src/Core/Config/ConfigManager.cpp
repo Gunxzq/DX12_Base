@@ -89,8 +89,8 @@ void ConfigManager::SetLogGlobalLevel(LogLevel level) {
 void ConfigManager::SetLogDirectory(const std::string &dir) {
     {
         std::unique_lock<std::shared_mutex> lock(m_mutex);
-        if (m_logConfig.LogDirectory != dir) {
-            m_logConfig.LogDirectory = dir;
+        if (m_logConfig.Sinks.File.Path != dir) {
+            m_logConfig.Sinks.File.Path = dir;
             m_isDirty = true;
             m_lastModifyTime = std::chrono::steady_clock::now();
             SyncStructsToJson();
@@ -197,22 +197,28 @@ void ConfigManager::LoadAndMergeConfigs(const std::filesystem::path &userPath,
 
 void ConfigManager::SyncStructsToJson() {
     nlohmann::json logJson = m_logConfig;
-    m_configData["Log"] = logJson;
+
+    m_configData["logging"] = logJson;
 }
 
 void ConfigManager::ParseJsonToStructs(const nlohmann::json &j) {
-    // 从 JSON 对象读取到强类型结构体
-    if (j.contains("Log")) {
+
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+
+    // 检查是否存在 "logging" 节点
+    if (j.contains("logging")) {
         try {
-            m_logConfig = j["Log"].get<LogConfig>();
+            // 从 "logging" 节点反序列化到 m_logConfig
+            m_logConfig = j["logging"].get<LogConfig>();
         } catch (const std::exception &e) {
-            // 解析失败，保持默认值或记录错误
+            // 处理解析错误，例如使用默认值或记录错误
+            SPDLOG_WARN("Failed to parse logging config: {}. Using defaults.", e.what());
+            m_logConfig = LogConfig(); // 重置为默认值
         }
     } else {
-        // 如果 JSON 中没有 Log 节，保持 m_logConfig 的默认构造函数值
+        // 如果没有 logging 节点，使用默认配置
+        m_logConfig = LogConfig();
     }
-
-    // 如果有其他配置，继续解析
 }
 
 bool ConfigManager::AtomicWriteFile(const std::filesystem::path &targetPath, const std::string &content) {

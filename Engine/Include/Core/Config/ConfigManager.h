@@ -11,26 +11,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include "Core/Logger/LoggerConfig.h"
+
 namespace DX12Engine {
 namespace Core {
-
-// 前置声明日志级别，避免依赖 Logger.h 造成循环依赖
-enum class LogLevel : int { Trace = 0, Debug = 1, Info = 2, Warn = 3, Error = 4, Critical = 5, Off = 6 };
-
-// ========================================================================
-// 配置结构体定义 (Strongly Typed Configs)
-// ========================================================================
-
-struct LogConfig {
-    LogLevel GlobalLevel = LogLevel::Info;
-    std::string LogDirectory = "Logs";
-    bool EnableFileLogging = true;
-    bool EnableConsoleLogging = true;
-
-    // 序列化支持
-    // 通过宏序列化可以直接把对象转换为JSON
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(LogConfig, GlobalLevel, LogDirectory, EnableFileLogging, EnableConsoleLogging)
-};
 
 // ========================================================================
 // ConfigManager 类定义

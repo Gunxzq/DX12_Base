@@ -22,6 +22,8 @@
 
 ### 2.2 核心组件与 Sinks (输出端)
 
+<!-- Sink：负责实际执行 I/O 操作。一个 Logger 可以拥有多个 Sinks。 -->
+<!-- sink是输出端，输出到各种目标 -->
 - **Logger Instance**: 单例模式管理的 `std::shared_ptr<spdlog::logger>`，通常命名为 "engine_logger"。
 - **Sinks 设计**:
     | Sink 类型 | 用途 | 配置策略 |
