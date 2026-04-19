@@ -1,5 +1,4 @@
 #include "Core/Logger/Logger.h"
-#include "Core/Config/ConfigManager.h" // 在 .cpp 中包含以获取配置实例
 #include <filesystem>
 #include <iostream>
 #include <spdlog/async.h>

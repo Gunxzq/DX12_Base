@@ -203,16 +203,14 @@ void ConfigManager::SyncStructsToJson() {
 
 void ConfigManager::ParseJsonToStructs(const nlohmann::json &j) {
 
-    std::unique_lock<std::shared_mutex> lock(m_mutex);
-
     // 检查是否存在 "logging" 节点
     if (j.contains("logging")) {
         try {
             // 从 "logging" 节点反序列化到 m_logConfig
             m_logConfig = j["logging"].get<LogConfig>();
         } catch (const std::exception &e) {
-            // 处理解析错误，例如使用默认值或记录错误
-            SPDLOG_WARN("Failed to parse logging config: {}. Using defaults.", e.what());
+            std::cerr << "[ConfigManager Warning] Failed to parse logging config: " << e.what() << ". Using defaults."
+                      << std::endl;
             m_logConfig = LogConfig(); // 重置为默认值
         }
     } else {
