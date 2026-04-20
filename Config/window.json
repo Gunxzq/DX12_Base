@@ -1,0 +1,14 @@
+{
+  "window": {
+    "title": "DX12 Engine",
+    "resolution": {
+      "width": 1280,
+      "height": 720
+    },
+    "mode": "windowed",
+    "behavior": {
+      "resizable": true,
+      "maximizable": true
+    }
+  }
+}

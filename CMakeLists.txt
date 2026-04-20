@@ -1,4 +1,13 @@
 cmake_minimum_required(VERSION 3.14)
+
+# ========================================================================
+# vcpkg 工具链配置 (必须在 project() 之前)
+# ========================================================================
+# 如果环境变量中有 VCPKG_ROOT，则使用它
+if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+endif()
+
 project(DX12_Base LANGUAGES CXX)
 
 # 设置 C++ 标准
@@ -32,6 +41,7 @@ add_library(DX12EngineCore STATIC ${ENGINE_SOURCES})
 # 设置包含目录 (PUBLIC 使得链接此库的目标也能找到头文件)
 target_include_directories(DX12EngineCore PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Include
+    ${CMAKE_CURRENT_SOURCE_DIR}/Content
 )
 
 # 链接依赖库
@@ -46,6 +56,7 @@ target_link_libraries(DX12EngineCore PUBLIC
     dxguid.lib
 )
 
+
 # ========================================================================
 # 4. 构建主程序 (Executable)
 # ========================================================================
@@ -55,14 +66,17 @@ file(GLOB_RECURSE RUNTIME_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/*.h"
 )
 
-# 收集资源文件 (.rc)
-# 注意：.rc 文件通常不需要 GLOB_RECURSE，直接指定即可，或者确保它在 RUNTIME_SOURCES 中被包含
-# 这里我们显式添加 .rc 文件，确保它被编译
-set(RUNTIME_RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/DX12_Base.rc")
+
+
+set(RUNTIME_RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Content/DX12_Base.rc")
 
 # 【关键修改】添加 WIN32 关键字
 # 这告诉链接器这是一个 Windows GUI 程序，入口点是 wWinMain/WinMain，而不是 main
 add_executable(${PROJECT_NAME} WIN32 ${RUNTIME_SOURCES} ${RUNTIME_RESOURCES})
+
+set_source_files_properties(${RUNTIME_RESOURCES} PROPERTIES 
+    RC_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/Content"
+)
 
 # 主程序链接引擎核心库
 target_link_libraries(${PROJECT_NAME} PRIVATE 
@@ -79,6 +93,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     uuid.lib
 )
 
+# 为 RC 编译器添加包含目录，使其能找到 resource.h 和 targetver.h
+target_include_directories(${PROJECT_NAME} PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/Content
+)
+
 # 复制 Content 文件夹到输出目录
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -87,43 +106,34 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 )
 
 # ========================================================================
-# 5. 集成 Google Test (FetchContent)
+# 5. 集成 Google Test (通过 vcpkg) - 可选
 # ========================================================================
-include(FetchContent)
+option(BUILD_TESTS "Build test programs" OFF)
 
-# 声明 Google Test
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG        v1.14.0 # 使用稳定版本，可根据需要更新
-)
+if(BUILD_TESTS)
+    find_package(GTest CONFIG REQUIRED)
 
-# 对于 Windows，强制使用共享 CRT 以匹配默认项目设置
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    # ========================================================================
+    # 6. 构建测试程序
+    # ========================================================================
+    enable_testing()
 
-# 下载并配置 Google Test
-FetchContent_MakeAvailable(googletest)
-
-# ========================================================================
-# 6. 构建测试程序
-# ========================================================================
-enable_testing()
-
-# 收集 Tests 目录下的测试源文件
-file(GLOB_RECURSE TEST_SOURCES 
-    "${CMAKE_CURRENT_SOURCE_DIR}/Tests/*.cpp"
-)
-
-if(TEST_SOURCES)
-    add_executable(DX12Tests ${TEST_SOURCES})
-
-    # 链接 GTest 主库 和 引擎核心库
-    target_link_libraries(DX12Tests PRIVATE 
-        GTest::gtest_main 
-        DX12EngineCore
+    # 收集 Tests 目录下的测试源文件
+    file(GLOB_RECURSE TEST_SOURCES 
+        "${CMAKE_CURRENT_SOURCE_DIR}/Tests/*.cpp"
     )
 
-    # 自动发现测试用例，以便 VS Test Explorer 识别
-    include(GoogleTest)
-    gtest_discover_tests(DX12Tests)
+    if(TEST_SOURCES)
+        add_executable(DX12Tests ${TEST_SOURCES})
+
+        # 链接 GTest 主库 和 引擎核心库
+        target_link_libraries(DX12Tests PRIVATE 
+            GTest::gtest_main 
+            DX12EngineCore
+        )
+
+        # 自动发现测试用例，以便 VS Test Explorer 识别
+        include(GoogleTest)
+        gtest_discover_tests(DX12Tests)
+    endif()
 endif()

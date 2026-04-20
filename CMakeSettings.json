@@ -5,16 +5,26 @@
       "generator": "Ninja",
       "configurationType": "Debug",
       "inheritEnvironments": [ "msvc_x64" ],
-      "buildRoot": "${projectDir}\\build\\${name}", 
-      "installRoot": "${projectDir}\\build\\install\\${name}", 
+      "buildRoot": "${projectDir}\\build\\${name}",
+      "installRoot": "${projectDir}\\build\\install\\${name}",
       "cmakeCommandArgs": "",
       "buildCommandArgs": "",
       "ctestCommandArgs": "",
       "variables": [
         {
           "name": "CMAKE_TOOLCHAIN_FILE",
-          "value": "D:/Dev/vcpkg/scripts/buildsystems/vcpkg.cmake", 
+          "value": "D:/Dev/vcpkg/scripts/buildsystems/vcpkg.cmake",
           "type": "PATH"
+        },
+        {
+          "name": "BUILD_TESTS",
+          "value": "TRUE",
+          "type": "BOOL"
+        },
+        {
+          "name": "VCPKG_MANIFEST_MODE",
+          "value": "OFF",
+          "type": "BOOL"
         }
       ]
     }
