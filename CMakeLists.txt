@@ -10,6 +10,11 @@ endif()
 
 project(DX12_Base LANGUAGES CXX)
 
+
+add_compile_options("/utf-8")
+
+
+
 # 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -73,6 +78,20 @@ set(RUNTIME_RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Content/DX12_Base.rc")
 # 【关键修改】添加 WIN32 关键字
 # 这告诉链接器这是一个 Windows GUI 程序，入口点是 wWinMain/WinMain，而不是 main
 add_executable(${PROJECT_NAME} WIN32 ${RUNTIME_SOURCES} ${RUNTIME_RESOURCES})
+
+
+# 在 add_executable 或 target_compile_definitions 中添加
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    UNICODE
+    _UNICODE
+)
+
+# 同时也给引擎库加上，保持一致
+target_compile_definitions(DX12EngineCore PRIVATE
+    UNICODE
+    _UNICODE
+)
+
 
 set_source_files_properties(${RUNTIME_RESOURCES} PROPERTIES 
     RC_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/Content"
