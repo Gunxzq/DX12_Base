@@ -96,7 +96,7 @@ void ConfigManager::SetLogDirectory(const std::string &dir) {
             SyncStructsToJson_Locked();
         }
     }
-    NotifySubscribers("Log");
+    NotifySubscribers_Unlocked("Log");
 }
 
 void ConfigManager::Save() {

@@ -154,11 +154,6 @@ private:
      */
     bool AtomicWriteFile(const std::filesystem::path &targetPath, const std::string &content);
 
-    /**
-     * @brief 通知订阅者
-     */
-    void NotifySubscribers(const std::string &section);
-
     // --- 成员变量 ---
 
     // 互斥锁: 保护配置数据的读写 (std::shared_mutex 允许并发读)
