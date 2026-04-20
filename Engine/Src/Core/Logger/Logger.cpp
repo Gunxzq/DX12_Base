@@ -1,6 +1,7 @@
 #include "Core/Logger/Logger.h"
 #include <filesystem>
 #include <iostream>
+#include <shared_mutex>
 #include <spdlog/async.h>
 #include <spdlog/details/null_mutex.h>
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -24,7 +25,29 @@ protected:
 std::shared_ptr<spdlog::logger> Logger::s_logger = nullptr;
 
 void Logger::Init(const LogConfig &config) {
-    // 1. 创建日志目录
+    std::unique_lock<std::shared_mutex> lock(s_mutex);
+    Init_Internal(config);
+}
+void Logger::Shutdown() {
+    std::unique_lock<std::shared_mutex> lock(s_mutex);
+    Shutdown_Internal();
+}
+
+std::shared_ptr<spdlog::logger> Logger::GetInstance() {
+    std::shared_lock<std::shared_mutex> lock(s_mutex);
+    return GetInstance_Internal();
+}
+
+// Private: REQUIRES: Caller must hold the lock (exclusive).
+void Logger::Init_Internal(const LogConfig &config) {
+    // 如果已经初始化，可以选择重置或忽略，这里假设允许重新初始化
+    if (s_logger) {
+        Shutdown_Internal();
+    }
+
+    // 1. 创建日志目录 (IO操作，建议在锁外进行，但依赖config，此处简化保留在锁内或可提取config路径后释放锁)
+    // 为了严格遵循“临界区越短越好”，可以将目录创建移至锁外，但需要确保线程安全地读取config。
+    // 鉴于 Init 通常只在启动时调用一次，且 config 是传入值，此处保持简单结构，若需极致优化可提取路径。
     if (config.Sinks.File.Enabled) {
         std::filesystem::path logPath(config.Sinks.File.Path);
         if (auto parent = logPath.parent_path(); !parent.empty()) {
@@ -102,7 +125,9 @@ void Logger::Init(const LogConfig &config) {
     // 8. 设置格式
     s_logger->set_pattern(config.FormatPattern);
 }
-void Logger::Shutdown() {
+
+// Private: REQUIRES: Caller must hold the lock (exclusive).
+void Logger::Shutdown_Internal() {
     if (s_logger) {
         s_logger->flush();
         spdlog::shutdown();
@@ -110,7 +135,8 @@ void Logger::Shutdown() {
     }
 }
 
-std::shared_ptr<spdlog::logger> &Logger::GetInstance() { return s_logger; }
+// Private: REQUIRES: Caller must hold the lock (shared).
+std::shared_ptr<spdlog::logger> Logger::GetInstance_Internal() { return s_logger; }
 
 } // namespace Core
 } // namespace DX12Engine

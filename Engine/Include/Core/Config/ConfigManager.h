@@ -53,19 +53,23 @@ public:
     // --- 2. 读取配置 (Read) ---
 
     /**
-     * @brief 获取日志配置 (只读引用)
+     * @brief 获取日志配置
+     * @attention Thread-safe: Acquires shared lock.
+     * @return const LogConfig &
      */
     const LogConfig &GetLogConfig() const;
 
     // --- 3. 修改配置 (Write) ---
 
     /**
-     * @brief 设置日志全局级别
+     * @brief 设置全局日志级别
+     * @attention Thread-safe: Acquires unique lock.
      */
     void SetLogGlobalLevel(LogLevel level);
 
     /**
      * @brief 设置日志目录
+     * @attention Thread-safe: Acquires unique lock.
      */
     void SetLogDirectory(const std::string &dir);
 
@@ -73,6 +77,7 @@ public:
 
     /**
      * @brief 手动触发保存
+     * @attention Thread-safe: Acquires unique lock.
      */
     void Save();
 
@@ -80,6 +85,7 @@ public:
 
     /**
      * @brief 重新从磁盘加载配置
+     * @attention Thread-safe: Acquires unique lock.
      */
     void Reload();
 
@@ -87,6 +93,7 @@ public:
 
     /**
      * @brief 在主循环中调用，处理节流自动保存
+     * @attention Thread-safe: Acquires unique lock internally if dirty.
      * @param deltaTime 帧间隔时间(秒)
      */
     void Update(float deltaTime);
@@ -95,6 +102,7 @@ public:
 
     /**
      * @brief 订阅配置变更事件
+     * @attention  Thread-safe: Acquires unique lock.
      * @param section 配置节名称 (如 "Log")
      * @param callback 变更回调
      */
@@ -108,18 +116,38 @@ private:
 
     /**
      * @brief 加载并合并 JSON 文件
+     * @attention  REQUIRES: Caller must hold m_mutex (unique or shared depending on usage, usually unique forload).
+     * @note Internal logic only, no locking performed here.
      */
-    void LoadAndMergeConfigs(const std::filesystem::path &userPath, const std::filesystem::path &defaultPath);
+    void LoadAndMergeConfigs_Locked(const std::filesystem::path &userPath, const std::filesystem::path &defaultPath);
 
     /**
      * @brief 将内存中的 Struct 同步到 JSON 对象 (准备保存)
+     * @attention REQUIRES: Caller must hold m_mutex (unique).
+     * @note Internal logic only, no locking performed here.
      */
-    void SyncStructsToJson();
+    void SyncStructsToJson_Locked();
 
     /**
      * @brief 将 JSON 对象解析到内存 Struct
+     * @attention REQUIRES: Caller must hold m_mutex (shared).
+     * @note Internal logic only, no locking performed here.
      */
-    void ParseJsonToStructs(const nlohmann::json &j);
+    void ParseJsonToStructs_Locked(const nlohmann::json &j);
+
+    /**
+     * @brief 保存配置
+     * @attention REQUIRES: Caller must hold m_mutex (unique).
+     * @note Performs the actual file write logic. Lock is held to ensure consistency of m_isDirty/m_configData.
+     */
+    bool SaveInternal_Locked();
+
+    /**
+     * @brief 通知订阅者
+     * @attention REQUIRES: Caller must NOT hold m_mutex (to avoid deadlock in callbacks).
+     * @note Notifies subscribers outside of the lock scope.
+     */
+    void NotifySubscribers_Unlocked(const std::string &section);
 
     /**
      * @brief 原子写入文件 (防止损坏)
