@@ -1,9 +1,9 @@
 {
   "window": {
-    "title": "DX12 Engine",
+    "title": "测试标题",
     "resolution": {
-      "width": 1280,
-      "height": 720
+      "width": 600,
+      "height": 600
     },
     "mode": "windowed",
     "behavior": {

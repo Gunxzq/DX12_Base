@@ -8,7 +8,7 @@ class Window {
 public:
     // 配置结构体，替代硬编码的字符串
     struct Desc {
-        std::wstring title = L"DX12 Engine";
+        std::wstring title = L"default window title";
         uint32_t width = 1280;
         uint32_t height = 720;
         bool resizable = true;

@@ -44,7 +44,8 @@ bool Window::Create() {
 
     // 4. 鍒涘缓绐楀彛
     // 鍏抽敭锛氶€氳繃 lpCreateParams 浼犻€?this 鎸囬拡
-    m_hWnd = CreateWindowExW(0, L"DX12WindowClass", m_Desc.title.c_str(), style, CW_USEDEFAULT, CW_USEDEFAULT,
+
+      m_hWnd = CreateWindowExW(0, L"DX12WindowClass", m_Desc.title.c_str(), style, CW_USEDEFAULT, CW_USEDEFAULT,
                              rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, m_hInstance, this);
 
     if (!m_hWnd) {

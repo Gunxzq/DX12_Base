@@ -1,5 +1,5 @@
 ﻿#include "DX12_Base.h"
-#include "Core/Window/Window.h"
+#include "Core/Bootstrap/Bootstrap.h"
 #include "framework.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine,
@@ -9,24 +9,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
     UNREFERENCED_PARAMETER(lpCmdLine);
     UNREFERENCED_PARAMETER(nCmdShow);
 
-    // 1. 创建窗口
-    Window::Desc desc;
-    desc.title = L"DX12 Base";
-    desc.width = 1280;
-    desc.height = 720;
-    desc.resizable = true;
+    // 原生输出调试信息
+    // OutputDebugStringW(L"Logging config path: \n");
 
-    Window window(desc);
-    if (!window.Create()) {
+    // 创建启动模块
+    DX12Engine::Core::Bootstrap bootstrap;
+
+    // 初始化（加载配置，创建窗口）
+    if (!bootstrap.Initialize("Config")) {
         return -1;
     }
 
-    // 2. 主消息循环
-    while (!window.ShouldClose()) {
-        window.ProcessMessages();
+    // 运行主循环
+    bootstrap.Run();
 
-        // TODO: 在此处添加游戏逻辑和渲染代码
-    }
+    // 关闭并清理
+    bootstrap.Shutdown();
 
     return 0;
 }

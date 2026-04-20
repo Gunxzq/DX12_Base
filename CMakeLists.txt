@@ -105,10 +105,17 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     $<TARGET_FILE_DIR:${PROJECT_NAME}>/Content
 )
 
+# 复制 Config 文件夹到输出目录
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Config
+    $<TARGET_FILE_DIR:${PROJECT_NAME}>/Config
+)
+
 # ========================================================================
-# 5. 集成 Google Test (通过 vcpkg) - 可选
+# 5. 集成 Google Test (通过 vcpkg) - 默认启用测试
 # ========================================================================
-option(BUILD_TESTS "Build test programs" OFF)
+option(BUILD_TESTS "Build test programs" ON)
 
 if(BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)

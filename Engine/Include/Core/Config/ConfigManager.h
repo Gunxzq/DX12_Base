@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "Core/Logger/LoggerConfig.h"
+#include "Core/Config/WindowConfig.h"
 
 namespace DX12Engine {
 namespace Core {
@@ -34,15 +35,24 @@ public:
 
     /**
      * @brief 初始化配置管理器
-     * @param userConfigPath 用户配置文件路径 (如 config/user_settings.json)
-     * @param defaultConfigPath 默认配置文件路径 (可选, 如 config/default_settings.json)
+     * @param configDir 配置目录路径 (如 "Config")，会自动加载 logging_config.json 和 window.json
      */
-    void Initialize(const std::filesystem::path &userConfigPath, const std::filesystem::path &defaultConfigPath = "");
+    void Initialize(const std::filesystem::path &configDir);
 
     /**
      * @brief 关闭并强制保存配置
      */
     void Shutdown();
+
+    /**
+     * @brief 构造函数
+     */
+    ConfigManager();
+
+    /**
+     * @brief 析构函数
+     */
+    ~ConfigManager();
 
     // 禁止拷贝和移动
     ConfigManager(const ConfigManager &) = delete;
@@ -58,6 +68,13 @@ public:
      * @return const LogConfig &
      */
     const LogConfig &GetLogConfig() const;
+
+    /**
+     * @brief 获取窗口配置
+     * @attention Thread-safe: Acquires shared lock.
+     * @return const WindowConfig &
+     */
+    const WindowConfig &GetWindowConfig() const;
 
     // --- 3. 修改配置 (Write) ---
 
@@ -109,10 +126,19 @@ public:
     void Subscribe(const std::string &section, ConfigChangeCallback callback);
 
 private:
-    ConfigManager();
-    ~ConfigManager();
-
     // --- 内部辅助方法 ---
+
+    /**
+     * @brief 加载日志配置
+     * @attention REQUIRES: Caller must hold m_mutex (unique).
+     */
+    void LoadLoggingConfig_Locked(const std::filesystem::path &path);
+
+    /**
+     * @brief 加载窗口配置
+     * @attention REQUIRES: Caller must hold m_mutex (unique).
+     */
+    void LoadWindowConfig_Locked(const std::filesystem::path &path);
 
     /**
      * @brief 加载并合并 JSON 文件
@@ -161,6 +187,7 @@ private:
 
     // 强类型配置实例
     LogConfig m_logConfig;
+    WindowConfig m_windowConfig;
 
     // 原始 JSON 数据
     nlohmann::json m_configData;
@@ -174,8 +201,7 @@ private:
     std::chrono::steady_clock::time_point m_lastSaveTime;
 
     // 配置路径
-    std::filesystem::path m_userConfigPath;
-    std::filesystem::path m_defaultConfigPath;
+    std::filesystem::path m_configDir;
 
     // 节流阈值
     static constexpr float SAVE_THRESHOLD_SECONDS = 5.0f;
