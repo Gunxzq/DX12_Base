@@ -33,8 +33,36 @@ public:
      */
     static std::shared_ptr<spdlog::logger> GetInstance();
 
-    // 便捷日志宏或静态方法可以在这里声明
-    // 例如: static void Log(LogLevel level, const char* fmt, ...);
+    // 便捷日志方法
+    template <typename... Args> static void Trace(const char *fmt, Args... args) {
+        if (auto logger = GetInstance())
+            logger->trace(fmt, args...);
+    }
+
+    template <typename... Args> static void Debug(const char *fmt, Args... args) {
+        if (auto logger = GetInstance())
+            logger->debug(fmt, args...);
+    }
+
+    template <typename... Args> static void Info(const char *fmt, Args... args) {
+        if (auto logger = GetInstance())
+            logger->info(fmt, args...);
+    }
+
+    template <typename... Args> static void Warn(const char *fmt, Args... args) {
+        if (auto logger = GetInstance())
+            logger->warn(fmt, args...);
+    }
+
+    template <typename... Args> static void Error(const char *fmt, Args... args) {
+        if (auto logger = GetInstance())
+            logger->error(fmt, args...);
+    }
+
+    template <typename... Args> static void Critical(const char *fmt, Args... args) {
+        if (auto logger = GetInstance())
+            logger->critical(fmt, args...);
+    }
 
 private:
     /**
