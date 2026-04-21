@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <nlohmann/json.hpp>
 #include <string>
@@ -7,12 +7,12 @@ namespace DX12Engine {
 namespace Core {
 
 // ========================================================================
-// 鏃ュ織绾у埆瀹氫箟
+// 日志级别定义
 // ========================================================================
 
 enum class LogLevel : int { Trace = 0, Debug = 1, Info = 2, Warn = 3, Error = 4, Critical = 5, Off = 6 };
 
-// 杈呭姪瀹忥細鐢ㄤ簬 nlohmann json 搴忓垪鍖?enum class 涓哄瓧绗︿覆
+// 辅助宏：用于 nlohmann json 序列化 enum class 为字符串
 NLOHMANN_JSON_SERIALIZE_ENUM(LogLevel, {{LogLevel::Trace, "trace"},
                                         {LogLevel::Debug, "debug"},
                                         {LogLevel::Info, "info"},
@@ -22,7 +22,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(LogLevel, {{LogLevel::Trace, "trace"},
                                         {LogLevel::Off, "off"}})
 
 // ========================================================================
-// 寮傛閰嶇疆缁撴瀯浣?
+// 异步配置结构体
 // ========================================================================
 
 struct AsyncConfig {
@@ -35,11 +35,11 @@ struct AsyncConfig {
 };
 
 // ========================================================================
-// 鏂囦欢杞浆閰嶇疆缁撴瀯浣?
+// 文件轮转配置结构体?
 // ========================================================================
 
 struct FileRotationConfig {
-    std::string Policy = "size"; // 鐩墠涓昏鏀寔 size
+    std::string Policy = "size"; // 目前主要支持 size
     int MaxSizeMb = 10;
     int MaxFiles = 5;
 
@@ -47,7 +47,7 @@ struct FileRotationConfig {
 };
 
 // ========================================================================
-// 鏂囦欢 Sink 閰嶇疆缁撴瀯浣?
+// 文件 Sink 配置结构体
 // ========================================================================
 
 struct FileSinkConfig {
@@ -60,7 +60,7 @@ struct FileSinkConfig {
 };
 
 // ========================================================================
-// 鎺у埗鍙?Sink 閰嶇疆缁撴瀯浣?
+// 控制台 Sink 配置结构体
 // ========================================================================
 
 struct ConsoleSinkConfig {
@@ -72,28 +72,52 @@ struct ConsoleSinkConfig {
 };
 
 // ========================================================================
-// 鎵€鏈?Sinks 鐨勮仛鍚堥厤缃?
+// Debug Output Sink 配置结构体 (VS 输出窗口)
+// ========================================================================
+
+struct DebugOutputSinkConfig {
+    bool Enabled = false;
+    LogLevel Level = LogLevel::Debug;
+
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(DebugOutputSinkConfig, Enabled, Level)
+};
+
+// ========================================================================
+// Log Window Sink 配置结构体 (独立日志窗口)
+// ========================================================================
+
+struct LogWindowSinkConfig {
+    bool Enabled = true;
+    LogLevel Level = LogLevel::Debug;
+
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(LogWindowSinkConfig, Enabled, Level)
+};
+
+// ========================================================================
+// 所有 Sinks 的聚合配置
 // ========================================================================
 
 struct SinksConfig {
     ConsoleSinkConfig Console;
     FileSinkConfig File;
+    DebugOutputSinkConfig DebugOutput;
+    LogWindowSinkConfig LogWindow;
     AsyncConfig Async;
 
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(SinksConfig, Console, File, Async)
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(SinksConfig, Console, File, DebugOutput, LogWindow, Async)
 };
 
 // ========================================================================
-// 椤跺眰鏃ュ織閰嶇疆缁撴瀯浣?
+// 顶层日志配置结构体
 // ========================================================================
 
 /**
- * @brief 瀹屾暣鏃ュ織閰嶇疆
- * 瀵瑰簲 JSON 涓殑 "logging" 瀵硅薄
+ * @brief 完整日志配置
+ * 对应 JSON 中的 "logging" 对象
  */
 struct LogConfig {
     LogLevel GlobalLevel = LogLevel::Info;
-    LogLevel FlushLevel = LogLevel::Error; // 瀵瑰簲 flush_level
+    LogLevel FlushLevel = LogLevel::Error; // 对应 flush_level
     std::string FormatPattern = "[%Y-%m-%d %H:%M:%S.%e] [%l] [thread %t] %v";
 
     SinksConfig Sinks;

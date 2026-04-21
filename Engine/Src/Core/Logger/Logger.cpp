@@ -1,102 +1,202 @@
 #include "Core/Logger/Logger.h"
+#include "Core/DebugOverlay/LogWindow.h"
 #include <filesystem>
-#include <iostream>
-#include <shared_mutex>
 #include <spdlog/async.h>
 #include <spdlog/details/null_mutex.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
+#include <windows.h>
+#include <sstream>
 
 namespace DX12Engine {
 namespace Core {
 
-template <typename Mutex> class null_sink_mt : public spdlog::sinks::base_sink<Mutex> {
+// ========================================================================
+// 辅助函数
+// ========================================================================
+
+inline void DebugOutput(const std::string &msg) {
+    ::OutputDebugStringA(msg.c_str());
+}
+
+// ========================================================================
+// Log Window Sink - 输出到独立日志窗口
+// ========================================================================
+
+template <typename Mutex> class log_window_sink_mt : public spdlog::sinks::base_sink<Mutex> {
 protected:
-    void sink_it_(const spdlog::details::log_msg &) override {
-        // 什么都不做，丢弃日志消息
+    void sink_it_(const spdlog::details::log_msg &msg) override {
+        spdlog::memory_buf_t formatted;
+        base_sink<Mutex>::formatter_->format(msg, formatted);
+        std::string text(formatted.begin(), formatted.end());
+
+        LogWindow *logWindow = LogWindow::GetInstance();
+        if (logWindow) {
+            logWindow->AppendLog(text + "\r\n");
+        }
     }
 
-    void flush_() override {
-        // 什么都不做
-    }
+    void flush_() override {}
 };
 
-std::shared_ptr<spdlog::logger> Logger::s_logger = nullptr;
+using log_window_sink = log_window_sink_mt<std::mutex>;
+
+// ========================================================================
+// Debug Output Sink - 输出到 VS 输出窗口
+// ========================================================================
+
+template <typename Mutex> class debug_output_sink_mt : public spdlog::sinks::base_sink<Mutex> {
+protected:
+    void sink_it_(const spdlog::details::log_msg &msg) override {
+        spdlog::memory_buf_t formatted;
+        base_sink<Mutex>::formatter_->format(msg, formatted);
+        formatted.push_back('\0');
+        ::OutputDebugStringA(formatted.data());
+    }
+
+    void flush_() override {}
+};
+
+using debug_output_sink = debug_output_sink_mt<std::mutex>;
+
+// ========================================================================
+// Null Sink
+// ========================================================================
+
+template <typename Mutex> class null_sink_mt : public spdlog::sinks::base_sink<Mutex> {
+protected:
+    void sink_it_(const spdlog::details::log_msg &) override {}
+    void flush_() override {}
+};
+
+// ========================================================================
+// Logger 单例实现
+// ========================================================================
+
+Logger *Logger::GetInstance() {
+    if (!s_instance) {
+        std::unique_lock<std::shared_mutex> lock(s_mutex);
+        if (!s_instance) {
+            s_instance = new Logger();
+        }
+    }
+    return s_instance;
+}
 
 void Logger::Init(const LogConfig &config) {
     std::unique_lock<std::shared_mutex> lock(s_mutex);
-    Init_Internal(config);
+    GetInstance()->Init_Internal(config);
 }
+
 void Logger::Shutdown() {
     std::unique_lock<std::shared_mutex> lock(s_mutex);
-    Shutdown_Internal();
+    if (s_instance) {
+        s_instance->Shutdown_Internal();
+        delete s_instance;
+        s_instance = nullptr;
+    }
 }
 
-std::shared_ptr<spdlog::logger> Logger::GetInstance() {
-    std::shared_lock<std::shared_mutex> lock(s_mutex);
-    return GetInstance_Internal();
-}
-
-// Private: REQUIRES: Caller must hold the lock (exclusive).
 void Logger::Init_Internal(const LogConfig &config) {
-    // 如果已经初始化，可以选择重置或忽略，这里假设允许重新初始化
-    if (s_logger) {
+    if (m_logger) {
         Shutdown_Internal();
     }
 
-    // 1. 创建日志目录 (IO操作，建议在锁外进行，但依赖config，此处简化保留在锁内或可提取config路径后释放锁)
-    // 为了严格遵循“临界区越短越好”，可以将目录创建移至锁外，但需要确保线程安全地读取config。
-    // 鉴于 Init 通常只在启动时调用一次，且 config 是传入值，此处保持简单结构，若需极致优化可提取路径。
+    // 0. 创建日志窗口（如果启用）
+    if (config.Sinks.LogWindow.Enabled) {
+        // 创建 LogWindow 实例（内部会设置 s_instance）
+        if (!LogWindow::GetInstance()) {
+            new LogWindow();
+        }
+        LogWindow::GetInstance()->Show();
+        DebugOutput("[Logger] Log window created\n");
+    }
+
+    // 1. 创建日志目录
     if (config.Sinks.File.Enabled) {
-        std::filesystem::path logPath(config.Sinks.File.Path);
+        std::filesystem::path exePath = std::filesystem::current_path();
+        std::filesystem::path projectRoot = exePath.parent_path().parent_path().parent_path();
+        std::filesystem::path logPath = projectRoot / config.Sinks.File.Path;
+
+        DebugOutput("[Logger] Project root: " + projectRoot.string() + "\n");
+
         if (auto parent = logPath.parent_path(); !parent.empty()) {
             try {
                 std::filesystem::create_directories(parent);
             } catch (const std::filesystem::filesystem_error &e) {
-                std::cerr << "[Logger Init Error] Failed to create log directory '" << parent.string()
-                          << "': " << e.what() << std::endl;
+                DebugOutput("[Logger Init Error] Failed to create directory: " + std::string(e.what()) + "\n");
             }
         }
     }
 
     std::vector<spdlog::sink_ptr> sinks;
 
-    // 2. 创建控制台 Sink
+    // 2. 创建 Log Window Sink
+    if (config.Sinks.LogWindow.Enabled) {
+        try {
+            auto windowSink = std::make_shared<log_window_sink>();
+            windowSink->set_level(
+                static_cast<spdlog::level::level_enum>(static_cast<int>(config.Sinks.LogWindow.Level)));
+            sinks.push_back(windowSink);
+            DebugOutput("[Logger] LogWindow sink created\n");
+        } catch (const spdlog::spdlog_ex &ex) {
+            DebugOutput("[Logger Init Error] LogWindow sink failed: " + std::string(ex.what()) + "\n");
+        }
+    }
+
+    // 3. 创建 Debug Output Sink
+    if (config.Sinks.DebugOutput.Enabled) {
+        try {
+            auto debugSink = std::make_shared<debug_output_sink>();
+            debugSink->set_level(
+                static_cast<spdlog::level::level_enum>(static_cast<int>(config.Sinks.DebugOutput.Level)));
+            sinks.push_back(debugSink);
+            DebugOutput("[Logger] DebugOutput sink created\n");
+        } catch (const spdlog::spdlog_ex &ex) {
+            DebugOutput("[Logger Init Error] DebugOutput sink failed: " + std::string(ex.what()) + "\n");
+        }
+    }
+
+    // 4. 创建控制台 Sink
     if (config.Sinks.Console.Enabled) {
         try {
             auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
             consoleSink->set_level(
                 static_cast<spdlog::level::level_enum>(static_cast<int>(config.Sinks.Console.Level)));
             sinks.push_back(consoleSink);
+            DebugOutput("[Logger] Console sink created\n");
         } catch (const spdlog::spdlog_ex &ex) {
-            std::cerr << "[Logger Init Error] Console sink initialization failed: " << ex.what() << std::endl;
+            DebugOutput("[Logger Init Error] Console sink failed: " + std::string(ex.what()) + "\n");
         }
     }
 
-    // 3. 创建文件 Sink
+    // 5. 创建文件 Sink
     if (config.Sinks.File.Enabled) {
         try {
-            // 计算最大字节数
+            std::filesystem::path exePath = std::filesystem::current_path();
+            std::filesystem::path projectRoot = exePath.parent_path().parent_path().parent_path();
+            std::filesystem::path absoluteLogPath = projectRoot / config.Sinks.File.Path;
+
             auto maxSize = static_cast<size_t>(config.Sinks.File.Rotation.MaxSizeMb) * 1024 * 1024;
             auto maxFiles = static_cast<size_t>(config.Sinks.File.Rotation.MaxFiles);
 
-            auto fileSink =
-                std::make_shared<spdlog::sinks::rotating_file_sink_mt>(config.Sinks.File.Path, maxSize, maxFiles);
+            auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(absoluteLogPath.string(), maxSize, maxFiles);
             fileSink->set_level(static_cast<spdlog::level::level_enum>(static_cast<int>(config.Sinks.File.Level)));
             sinks.push_back(fileSink);
+            DebugOutput("[Logger] File sink created: " + absoluteLogPath.string() + "\n");
         } catch (const spdlog::spdlog_ex &ex) {
-            std::cerr << "[Logger Init Error] File sink initialization failed ('" << config.Sinks.File.Path
-                      << "'): " << ex.what() << std::endl;
+            DebugOutput("[Logger Init Error] File sink failed: " + std::string(ex.what()) + "\n");
         }
     }
 
     if (sinks.empty()) {
         auto nullSink = std::make_shared<null_sink_mt<std::mutex>>();
         sinks.push_back(nullSink);
+        DebugOutput("[Logger] No sinks enabled, using null sink\n");
     }
 
-    // 4. 构建 Async Logger
+    // 6. 构建 Async Logger
     if (config.Sinks.Async.Enabled) {
         spdlog::init_thread_pool(config.Sinks.Async.QueueSize, 1);
 
@@ -105,38 +205,37 @@ void Logger::Init_Internal(const LogConfig &config) {
             policy = spdlog::async_overflow_policy::block;
         }
 
-        s_logger = std::make_shared<spdlog::async_logger>("engine_logger", sinks.begin(), sinks.end(),
+        m_logger = std::make_shared<spdlog::async_logger>("engine_logger", sinks.begin(), sinks.end(),
                                                           spdlog::thread_pool(), policy);
     } else {
-        // 同步 Logger
-        s_logger = std::make_shared<spdlog::logger>("engine_logger", sinks.begin(), sinks.end());
+        m_logger = std::make_shared<spdlog::logger>("engine_logger", sinks.begin(), sinks.end());
     }
 
-    // 5. 注册与设置默认
-    spdlog::register_logger(s_logger);
-    spdlog::set_default_logger(s_logger);
+    // 7. 注册与设置默认
+    spdlog::register_logger(m_logger);
+    spdlog::set_default_logger(m_logger);
 
-    // 6. 设置全局级别
-    s_logger->set_level(static_cast<spdlog::level::level_enum>(static_cast<int>(config.GlobalLevel)));
+    // 8. 设置全局级别
+    m_logger->set_level(static_cast<spdlog::level::level_enum>(static_cast<int>(config.GlobalLevel)));
 
-    // 7. 设置刷盘级别
-    s_logger->flush_on(static_cast<spdlog::level::level_enum>(static_cast<int>(config.FlushLevel)));
+    // 9. 设置刷盘级别
+    m_logger->flush_on(static_cast<spdlog::level::level_enum>(static_cast<int>(config.FlushLevel)));
 
-    // 8. 设置格式
-    s_logger->set_pattern(config.FormatPattern);
+    // 10. 设置格式
+    m_logger->set_pattern(config.FormatPattern);
+
+    // 11. 测试日志
+    m_logger->info("Logger initialized successfully");
+    m_logger->flush();
 }
 
-// Private: REQUIRES: Caller must hold the lock (exclusive).
 void Logger::Shutdown_Internal() {
-    if (s_logger) {
-        s_logger->flush();
+    if (m_logger) {
+        m_logger->flush();
         spdlog::shutdown();
-        s_logger.reset();
+        m_logger.reset();
     }
 }
-
-// Private: REQUIRES: Caller must hold the lock (shared).
-std::shared_ptr<spdlog::logger> Logger::GetInstance_Internal() { return s_logger; }
 
 } // namespace Core
 } // namespace DX12Engine

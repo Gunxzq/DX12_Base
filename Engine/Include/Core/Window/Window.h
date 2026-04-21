@@ -4,6 +4,9 @@
 #include <functional>
 #include <string>
 
+namespace DX12Engine {
+namespace Core {
+
 class Window {
 public:
     // 配置结构体，替代硬编码的字符串
@@ -30,6 +33,9 @@ public:
     uint32_t GetWidth() const { return m_Width; }
     uint32_t GetHeight() const { return m_Height; }
 
+    // 显示窗口
+    void Show();
+
 private:
     // 静态 WndProc，用于接收 Windows 消息
     static LRESULT CALLBACK WndProcStatic(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -46,3 +52,6 @@ private:
     uint32_t m_Height = 0;
     bool m_ShouldClose = false;
 };
+
+} // namespace Core
+} // namespace DX12Engine

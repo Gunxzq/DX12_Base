@@ -1,29 +1,37 @@
 {
   "logging": {
-    "global_level": "debug",
-    "flush_level": "err",
-    "format_pattern": "[%Y-%m-%d %H:%M:%S.%e] [%l] [thread %t] %v",
-    
-    "sinks": {
-      "console": {
-        "enabled": true,
-        "level": "info",
-        "colorize": true
+    "GlobalLevel": "Debug",
+    "FlushLevel": "Error",
+    "FormatPattern": "[%Y-%m-%d %H:%M:%S.%e] [%l] [thread %t] %v",
+
+    "Sinks": {
+      "Console": {
+        "Enabled": false,
+        "Level": "Info",
+        "Colorize": true
       },
-      "file": {
-        "enabled": true,
-        "level": "debug",
-        "path": "logs/engine.log",
-        "rotation": {
-          "policy": "size",
-          "max_size_mb": 10,
-          "max_files": 5
+      "DebugOutput": {
+        "Enabled": false,
+        "Level": "Debug"
+      },
+      "LogWindow": {
+        "Enabled": true,
+        "Level": "Debug"
+      },
+      "File": {
+        "Enabled": true,
+        "Level": "Debug",
+        "Path": "logs/engine.log",
+        "Rotation": {
+          "Policy": "size",
+          "MaxSizeMb": 10,
+          "MaxFiles": 5
         }
       },
-      "async": {
-        "enabled": true,
-        "queue_size": 8192,
-        "overflow_policy": "discard"
+      "Async": {
+        "Enabled": true,
+        "QueueSize": 8192,
+        "OverflowPolicy": "discard"
       }
     }
   }

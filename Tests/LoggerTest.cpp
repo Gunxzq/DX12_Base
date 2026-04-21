@@ -3,7 +3,6 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
-#include <spdlog/spdlog.h>
 
 // 辅助函数：清理测试产生的日志文件
 void CleanupLogFiles(const std::string &path) {
@@ -43,12 +42,15 @@ TEST_F(LoggerTest, InitWithValidConfig) {
     EXPECT_NO_THROW(DX12Engine::Core::Logger::Init(config));
 
     // 验证 Logger 实例有效
-    auto logger = DX12Engine::Core::Logger::GetInstance();
+    auto *logger = DX12Engine::Core::Logger::GetInstance();
     EXPECT_NE(logger, nullptr);
-    EXPECT_EQ(logger->name(), "engine_logger");
 
     // 验证文件是否创建
     EXPECT_TRUE(std::filesystem::exists("TestLogs/engine_test.log"));
+
+    // 测试日志方法
+    EXPECT_NO_THROW(logger->Info("Test message"));
+    logger->Flush();
 }
 
 // 测试用例2：空 Sink 健壮性（所有 Sink 禁用）
@@ -62,11 +64,11 @@ TEST_F(LoggerTest, InitWithNoSinksUsesNullSink) {
     // 即使没有启用任何 Sink，也不应崩溃
     EXPECT_NO_THROW(DX12Engine::Core::Logger::Init(config));
 
-    auto logger = DX12Engine::Core::Logger::GetInstance();
+    auto *logger = DX12Engine::Core::Logger::GetInstance();
     EXPECT_NE(logger, nullptr);
 
     // 尝试记录日志，不应崩溃
-    EXPECT_NO_THROW(SPDLOG_INFO("This should be discarded by null sink"));
+    EXPECT_NO_THROW(logger->Info("This should be discarded by null sink"));
 }
 
 // 测试用例3：异步 Logger 初始化
@@ -82,14 +84,14 @@ TEST_F(LoggerTest, InitAsyncLogger) {
 
     EXPECT_NO_THROW(DX12Engine::Core::Logger::Init(config));
 
-    auto logger = DX12Engine::Core::Logger::GetInstance();
+    auto *logger = DX12Engine::Core::Logger::GetInstance();
     EXPECT_NE(logger, nullptr);
 
     // 异步模式下，日志可能不会立即落盘，但实例应有效
-    SPDLOG_INFO("Async log message");
+    EXPECT_NO_THROW(logger->Info("Async log message"));
 
     // 强制刷盘以确保写入
-    logger->flush();
+    logger->Flush();
     EXPECT_TRUE(std::filesystem::exists("TestLogs/async_test.log"));
 }
 
@@ -122,8 +124,7 @@ TEST_F(LoggerTest, ShutdownSafety) {
     // 第二次关闭（幂等性）
     EXPECT_NO_THROW(DX12Engine::Core::Logger::Shutdown());
 
-    // 关闭后获取实例（应返回 nullptr 或无效状态，取决于实现，这里期望不崩溃）
-    // 注意：当前实现 Shutdown 后 s_logger 重置为 nullptr
-    auto logger = DX12Engine::Core::Logger::GetInstance();
+    // 关闭后获取实例
+    auto *logger = DX12Engine::Core::Logger::GetInstance();
     EXPECT_EQ(logger, nullptr);
 }
