@@ -9,9 +9,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
     UNREFERENCED_PARAMETER(lpCmdLine);
     UNREFERENCED_PARAMETER(nCmdShow);
 
-    // 原生输出调试信息
-    // OutputDebugStringW(L"Logging config path: \n");
-
     // 创建启动模块
     DX12Engine::Core::Bootstrap bootstrap;
 
