@@ -2,14 +2,14 @@
 
 ## 1. 概述
 
-Bootstrap 是游戏引擎的**装配层**，而非运行层。
+Bootstrap 是游戏引擎的**装配层**，负责初始化基础设施、创建 Context 并填充能力、最终创建 Game 实例。
 
 | 职责定位 | 说明 |
 |:--------|:-----|
-| **做什么** | 初始化基础设施、组装依赖、创建 Game 实例并注入能力 |
+| **做什么** | 初始化基础设施、创建 Context、组装依赖、将 GameContext 注入 Game |
 | **不做什么** | 不持有消息循环、不管理运行时生命周期、不进入主循环 |
 
-**设计哲学**：Bootstrap 是"工厂 + 装配工"，负责将散落的子系统组装成可运行的 Game 实例，然后移交控制权。
+**设计哲学**：Bootstrap 是"工厂 + 装配工"，负责将散落的子系统组装成 Context，然后创建 Game 并注入 Context，最后移交控制权。
 
 ---
 
@@ -23,11 +23,25 @@ Bootstrap 是游戏引擎的**装配层**，而非运行层。
 | 2 | Logging | 根据配置初始化日志输出 |
 | 3 | Window | 创建操作系统窗口 |
 
-### 2.2 依赖组装
+### 2.2 创建并填充 Context
 
-- 按依赖顺序初始化底层系统
-- 创建具体子系统的实现实例
-- 将能力**注入**给 Game 实例
+Bootstrap 创建 GameContext 并填充具体能力：
+
+```cpp
+GameContext* Bootstrap::CreateContext() {
+    auto ctx = new GameContext();
+
+    // 基础子系统
+    ctx->Config   = new JsonConfigManager("config.json");
+    ctx->Logging  = new FileLogging(ctx->Config);
+    ctx->Window   = new DX12Window(ctx->Config);
+
+    // 渲染和其他子系统
+    ctx->Renderer = new DX12Renderer(ctx->Window);
+
+    return ctx;
+}
+```
 
 ### 2.3 异常捕获
 
@@ -35,19 +49,20 @@ Bootstrap 是游戏引擎的**装配层**，而非运行层。
 - 处理启动阶段的致命错误
 - 提供友好的错误信息
 
-### 2.4 控制权移交
+### 2.4 创建 Game 并移交控制权
 
 ```cpp
 // Bootstrap 的职责到此为止
-Game game(window, configManager);  // 创建并注入能力
-return game.Run();                  // 移交控制权给 Game
+GameContext* ctx = CreateContext();  // 创建并填充 Context
+Game game(ctx);                        // 将 Context 注入 Game
+return game.Run();                     // 移交控制权给 Game
 ```
 
 ---
 
 ## 3. 架构图表
 
-### 3.1 模块职责边界
+### 3.1 模块职责边界（包含 Context）
 
 ```mermaid
 graph TB
@@ -57,10 +72,16 @@ graph TB
 
     subgraph "Bootstrap (装配层)"
         B["Initialize()"]
-        C["ConfigManager::Initialize()"]
-        D["Logging::Initialize()"]
-        E["Window::Create()"]
-        F["new Game(...)"]
+        C["CreateContext()"]
+        D["填充能力到 Context"]
+    end
+
+    subgraph "Context (中间层)"
+        E["GameContext"]
+        E1["Window*"]
+        E2["Renderer*"]
+        E3["Logging*"]
+        E4["Config*"]
     end
 
     subgraph "Game (运行层)"
@@ -72,19 +93,19 @@ graph TB
 
     A -->|"调用"| B
     B --> C
-    B --> D
-    B --> E
-    C -->|"依赖配置"| D
-    E --> F
-    F -->|"注入能力"| G
-    B -->|"移交控制"| G
+    C --> D
+    D -->|"填充"| E1
+    D -->|"填充"| E2
+    D -->|"填充"| E3
+    D -->|"填充"| E4
 
-    G --> I
-    G --> J
-    G --> H
+    C -->|"返回"| E
+    E -->|"注入"| G
+    B -->|"移交控制"| G
 
     style A fill:#f9f,stroke:#333,stroke-width:2px
     style B fill:#e8f5e9,stroke:#2e7d32
+    style E fill:#fff3e0,stroke:#e65100
     style G fill:#e3f2fd,stroke:#1565c0
 ```
 
@@ -94,34 +115,33 @@ graph TB
 sequenceDiagram
     participant main as main() / wWinMain()
     participant Bootstrap
-    participant ConfigMgr as ConfigManager
-    participant Logging
-    participant Window
+    participant Context as GameContext
     participant Game
 
     main->>Bootstrap: Initialize(hInstance, cmdShow)
     Activate Bootstrap
 
-    Bootstrap->>ConfigMgr: Initialize()
-    ConfigMgr-->>Bootstrap: OK
+    Bootstrap->>Bootstrap: 初始化 ConfigManager
+    Bootstrap->>Bootstrap: 初始化 Logging
 
-    Bootstrap->>Logging: Initialize(config)
-    Logging-->>Bootstrap: OK
+    Bootstrap->>Context: new GameContext()
+    Note over Context: 创建空的上下文容器
 
-    Bootstrap->>Window: Create(config)
-    Window-->>Bootstrap: window handle
+    Bootstrap->>Context: Context->Config = new JsonConfig()
+    Bootstrap->>Context: Context->Logging = new FileLogging()
+    Bootstrap->>Context: Context->Window = new DX12Window()
+    Bootstrap->>Context: Context->Renderer = new DX12Renderer()
+    Note over Context: 填充所有能力
 
-    Bootstrap->>Game: new Game(window, config, logging)
-    Note over Game: 接收注入的能力
-
-    Bootstrap-->>main: game instance
+    Bootstrap->>Game: new Game(Context)
+    Context-->>Game: Context 指针
     Deactivate Bootstrap
 
     main->>Game: Run()
     Activate Game
 
     loop Game Loop
-        Game->>Window: ProcessMessages()
+        Game->>Context: Context->Window->ProcessMessages()
         Game->>Game: Update()
         Game->>Game: Render()
     end
@@ -138,10 +158,19 @@ graph TB
         B["Bootstrap"]
     end
 
-    subgraph "基础子系统"
-        C["ConfigManager"]
-        L["Logging"]
-        W["Window"]
+    subgraph "Context (中间层)"
+        C["GameContext"]
+        C1["Window*"]
+        C2["Renderer*"]
+        C3["Logging*"]
+        C4["Config*"]
+    end
+
+    subgraph "具体实现"
+        W["DX12Window"]
+        R["DX12Renderer"]
+        L["FileLogging"]
+        CF["JsonConfig"]
     end
 
     subgraph "Game (运行层)"
@@ -149,44 +178,60 @@ graph TB
     end
 
     B -->|"创建"| C
-    B -->|"创建"| L
     B -->|"创建"| W
-    C -->|"提供配置"| L
-    L -->|"依赖"| C
+    B -->|"创建"| R
+    B -->|"创建"| L
+    B -->|"创建"| CF
 
-    B -->|"创建 & 注入"| G
-    G -->|"使用"| W
-    G -->|"使用"| C
-    G -->|"使用"| L
+    W -->|"填充"| C1
+    R -->|"填充"| C2
+    L -->|"填充"| C3
+    CF -->|"填充"| C4
+
+    C -->|"注入"| G
 
     style B fill:#e8f5e9,stroke:#2e7d32
+    style C fill:#fff3e0,stroke:#e65100
     style G fill:#e3f2fd,stroke:#1565c0
 ```
 
-### 3.4 能力注入模式
+### 3.4 能力注入模式（通过 Context）
 
 ```mermaid
 graph LR
-    subgraph "定义层"
-        I["interface IRenderer"]
+    subgraph "Bootstrap 创建"
+        B["Bootstrap"]
+        W["DX12Window"]
+        R["DX12Renderer"]
+        L["FileLogging"]
     end
 
-    subgraph "Bootstrap (创建 & 注入)"
-        BR["DX12Renderer"]
-        BG["new Game(renderer)"]
+    subgraph "Context 持有接口"
+        C["GameContext"]
+        C1["IWindow*"]
+        C2["IRenderer*"]
+        C3["ILogging*"]
     end
 
-    subgraph "Game (使用)"
-        GR["m_Renderer->DrawTriangle()"]
+    subgraph "Game 使用"
+        G["Game"]
+        GL["GameLoop"]
     end
 
-    I --> BR
-    BR --> BG
-    BG --> GR
+    B -->|"new"| W
+    B -->|"new"| R
+    B -->|"new"| L
 
-    style I fill:#fff3e0,stroke:#e65100
-    style BR fill:#e8f5e9,stroke:#2e7d32
-    style GR fill:#e3f2fd,stroke:#1565c0
+    W -->|"填充"| C1
+    R -->|"填充"| C2
+    L -->|"填充"| C3
+
+    C -->|"注入"| G
+    C1 & C2 & C3 -->|"使用"| GL
+
+    style B fill:#e8f5e9,stroke:#2e7d32
+    style C fill:#fff3e0,stroke:#e65100
+    style G fill:#e3f2fd,stroke:#1565c0
 ```
 
 ```cpp
@@ -197,42 +242,38 @@ public:
     virtual ~IRenderer() = default;
 };
 
-// 2. Game 只依赖接口，不知道具体实现
-class Game {
-private:
-    IRenderer*     m_Renderer;     // 注入的能力
-    ConfigManager* m_Config;       // 注入的能力
-    Logging*       m_Logging;      // 注入的能力
-
+// 2. Context 只声明接口指针
+class GameContext {
 public:
-    Game(IRenderer* renderer, ConfigManager* config, Logging* logging)
-        : m_Renderer(renderer)
-        , m_Config(config)
-        , m_Logging(logging) {}
-
-    void Run();  // 拥有消息循环和主循环
+    IRenderer*  Renderer = nullptr;
+    IWindow*    Window   = nullptr;
+    ILogging*   Logging  = nullptr;
 };
 
-// 3. Bootstrap 负责制造具体能力并注入
+// 3. Game 只依赖 Context
+class Game {
+private:
+    GameContext* m_Context;  // 单一的注入点
+
+public:
+    Game(GameContext* ctx) : m_Context(ctx) {}
+    void Render() { m_Context->Renderer->DrawTriangle(); }
+};
+
+// 4. Bootstrap 负责制造具体能力并填充 Context
 class Bootstrap {
 public:
-    Game* Initialize() {
-        // 初始化基础设施
-        auto config = new ConfigManager();
-        auto logging = new Logging();
-        auto window = new Window();
-
-        // 制造具体能力
-        auto renderer = new DX12Renderer();
-
-        // 注入给 Game
-        return new Game(window, config, renderer);
+    Game* CreateGame() {
+        auto ctx = new GameContext();
+        ctx->Window   = new DX12Window();
+        ctx->Renderer = new DX12Renderer();
+        ctx->Logging  = new FileLogging();
+        return new Game(ctx);
     }
 };
 ```
 
-### 3.5 PlantUML 组件图
-
+### 3.5 完整架构 PlantUML 风格
 
 ```mermaid
 graph LR
@@ -240,64 +281,77 @@ graph LR
         Main["WinMain / main"]
     end
 
-    subgraph "Bootstrap"
+    subgraph "Bootstrap (装配层)"
         EB["EngineBootstrap"]
     end
 
-    subgraph "基础子系统"
+    subgraph "Context (中间层)"
+        CTX["GameContext"]
+        CTX1["Window*"]
+        CTX2["Renderer*"]
+        CTX3["Logging*"]
+        CTX4["Config*"]
+    end
+
+    subgraph "基础子系统 (具体实现)"
         direction TB
         CM["ConfigManager"]
         Log["Logging"]
         Win["Window"]
+        Ren["Renderer"]
     end
 
-    subgraph "Game"
+    subgraph "Game (运行层)"
         G["Game"]
         GL["GameLoop"]
     end
 
     %% 关系连接
     Main -->|"入口点"| EB
-    
+
     EB -->|"创建"| CM
     EB -->|"创建"| Log
     EB -->|"创建"| Win
-    EB -->|"注入能力"| G
-    
-    CM -->|"提供配置"| Log
-    
+    EB -->|"创建"| Ren
+
+    CM -->|"填充"| CTX4
+    Log -->|"填充"| CTX3
+    Win -->|"填充"| CTX1
+    Ren -->|"填充"| CTX2
+
+    CTX4 & CTX3 & CTX2 & CTX1 -->|"持有"| CTX
+
+    EB -->|"填充 Context"| CTX
+    CTX -->|"注入"| G
+
     G -->|"Run()"| GL
 
-    %% 样式定义 (对应原 PlantUML 颜色)
-    style EB fill:#palegreen,stroke:#333,stroke-width:1px
-    
-    style CM fill:#lightblue,stroke:#333,stroke-width:1px
-    style Log fill:#lightblue,stroke:#333,stroke-width:1px
-    style Win fill:#lightblue,stroke:#333,stroke-width:1px
-    
-    style G fill:#lightcyan,stroke:#333,stroke-width:1px
-    style GL fill:#lightcyan,stroke:#333,stroke-width:1px
-    
-    style Main fill:#f9f9f9,stroke:#333,stroke-width:1px
-
-    %% 注释说明 (通过子图标题或节点文本体现，保持图表简洁)
-    click EB "javascript:void(0)" "Bootstrap职责: 加载配置、初始化子系统、异常处理、能力注入" _blank
-    click G "javascript:void(0)" "Game职责: 持有主循环、组合游戏逻辑、管理生命周期" _blank
+    %% 样式定义
+    style EB fill:#e8f5e9,stroke:#2e7d32
+    style CTX fill:#fff3e0,stroke:#e65100
+    style G fill:#e3f2fd,stroke:#1565c0
+    style CM fill:#bbdefb,stroke:#1565c0
+    style Log fill:#bbdefb,stroke:#1565c0
+    style Win fill:#bbdefb,stroke:#1565c0
+    style Ren fill:#bbdefb,stroke:#1565c0
 ```
 
 ---
 
 ## 4. 职责边界总结
 
-| 组件 | Bootstrap | Game | wWinMain |
-|:-----|:---------:|:----:|:--------:|
-| 创建 ConfigManager | ✅ | ❌ | ❌ |
-| 创建 Logging | ✅ | ❌ | ❌ |
-| 创建 Window | ✅ | ❌ | ❌ |
-| 创建 Game 实例 | ✅ | ❌ | ❌ |
-| 持有消息循环 | ❌ | ✅ | ❌ |
-| 管理生命周期 | ❌ | ✅ | ❌ |
-| 调用 Game.Run() | ❌ | ❌ | ✅ |
+| 组件 | Bootstrap | Context | Game | wWinMain |
+|:-----|:---------:|:-------:|:----:|:--------:|
+| 创建 ConfigManager | ✅ | ❌ | ❌ | ❌ |
+| 创建 Logging | ✅ | ❌ | ❌ | ❌ |
+| 创建 Window | ✅ | ❌ | ❌ | ❌ |
+| 创建 GameContext | ✅ | ❌ | ❌ | ❌ |
+| 填充 Context 能力 | ✅ | ❌ | ❌ | ❌ |
+| 持有能力指针 | ❌ | ✅ | ❌ | ❌ |
+| 创建 Game 实例 | ✅ | ❌ | ❌ | ❌ |
+| 持有消息循环 | ❌ | ❌ | ✅ | ❌ |
+| 管理生命周期 | ❌ | ❌ | ✅ | ❌ |
+| 调用 Game.Run() | ❌ | ❌ | ❌ | ✅ |
 
 ---
 
@@ -308,7 +362,7 @@ graph LR
 | **配置驱动** | 根据配置文件决定初始化哪些模块 |
 | **按需初始化** | 只初始化配置中启用的模块 |
 | **快速失败** | 配置无效或初始化失败时立即终止 |
-| **能力注入** | 通过构造函数或工厂方法注入依赖 |
+| **Context 填充** | 通过 Context 统一注入能力，而非单独注入 |
 | **单一职责** | Bootstrap 只做装配，不做运行 |
 
 ---
@@ -317,14 +371,13 @@ graph LR
 
 随着引擎发展，Bootstrap 将逐步初始化更多子系统：
 
-| 顺序 | 子系统 | 说明 |
-|:----:|:-------|:-----|
-| 4 | Memory Allocator | 内存管理器 |
-| 5 | File System | 文件系统 |
-| 6 | Render Backend | 渲染后端 (DX12/Vulkan) |
-| 7 | Audio System | 音频系统 |
-| 8 | Input System | 输入系统 |
-| 9 | Physics System | 物理系统 |
+| 顺序 | 子系统 | Context 字段 | 说明 |
+|:----:|:-------|:-------------|:-----|
+| 5 | Memory Allocator | MemoryAllocator* | 内存管理器 |
+| 6 | File System | FileSystem* | 文件系统 |
+| 7 | Render Backend | Renderer* | 渲染后端 (DX12/Vulkan) |
+| 8 | Audio System | AudioSystem* | 音频系统 |
+| 9 | Input System | InputSystem* | 输入系统 |
+| 10 | Physics System | PhysicsSystem* | 物理系统 |
 
-所有新增子系统都遵循相同的注入模式：Bootstrap 创建 → 注入 Game → Game 使用。
-
+所有新增子系统都遵循相同的模式：Bootstrap 创建 → 填充到 Context → Game 通过 Context 使用。

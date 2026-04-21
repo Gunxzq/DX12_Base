@@ -4,7 +4,7 @@
 
 Game 是游戏引擎的**运行层**，负责：
 
-- 接收 Bootstrap 注入的基础能力
+- 接收 Context 注入的基础能力
 - 持有并运行主循环 (Game Loop)
 - 组合游戏逻辑模块
 - 管理整个游戏的生命周期
@@ -12,30 +12,31 @@ Game 是游戏引擎的**运行层**，负责：
 | 职责定位 | 说明 |
 |:--------|:-----|
 | **做什么** | 运行主循环、组合游戏逻辑、管理 Update/Render |
-| **不做什么** | 不创建基础设施（由 Bootstrap 创建并注入） |
+| **不做什么** | 不创建基础设施（由 Bootstrap 创建并填充到 Context） |
 
-**设计哲学**：Game 是"运行者 + 组合者"，负责将基础能力和游戏逻辑组合成完整的游戏体验。
+**设计哲学**：Game 是"运行者 + 组合者"，通过 Context 获取基础能力，并将游戏逻辑模块组合成完整的游戏体验。
 
 ---
 
 ## 2. 核心职责
 
-### 2.1 接收注入的能力
+### 2.1 接收 Context
 
-Game 不创建基础子系统，而是接收 Bootstrap 注入的实例：
+Game 不创建基础子系统，而是接收注入的 GameContext：
 
-| 能力 | 来源 | 用途 |
-|:-----|:-----|:-----|
-| Window | Bootstrap 创建并注入 | 窗口消息处理、渲染目标 |
-| ConfigManager | Bootstrap 创建并注入 | 读取游戏配置 |
-| Logging | Bootstrap 创建并注入 | 记录游戏日志 |
+| 能力 | 来源 (Context) | 用途 |
+|:-----|:--------------|:-----|
+| Window | Context->Window | 窗口消息处理、渲染目标 |
+| Renderer | Context->Renderer | 渲染画面 |
+| Config | Context->Config | 读取游戏配置 |
+| Logging | Context->Logging | 记录游戏日志 |
 
 ### 2.2 运行主循环
 
 ```cpp
 void Game::Run() {
-    while (!m_window->ShouldClose()) {
-        m_window->ProcessMessages();  // 消息循环
+    while (!m_Context->Window->ShouldClose()) {
+        m_Context->Window->ProcessMessages();  // 消息循环
         Update();                       // 更新逻辑
         Render();                       // 渲染画面
     }
@@ -48,7 +49,7 @@ void Game::Run() {
 Game 负责组合和协调各个游戏逻辑子系统：
 
 | 模块 | 职责 | Game 的角色 |
-|:-----|:-----|:-----------|
+|:-----|:-----|:------------|
 | AssetManager | 资源加载与管理 | 组合 (Composition) |
 | InputManager | 输入处理 | 组合 (Composition) |
 | PlayerManager | 玩家控制 | 组合 (Composition) |
@@ -64,10 +65,12 @@ Game 负责组合和协调各个游戏逻辑子系统：
 ```mermaid
 graph TB
     subgraph "Game"
-        subgraph "注入的基础能力"
-            W["Window"]
-            C["ConfigManager"]
-            L["Logging"]
+        subgraph "注入的 Context"
+            C["GameContext"]
+            C1["Window*"]
+            C2["Renderer*"]
+            C3["Logging*"]
+            C4["Config*"]
         end
 
         subgraph "游戏逻辑模块 (组合)"
@@ -86,8 +89,8 @@ graph TB
         end
     end
 
-    W & C & L -->|"使用"| UP
-    W -->|"消息"| RL
+    C1 & C2 & C3 & C4 -->|"使用"| UP
+    C1 -->|"消息"| RL
     P & LV & A & IN & AU -->|"组合"| UP
     P & LV & A & IN & AU -->|"组合"| RE
 
@@ -95,9 +98,11 @@ graph TB
     RL --> RE
     RL --> SD
 
-    style W fill:#bbdefb,stroke:#1565c0
-    style C fill:#bbdefb,stroke:#1565c0
-    style L fill:#bbdefb,stroke:#1565c0
+    style C fill:#fff3e0,stroke:#e65100
+    style C1 fill:#fff,stroke:#ccc
+    style C2 fill:#fff,stroke:#ccc
+    style C3 fill:#fff,stroke:#ccc
+    style C4 fill:#fff,stroke:#ccc
     style P fill:#c8e6c9,stroke:#2e7d32
     style LV fill:#c8e6c9,stroke:#2e7d32
     style A fill:#c8e6c9,stroke:#2e7d32
@@ -110,6 +115,7 @@ graph TB
 ```mermaid
 sequenceDiagram
     participant Bootstrap
+    participant Context as GameContext
     participant Game
     participant Window
     participant InputMgr as InputManager
@@ -117,13 +123,17 @@ sequenceDiagram
     participant Renderer
     participant AudioMgr as AudioManager
 
-    Bootstrap->>Game: new Game(window, config, logging)
+    Bootstrap->>Context: new GameContext()
+    Bootstrap->>Context: 填充能力
+    Bootstrap->>Game: new Game(Context)
     Note over Game: 初始化游戏逻辑模块
 
     Game->>Game: Run()
     loop 每帧
-        Game->>Window: ProcessMessages()
-        Window-->>Game: 消息处理完成
+        Game->>Context: Context->Window->ProcessMessages()
+        Context->>Window: ProcessMessages()
+        Window-->>Context: 消息处理完成
+        Context-->>Game: 完成
 
         Game->>InputMgr: ProcessInput()
         InputMgr-->>Game: 输入状态更新
@@ -132,8 +142,12 @@ sequenceDiagram
         Logic->>AudioMgr: Update()
         Logic-->>Game: 逻辑更新完成
 
-        Game->>Renderer: Render()
-        Renderer-->>Game: 渲染完成
+        Game->>Context: Context->Renderer->Clear()
+        Context->>Renderer: Clear()
+        Game->>Context: Context->Renderer->Draw()
+        Context->>Renderer: Draw()
+        Renderer-->>Context: 渲染完成
+        Context-->>Game: 完成
     end
 
     Game->>Game: Shutdown()
@@ -146,11 +160,15 @@ sequenceDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> Bootstrap: Bootstrap 创建
-    Bootstrap --> Game: new Game(注入能力)
-    Game --> Initialized: 构造函数
+
+    Bootstrap --> 创建Context: new GameContext()
+    创建Context --> 填充能力: 填充 Window/Renderer/Logging/Config
+
+    填充能力 --> 创建Game: new Game(Context)
+    创建Game --> Initialized: 构造函数
+
     Initialized --> Running: Run()
-    Running --> Running: Update()
-    Running --> Running: Render()
+    Running --> Running: Update() / Render()
     Running --> Shutdown: ShouldClose() == true
     Shutdown --> [*]: return exitCode
 
@@ -158,7 +176,8 @@ stateDiagram-v2
         [*] --> 创建 ConfigManager
         创建 ConfigManager --> 创建 Logging
         创建 Logging --> 创建 Window
-        创建 Window --> 注入能力给 Game
+        创建 Window --> 创建 Renderer
+        创建 Renderer --> 填充到 Context
     }
 
     state Game {
@@ -170,97 +189,123 @@ stateDiagram-v2
     }
 ```
 
-### 3.4 PlantUML 组件图
+### 3.4 依赖关系（通过 Context）
 
 ```mermaid
 graph LR
-    subgraph "基础子系统 (注入)"
-        direction TB
-        W["Window"]
-        C["ConfigManager"]
-        L["Logging"]
+    subgraph "Bootstrap 创建"
+        BM["Bootstrap"]
     end
 
-    subgraph "游戏逻辑模块"
-        direction TB
+    subgraph "Context (持有接口)"
+        CTX["GameContext"]
+        CTX1["Window*"]
+        CTX2["Renderer*"]
+        CTX3["Logging*"]
+    end
+
+    subgraph "Game 组合"
+        G["Game"]
         IM["InputManager"]
         PM["PlayerManager"]
         LM["LevelManager"]
-        AM["AssetManager"]
-        AU["AudioManager"]
     end
 
-    subgraph "Game Core"
+    BM -->|"创建"| CTX1
+    BM -->|"创建"| CTX2
+    BM -->|"创建"| CTX3
+    BM -->|"填充"| CTX
+    CTX1 & CTX2 & CTX3 -->|"持有"| CTX
+
+    CTX -->|"注入"| G
+
+    G -->|"组合"| IM
+    G -->|"组合"| PM
+    G -->|"组合"| LM
+
+    G -->|"使用"| CTX1
+    G -->|"使用"| CTX2
+    G -->|"使用"| CTX3
+
+    style BM fill:#e8f5e9,stroke:#2e7d32
+    style CTX fill:#fff3e0,stroke:#e65100
+    style G fill:#e3f2fd,stroke:#1565c0
+```
+
+### 3.5 完整架构图
+
+```mermaid
+graph TB
+    subgraph "启动层"
+        B["Bootstrap"]
+    end
+
+    subgraph "中间层"
+        C["GameContext"]
+        subgraph "基础能力"
+            W["Window*"]
+            R["Renderer*"]
+            L["Logging*"]
+            CF["Config*"]
+        end
+    end
+
+    subgraph "基础子系统实现"
+        W_impl["DX12Window"]
+        R_impl["DX12Renderer"]
+        L_impl["FileLogging"]
+        CF_impl["JsonConfig"]
+    end
+
+    subgraph "运行层"
         G["Game"]
+        subgraph "游戏模块"
+            IM["InputManager"]
+            PM["PlayerManager"]
+            LM["LevelManager"]
+            AM["AssetManager"]
+            AU["AudioManager"]
+        end
         GL["GameLoop"]
     end
 
-    %% 依赖关系：基础子系统 -> Game
-    W -->|"ProcessMessages"| GL
-    C -->|"提供配置"| G
-    L -->|"记录日志"| G
+    %% Bootstrap 创建具体实现
+    B -->|"new"| W_impl
+    B -->|"new"| R_impl
+    B -->|"new"| L_impl
+    B -->|"new"| CF_impl
 
-    %% 组合关系：Game -> 游戏逻辑模块
+    %% 具体实现填充到 Context
+    W_impl -->|"填充"| W
+    R_impl -->|"填充"| R
+    L_impl -->|"填充"| L
+    CF_impl -->|"填充"| CF
+
+    W & R & L & CF -->|"持有"| C
+
+    %% Context 注入 Game
+    C -->|"注入"| G
+
+    %% Game 组合模块
     G -->|"组合"| IM
     G -->|"组合"| PM
     G -->|"组合"| LM
     G -->|"组合"| AM
     G -->|"组合"| AU
 
-    %% 内部关系
+    %% Game 使用 Context 能力
     G -->|"Run()"| GL
+    GL -->|"使用"| W
+    GL -->|"使用"| R
+    GL -->|"使用"| L
 
-    %% 样式定义 (对应原 PlantUML 颜色)
-    style W fill:#lightblue,stroke:#333,stroke-width:1px
-    style C fill:#lightblue,stroke:#333,stroke-width:1px
-    style L fill:#lightblue,stroke:#333,stroke-width:1px
-    
-    style IM fill:#lightgreen,stroke:#333,stroke-width:1px
-    style PM fill:#lightgreen,stroke:#333,stroke-width:1px
-    style LM fill:#lightgreen,stroke:#333,stroke-width:1px
-    style AM fill:#lightgreen,stroke:#333,stroke-width:1px
-    style AU fill:#lightgreen,stroke:#333,stroke-width:1px
-    
-    style G fill:#lightcyan,stroke:#333,stroke-width:1px
-    style GL fill:#lightcyan,stroke:#333,stroke-width:1px
+    %% 模块使用 Context
+    IM & PM & LM & AM & AU -->|"使用"| R
 
-    %% 注释说明 (Mermaid 中通常通过子图标题或节点文本体现，此处保留关键信息)
-    click G "javascript:void(0)" "Game 职责: 接收注入、组合模块、管理生命周期" _blank
-```
-
-
-### 3.5 依赖关系总览
-
-```mermaid
-graph LR
-    subgraph "Bootstrap 创建"
-        BM["Bootstrap"]
-        W["Window"]
-        C["ConfigManager"]
-        L["Logging"]
-    end
-
-    subgraph "注入 Game"
-        G["Game"]
-        IM["InputManager"]
-        PM["PlayerManager"]
-        LM["LevelManager"]
-    end
-
-    BM -->|"创建"| W
-    BM -->|"创建"| C
-    BM -->|"创建"| L
-    BM -->|"注入"| G
-
-    G -->|"使用"| W
-    G -->|"使用"| C
-    G -->|"使用"| L
-    G -->|"组合"| IM
-    G -->|"组合"| PM
-    G -->|"组合"| LM
-
-    style BM fill:#e8f5e9,stroke:#2e7d32
+    style B fill:#e8f5e9,stroke:#2e7d32
+    style C fill:#fff3e0,stroke:#e65100
     style G fill:#e3f2fd,stroke:#1565c0
+    style GL fill:#e3f2fd,stroke:#1565c0
 ```
 
 ---
@@ -272,12 +317,10 @@ graph LR
 ```cpp
 class Game {
 private:
-    // ── 注入的基础能力 ──
-    Window*        m_Window;
-    ConfigManager* m_ConfigManager;
-    Logging*       m_Logging;
+    // ── 注入的 Context (单一注入点) ──
+    GameContext* m_Context;
 
-    // ── 游戏逻辑模块 ──
+    // ── 游戏逻辑模块 (组合) ──
     std::unique_ptr<InputManager>    m_InputManager;
     std::unique_ptr<PlayerManager>    m_PlayerManager;
     std::unique_ptr<LevelManager>     m_LevelManager;
@@ -288,19 +331,17 @@ private:
     bool m_IsRunning;
 
 public:
-    // 构造函数接收注入的能力
-    Game(Window* window, ConfigManager* config, Logging* logging)
-        : m_Window(window)
-        , m_ConfigManager(config)
-        , m_Logging(logging)
+    // 构造函数接收 Context
+    Game(GameContext* context)
+        : m_Context(context)
         , m_IsRunning(true) {
         InitializeModules();
     }
 
     // 主循环
     int Run() {
-        while (m_Window->ShouldClose() == false && m_IsRunning) {
-            m_Window->ProcessMessages();
+        while (m_Context->Window->ShouldClose() == false && m_IsRunning) {
+            m_Context->Window->ProcessMessages();
             Update();
             Render();
         }
@@ -320,6 +361,9 @@ public:
 void Game::Update() {
     float deltaTime = CalculateDeltaTime();
 
+    // 通过 Context 访问基础能力
+    m_Context->Logging->Log("Updating frame...");
+
     // 更新基础能力
     m_InputManager->Update();
 
@@ -330,14 +374,46 @@ void Game::Update() {
 }
 
 void Game::Render() {
-    // 使用注入的 Window 作为渲染目标
-    m_Window->BeginFrame();
+    // 使用 Context 中的 Window 和 Renderer
+    m_Context->Window->BeginFrame();
+    m_Context->Renderer->Clear();
 
     // 渲染各个逻辑模块
     m_LevelManager->Render();
     m_PlayerManager->Render();
 
-    m_Window->EndFrame();
+    m_Context->Renderer->Present();
+    m_Context->Window->EndFrame();
+}
+```
+
+### 4.3 模块注册到 Context
+
+```cpp
+void Game::InitializeModules() {
+    // 通过 Config 读取配置
+    auto& config = m_Context->Config->GetSection("Game");
+
+    // 创建并初始化游戏逻辑模块
+    m_InputManager = std::make_unique<InputManager>(m_Context);
+    m_AssetManager = std::make_unique<AssetManager>(
+        m_Context->FileSystem,
+        m_Context->Logging
+    );
+    m_LevelManager = std::make_unique<LevelManager>(
+        m_AssetManager.get(),
+        m_Context->Logging
+    );
+    m_PlayerManager = std::make_unique<PlayerManager>(
+        m_InputManager.get(),
+        config.GetInt("MaxPlayers")
+    );
+    m_AudioManager = std::make_unique<AudioManager>(
+        m_Context->FileSystem
+    );
+
+    // 通过 Logging 记录初始化
+    m_Context->Logging->Log("All game modules initialized");
 }
 ```
 
@@ -345,16 +421,18 @@ void Game::Render() {
 
 ## 5. 职责边界总结
 
-| 能力/模块 | Bootstrap | Game |
-|:----------|:---------:|:----:|
-| 创建 Window | ✅ | ❌ (使用) |
-| 创建 ConfigManager | ✅ | ❌ (使用) |
-| 创建 Logging | ✅ | ❌ (使用) |
-| 创建 InputManager | ❌ | ✅ |
-| 创建 PlayerManager | ❌ | ✅ |
-| 创建 LevelManager | ❌ | ✅ |
-| 持有消息循环 | ❌ | ✅ |
-| 管理运行时状态 | ❌ | ✅ |
+| 能力/模块 | Bootstrap | Context | Game |
+|:----------|:---------:|:-------:|:----:|
+| 创建 Window | ✅ | ❌ (持有指针) | ❌ (使用) |
+| 创建 Renderer | ✅ | ❌ (持有指针) | ❌ (使用) |
+| 创建 Config | ✅ | ❌ (持有指针) | ❌ (使用) |
+| 创建 Logging | ✅ | ❌ (持有指针) | ❌ (使用) |
+| 持有能力指针 | ❌ | ✅ | ❌ |
+| 创建 InputManager | ❌ | ❌ | ✅ |
+| 创建 PlayerManager | ❌ | ❌ | ✅ |
+| 创建 LevelManager | ❌ | ❌ | ✅ |
+| 持有消息循环 | ❌ | ❌ | ✅ |
+| 管理运行时状态 | ❌ | ❌ | ✅ |
 
 ---
 
@@ -362,7 +440,8 @@ void Game::Render() {
 
 | 原则 | 说明 |
 |:-----|:-----|
-| **依赖注入** | 基础能力由外部注入，不自行创建 |
+| **依赖注入** | 基础能力通过 Context 注入，不自行创建 |
+| **单一注入点** | 所有基础能力通过一个 Context 对象获取 |
 | **组合优先** | 通过组合而非继承构建复杂逻辑 |
-| **单一入口** | Run() 是唯一的执行入口 |
 | **明确生命周期** | 构造函数初始化，Shutdown() 清理 |
+| **接口编程** | 通过 Context 访问接口，不直接依赖实现 |
