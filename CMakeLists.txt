@@ -65,10 +65,11 @@ target_link_libraries(DX12EngineCore PUBLIC
 # ========================================================================
 # 4. 构建主程序 (Executable)
 # ========================================================================
-# 收集 Runtime 目录下的源文件
+# 收集 Runtime 目录下的源文件 (包括 Application 和 Game 子目录)
 file(GLOB_RECURSE RUNTIME_SOURCES 
-    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/Application/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/Application/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/Game/*.h"
 )
 
 
