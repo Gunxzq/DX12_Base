@@ -1,4 +1,4 @@
-#include "System/Logger/DebugOverlay.h"
+﻿#include "System/Logger/DebugOverlay.h"
 
 #include <algorithm>
 
@@ -18,11 +18,17 @@ DebugOverlay *DebugOverlay::GetInstance() {
 DebugOverlay::~DebugOverlay() { Destroy(); }
 
 void DebugOverlay::PushLog(LogEntry::Level level, const std::string &message, const std::string &formatted) {
-    std::lock_guard<std::mutex> lock(m_queueMutex);
-    m_incomingQueue.emplace_back(level, message, formatted);
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_incomingQueue.emplace_back(level, message, formatted);
+    }
 
     // 如果窗口可见且队列积压不多，可以尝试直接触发更新（可选优化）
     // 这里主要依赖外部调用 Update 或定时器
+
+    if (m_hwnd) {
+        PostMessageW(m_hwnd, WM_LOG_UPDATE, 0, 0);
+    }
 }
 
 void DebugOverlay::Show() {
@@ -83,6 +89,9 @@ void DebugOverlay::ProcessQueue() {
         return;
 
     std::wstring appendText;
+    // 预分配一些空间以减少 realloc，可选优化
+    appendText.reserve(1024);
+
     while (!m_incomingQueue.empty()) {
         LogEntry entry = std::move(m_incomingQueue.front());
         m_incomingQueue.pop_front();
@@ -110,13 +119,24 @@ void DebugOverlay::ProcessQueue() {
             break;
         }
 
-        // 转换为宽字符
-        std::string line = levelStr + entry.message + "\r\n";
+        // 组合完整行
+        std::string line = entry.formatted;
+        // 确保末尾有换行
+        if (line.empty() || line.back() != '\n') {
+            line += "\r\n";
+        } else if (line.back() == '\n' && (line.size() < 2 || line[line.size() - 2] != '\r')) {
+            line.insert(line.end() - 1, '\r'); // 将 \n 变为 \r\n
+        }
+
+        // 【修复点】安全地将 UTF-8 std::string 转换为 std::wstring
         int wLen = MultiByteToWideChar(CP_UTF8, 0, line.c_str(), -1, nullptr, 0);
         if (wLen > 0) {
-            std::vector<wchar_t> wBuf(wLen);
-            MultiByteToWideChar(CP_UTF8, 0, line.c_str(), -1, wBuf.data(), wLen);
-            appendText += wBuf.data();
+            // 创建 wstring，大小为 wLen-1 (因为 MultiByteToWideChar 返回的长度包含 null terminator)
+            std::wstring wLine(wLen - 1, L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, line.c_str(), -1, &wLine[0], wLen);
+
+            // 直接追加 wstring，避免指针操作的歧义
+            appendText += wLine;
         }
     }
 
@@ -124,7 +144,7 @@ void DebugOverlay::ProcessQueue() {
         // 获取当前文本长度
         int currentLen = GetWindowTextLengthW(m_hEdit);
 
-        // 限制总行数/长度以防止内存无限增长 (简单策略：限制总字符数)
+        // 限制总行数/长度以防止内存无限增长
         const int MAX_CHARS = 1024 * 1024; // 1MB
         if (currentLen > MAX_CHARS) {
             // 清除一半旧数据
@@ -135,13 +155,13 @@ void DebugOverlay::ProcessQueue() {
 
         // 追加文本
         SendMessageW(m_hEdit, EM_SETSEL, currentLen, currentLen);
+        // 【注意】这里传入的是 c_str()，确保是 null-terminated 的宽字符串
         SendMessageW(m_hEdit, EM_REPLACESEL, FALSE, (LPARAM)appendText.c_str());
 
         // 自动滚动到底部
         SendMessageW(m_hEdit, WM_VSCROLL, SB_BOTTOM, 0);
     }
 }
-
 LRESULT CALLBACK DebugOverlay::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     DebugOverlay *self = nullptr;
 
@@ -176,6 +196,12 @@ LRESULT DebugOverlay::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         SendMessageW(m_hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
         break;
     }
+
+    case WM_LOG_UPDATE: {
+        ProcessQueue();
+        return 0;
+    }
+
     case WM_SIZE: {
         if (m_hEdit) {
             MoveWindow(m_hEdit, 0, 0, LOWORD(lParam), HIWORD(lParam), TRUE);

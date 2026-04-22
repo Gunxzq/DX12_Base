@@ -4,6 +4,9 @@
 #include <atomic>
 #include <deque>
 
+//
+#define WM_LOG_UPDATE (WM_USER + 1)
+
 namespace DX12Engine {
 namespace Core {
 
