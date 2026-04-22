@@ -65,11 +65,10 @@ target_link_libraries(DX12EngineCore PUBLIC
 # ========================================================================
 # 4. 构建主程序 (Executable)
 # ========================================================================
-# 收集 Runtime 目录下的源文件 (包括 Application 和 Game 子目录)
+# 收集 Runtime 目录下的源文件
 file(GLOB_RECURSE RUNTIME_SOURCES 
-    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/Application/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/Application/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/Game/*.h"
+   "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/**/*.cpp"
+   "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/**/*.h"
 )
 
 
@@ -79,6 +78,9 @@ set(RUNTIME_RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Content/DX12_Base.rc")
 # 【关键修改】添加 WIN32 关键字
 # 这告诉链接器这是一个 Windows GUI 程序，入口点是 wWinMain/WinMain，而不是 main
 add_executable(${PROJECT_NAME} WIN32 ${RUNTIME_SOURCES} ${RUNTIME_RESOURCES})
+
+
+
 
 
 # 在 add_executable 或 target_compile_definitions 中添加
@@ -102,6 +104,12 @@ set_source_files_properties(${RUNTIME_RESOURCES} PROPERTIES
 target_link_libraries(${PROJECT_NAME} PRIVATE 
     DX12EngineCore
 )
+
+# 设置包含目录
+target_include_directories(${PROJECT_NAME} PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/Runtime  
+)
+
 
 # 【建议】显式链接 Windows 基础库，防止某些环境下链接缺失
 target_link_libraries(${PROJECT_NAME} PRIVATE

@@ -1,8 +1,8 @@
 #pragma once
-#include "Core/Logger/LoggerConfig.h"
-#include <spdlog/logger.h>
+#include "Core/Config/LoggerConfig.h"
 #include <memory>
 #include <shared_mutex>
+#include <spdlog/logger.h>
 #include <string>
 
 namespace DX12Engine {

@@ -1,13 +1,9 @@
-#include "Core/Game/Game.h"
-
+#include "Game.h"
 #include "Core/Context/GameContext.h"
-#include "Core/Logger/Logger.h"
-#include "Core/Window/Window.h"
+#include "System/Logger/Logger.h"
+#include "System/Window/Window.h"
 
-namespace DX12Engine {
-namespace Core {
-
-Game::Game(GameContext *context) : m_context(context), m_isRunning(false), m_isInitialized(false) {}
+Game::Game(DX12Engine::Core::GameContext *context) : m_context(context), m_isRunning(false), m_isInitialized(false) {}
 
 Game::~Game() {
     if (m_isRunning || m_isInitialized) {
@@ -139,6 +135,3 @@ float Game::CalculateDeltaTime() {
 
     return delta;
 }
-
-} // namespace Core
-} // namespace DX12Engine

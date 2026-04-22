@@ -31,9 +31,9 @@ public:
 
     // ── 基础设施子系统指针 ──
 
-    Window*       Window   = nullptr;  // 窗口管理
-    ConfigManager* Config   = nullptr;  // 配置管理
-    Logger*       Logging  = nullptr;  // 日志系统
+    Window *Window = nullptr;        // 窗口管理
+    ConfigManager *Config = nullptr; // 配置管理
+    Logger *Logging = nullptr;       // 日志系统
 
     // ── 便捷访问方法 ──
 

@@ -11,8 +11,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Core/Logger/LoggerConfig.h"
-#include "Core/Config/WindowConfig.h"
+#include "LoggerConfig.h"
+#include "WindowConfig.h"
 
 namespace DX12Engine {
 namespace Core {

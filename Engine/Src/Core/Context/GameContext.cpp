@@ -1,8 +1,8 @@
 #include "Core/Context/GameContext.h"
 
 #include "Core/Config/ConfigManager.h"
-#include "Core/Logger/Logger.h"
-#include "Core/Window/Window.h"
+#include "System/Logger/Logger.h"
+#include "System/Window/Window.h"
 
 namespace DX12Engine {
 namespace Core {
@@ -24,9 +24,7 @@ bool GameContext::IsValid() const {
     return true;
 }
 
-const char *GameContext::GetInvalidReason() const {
-    return m_invalidReason ? m_invalidReason : "All fields are valid";
-}
+const char *GameContext::GetInvalidReason() const { return m_invalidReason ? m_invalidReason : "All fields are valid"; }
 
 } // namespace Core
 } // namespace DX12Engine

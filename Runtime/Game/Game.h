@@ -1,12 +1,8 @@
 #pragma once
 
 #include "Core/Context/GameContext.h"
-
 #include <chrono>
 #include <memory>
-
-namespace DX12Engine {
-namespace Core {
 
 // ========================================================================
 // Game - 游戏主逻辑层，负责运行主循环和组合游戏模块
@@ -18,7 +14,7 @@ public:
      * @brief 构造函数
      * @param context 注入的 GameContext（由 Bootstrap 创建并填充）
      */
-    explicit Game(GameContext *context);
+    explicit Game(DX12Engine::Core::GameContext *context);
 
     ~Game();
 
@@ -76,9 +72,9 @@ private:
 
     // ── 成员变量 ──
 
-    GameContext *m_context;       // 注入的上下文
-    bool m_isRunning = false;     // 运行状态
-    bool m_isInitialized = false; // 初始化状态
+    DX12Engine::Core::GameContext *m_context; // 注入的上下文
+    bool m_isRunning = false;                 // 运行状态
+    bool m_isInitialized = false;             // 初始化状态
 
     // 帧时间追踪
     std::chrono::steady_clock::time_point m_lastFrameTime;
@@ -92,6 +88,3 @@ private:
     // std::unique_ptr<AssetManager>     m_assetManager;
     // std::unique_ptr<AudioManager>     m_audioManager;
 };
-
-} // namespace Core
-} // namespace DX12Engine

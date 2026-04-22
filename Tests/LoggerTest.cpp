@@ -1,5 +1,5 @@
-#include "Core/Logger/Logger.h"
-#include "Core/Logger/LoggerConfig.h"
+#include "System/Logger/Logger.h"
+#include "Core/Config/LoggerConfig.h"
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>

@@ -1,13 +1,13 @@
-#include "Core/Logger/Logger.h"
-#include "Core/DebugOverlay/LogWindow.h"
+#include "System/Logger/Logger.h"
+#include "System/Logger/DebugOverlay.h"
 #include <filesystem>
 #include <spdlog/async.h>
 #include <spdlog/details/null_mutex.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
-#include <windows.h>
 #include <sstream>
+#include <windows.h>
 
 namespace DX12Engine {
 namespace Core {
@@ -16,9 +16,7 @@ namespace Core {
 // 辅助函数
 // ========================================================================
 
-inline void DebugOutput(const std::string &msg) {
-    ::OutputDebugStringA(msg.c_str());
-}
+inline void DebugOutput(const std::string &msg) { ::OutputDebugStringA(msg.c_str()); }
 
 // ========================================================================
 // Log Window Sink - 输出到独立日志窗口
@@ -31,9 +29,36 @@ protected:
         base_sink<Mutex>::formatter_->format(msg, formatted);
         std::string text(formatted.begin(), formatted.end());
 
-        LogWindow *logWindow = LogWindow::GetInstance();
-        if (logWindow) {
-            logWindow->AppendLog(text + "\r\n");
+        // 使用 DebugOverlay 单例
+        DebugOverlay *overlay = DebugOverlay::GetInstance();
+        if (overlay) {
+            // 映射 spdlog level 到 LogEntry level
+            LogEntry::Level level = LogEntry::Info;
+            switch (msg.level) {
+            case spdlog::level::trace:
+                level = LogEntry::Trace;
+                break;
+            case spdlog::level::debug:
+                level = LogEntry::Debug;
+                break;
+            case spdlog::level::info:
+                level = LogEntry::Info;
+                break;
+            case spdlog::level::warn:
+                level = LogEntry::Warn;
+                break;
+            case spdlog::level::err:
+                level = LogEntry::Error;
+                break;
+            case spdlog::level::critical:
+                level = LogEntry::Critical;
+                break;
+            default:
+                level = LogEntry::Info;
+                break;
+            }
+
+            overlay->PushLog(level, msg.payload.data(), text);
         }
     }
 
@@ -103,36 +128,16 @@ void Logger::Init_Internal(const LogConfig &config) {
         Shutdown_Internal();
     }
 
-    // 0. 创建日志窗口（如果启用）
+    // 日志窗口
     if (config.Sinks.LogWindow.Enabled) {
-        // 创建 LogWindow 实例（内部会设置 s_instance）
-        if (!LogWindow::GetInstance()) {
-            new LogWindow();
-        }
-        LogWindow::GetInstance()->Show();
-        DebugOutput("[Logger] Log window created\n");
-    }
-
-    // 1. 创建日志目录
-    if (config.Sinks.File.Enabled) {
-        std::filesystem::path exePath = std::filesystem::current_path();
-        std::filesystem::path projectRoot = exePath.parent_path().parent_path().parent_path();
-        std::filesystem::path logPath = projectRoot / config.Sinks.File.Path;
-
-        DebugOutput("[Logger] Project root: " + projectRoot.string() + "\n");
-
-        if (auto parent = logPath.parent_path(); !parent.empty()) {
-            try {
-                std::filesystem::create_directories(parent);
-            } catch (const std::filesystem::filesystem_error &e) {
-                DebugOutput("[Logger Init Error] Failed to create directory: " + std::string(e.what()) + "\n");
-            }
-        }
+        // 获取单例并显示窗口
+        DebugOverlay::GetInstance()->Show();
+        DebugOutput("[Logger] Log window created/shown\n");
     }
 
     std::vector<spdlog::sink_ptr> sinks;
 
-    // 2. 创建 Log Window Sink
+    // 日志窗口 sink
     if (config.Sinks.LogWindow.Enabled) {
         try {
             auto windowSink = std::make_shared<log_window_sink>();
@@ -175,13 +180,27 @@ void Logger::Init_Internal(const LogConfig &config) {
     if (config.Sinks.File.Enabled) {
         try {
             std::filesystem::path exePath = std::filesystem::current_path();
-            std::filesystem::path projectRoot = exePath.parent_path().parent_path().parent_path();
-            std::filesystem::path absoluteLogPath = projectRoot / config.Sinks.File.Path;
+
+            // 解析绝对路径：如果配置是相对路径，则相对于 exe 目录
+            std::filesystem::path absoluteLogPath = config.Sinks.File.Path;
+            if (absoluteLogPath.is_relative()) {
+                absoluteLogPath = exePath / config.Sinks.File.Path;
+            }
+
+            // 确保父目录存在
+            if (auto parent = absoluteLogPath.parent_path(); !parent.empty()) {
+                std::error_code ec;
+                std::filesystem::create_directories(parent, ec);
+                if (ec) {
+                    DebugOutput("[Logger Init Warning] Failed to create directory: " + ec.message() + "\n");
+                }
+            }
 
             auto maxSize = static_cast<size_t>(config.Sinks.File.Rotation.MaxSizeMb) * 1024 * 1024;
             auto maxFiles = static_cast<size_t>(config.Sinks.File.Rotation.MaxFiles);
 
-            auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(absoluteLogPath.string(), maxSize, maxFiles);
+            auto fileSink =
+                std::make_shared<spdlog::sinks::rotating_file_sink_mt>(absoluteLogPath.string(), maxSize, maxFiles);
             fileSink->set_level(static_cast<spdlog::level::level_enum>(static_cast<int>(config.Sinks.File.Level)));
             sinks.push_back(fileSink);
             DebugOutput("[Logger] File sink created: " + absoluteLogPath.string() + "\n");

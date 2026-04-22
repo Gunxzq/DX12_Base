@@ -5,6 +5,7 @@
 #include <deque>
 #include <mutex>
 #include <string>
+#include <windows.h>
 
 namespace DX12Engine {
 namespace Core {
@@ -25,11 +26,11 @@ struct LogEntry {
 };
 
 // ========================================================================
-// DebugOverlay - 单例，日志覆盖层
+// DebugOverlay - 单例，日志覆盖层/独立窗口
 //
 // 职责：
 //   - 从 Logger 的线程安全队列中消费日志
-//   - 在屏幕上绘制日志窗口
+//   - 在独立的 Win32 窗口中显示日志
 // ========================================================================
 
 class DebugOverlay {
@@ -46,38 +47,35 @@ public:
     void PushLog(LogEntry::Level level, const std::string &message, const std::string &formatted);
 
     // ========================================================================
-    // 生产者接口（渲染系统调用）
+    // 窗口管理接口
     // ========================================================================
 
     /**
-     * @brief 更新：消费队列中的日志到本地列表
+     * @brief 创建并显示日志窗口
      */
-    void Update();
+    void Show();
 
     /**
-     * @brief 渲染：绘制日志覆盖层
+     * @brief 隐藏日志窗口
      */
-    void Render();
+    void Hide();
 
     /**
-     * @brief 清空所有日志
+     * @brief 销毁日志窗口
      */
-    void Clear();
+    void Destroy();
+
+    bool IsVisible() const { return m_visible && m_hwnd != nullptr; }
 
     // ========================================================================
     // 配置
     // ========================================================================
 
     void SetMaxLines(size_t maxLines) { m_maxLines = maxLines; }
-    void SetVisible(bool visible) { m_visible = visible; }
-    bool IsVisible() const { return m_visible; }
-
-    // 切换显示/隐藏
-    void Toggle() { m_visible = !m_visible; }
 
 private:
     DebugOverlay() = default;
-    ~DebugOverlay() = default;
+    ~DebugOverlay(); // 析构函数需要实现以清理窗口
 
     DebugOverlay(const DebugOverlay &) = delete;
     DebugOverlay &operator=(const DebugOverlay &) = delete;
@@ -86,19 +84,30 @@ private:
     // 内部
     // ========================================================================
 
+    /**
+     * @brief 处理消息队列，将日志追加到窗口控件
+     */
     void ProcessQueue();
+
+    /**
+     * @brief 窗口过程回调
+     */
+    static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * @brief 实例特定的窗口过程处理
+     */
+    LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
     // 线程安全的输入队列（来自 Logger）
     std::deque<LogEntry> m_incomingQueue;
     std::mutex m_queueMutex;
 
-    // 本地显示列表（只在主线程访问，不需要锁）
-    std::deque<LogEntry> m_displayList;
-    size_t m_maxLines = 100;
-
     // UI 状态
-    bool m_visible = true;
-    bool m_autoScroll = true;
+    HWND m_hwnd = nullptr;  // 日志窗口句柄
+    HWND m_hEdit = nullptr; // 编辑框控件句柄
+    bool m_visible = false;
+    size_t m_maxLines = 1000; // 最大保留行数
 
     // 单例
     inline static DebugOverlay *s_instance = nullptr;
