@@ -1,6 +1,4 @@
 #include "Core/Config/ConfigManager.h"
-#include <fstream>
-#include <spdlog/spdlog.h>
 
 namespace {
 
@@ -34,7 +32,12 @@ ConfigManager::ConfigManager()
 
 ConfigManager::~ConfigManager() {
     if (m_isInitialized) {
-        Shutdown();
+        try {
+            Shutdown();
+        } catch (const std::exception &e) {
+            // 析构函数中不能抛出异常，使用宏记录并中断（如果是Debug）
+            ENGINE_ASSERT_FMT("ConfigManager Destructor Exception: %s", e.what());
+        }
     }
 }
 
@@ -51,19 +54,33 @@ void ConfigManager::Initialize(const std::filesystem::path &configDir) {
         return;
     }
 
+    // 1. 验证并创建目录
+    if (!std::filesystem::exists(configDir)) {
+        try {
+            std::filesystem::create_directories(configDir);
+        } catch (const std::filesystem::filesystem_error &e) {
+            // 致命错误：记录、中断、抛出
+            ENGINE_ASSERT_FMT("Failed to create config directory: %s", e.what());
+            throw std::runtime_error(std::string("Failed to create config directory: ") + e.what());
+        }
+    }
+
     m_configDir = configDir;
 
-    // 加载 logging 配置
-    auto loggingPath = configDir / "logging_config.json";
-    LoadLoggingConfig_Locked(loggingPath);
-
-    // 加载 window 配置
-    auto windowPath = configDir / "window.json";
-    LoadWindowConfig_Locked(windowPath);
-
+    // 2. 加载配置
+    try {
+        LoadLoggingConfig_Locked(configDir / "logging_config.json");
+        LoadWindowConfig_Locked(configDir / "window.json");
+    } catch (const std::exception &e) {
+        // 致命错误：记录、中断、抛出
+        ENGINE_ASSERT_FMT("Initialization failed during load: %s", e.what());
+        throw std::runtime_error(std::string("Initialization failed: ") + e.what());
+    }
     m_isInitialized = true;
     m_isDirty = false;
     m_lastSaveTime = std::chrono::steady_clock::now();
+
+    //
 }
 
 /**
@@ -72,8 +89,22 @@ void ConfigManager::Initialize(const std::filesystem::path &configDir) {
  */
 void ConfigManager::Shutdown() {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
-    SaveInternal_Locked();
+
+    if (!m_isInitialized) {
+        return;
+    }
+
+    if (m_isDirty) {
+        if (!SaveInternal_Locked()) {
+            // 警告级别：记录但不中断程序退出流程
+            ENGINE_ASSERT_MSG("Warning: Failed to save config on shutdown.");
+        }
+    }
+
     m_isInitialized = false;
+    m_isDirty = false;
+    m_configData.clear();
+    m_subscribers.clear();
 }
 
 /**
@@ -137,16 +168,22 @@ void ConfigManager::Reload() {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
 
     // REQUIRES: Lock is held.
-    // If dirty, save first to prevent data loss.
-    // Calling SaveInternal_Locked directly instead of public Save() to adhere to "No public-to-public calls" rule.
+    // 如果有修改，请先保存以防数据丢失。
     if (m_isDirty) {
         SaveInternal_Locked();
     }
 
-    LoadLoggingConfig_Locked(m_configDir / "logging_config.json");
-    LoadWindowConfig_Locked(m_configDir / "window.json");
+    try {
+        LoadLoggingConfig_Locked(m_configDir / "logging_config.json");
+        LoadWindowConfig_Locked(m_configDir / "window.json");
+    } catch (const std::exception &e) {
+        ENGINE_ASSERT_FMT("Reload failed: %s", e.what());
+        // Reload 失败通常不抛出异常，而是保持旧配置，但这里我们记录错误
+        lock.unlock();
+        return;
+    }
 
-    // Prepare list of sections to notify while holding lock, but notify outside
+    // 准备在持有锁的情况下通知的部分列表，但在锁外通知
     std::vector<std::string> sectionsToNotify;
     for (auto &pair : m_subscribers) {
         sectionsToNotify.push_back(pair.first);
@@ -172,53 +209,58 @@ void ConfigManager::Update(float deltaTime) {
             return;
         }
 
-        auto now = std::chrono::steady_clock::now();
-        std::chrono::duration<float> elapsed = now - m_lastSaveTime;
-
-        if (elapsed.count() > SAVE_THRESHOLD_SECONDS) {
-            shouldSave = true;
-            // We will perform the actual IO outside the lock,
-            // but we need to ensure state is consistent.
-            // For simplicity in this pattern, we can call SaveInternal_Locked here
-            // OR unlock and call public Save.
-            // To minimize lock time for IO:
-            m_isDirty = false; // Optimistically mark clean, if save fails we might need to revert,
-                               // but for config, retry on next frame is acceptable.
-            m_lastSaveTime = now;
-
-            // Sync JSON while locked
-            SyncStructsToJson_Locked();
-
-            // We need the content to write outside lock
-            // However, AtomicWriteFile needs path and content.
-            // Let's stick to calling SaveInternal_Locked but accept IO is inside lock for correctness
-            // OR refactor SaveInternal to just prepare data and return content.
-
-            // Better approach for "Minimize Hold Time":
-            // 1. Check dirty & time (Done)
-            // 2. Mark clean & update time (Done)
-            // 3. Copy necessary data for IO (content)
-            // 4. Unlock
-            // 5. Write file
-        }
-    }
-
-    if (shouldSave) {
-        // Perform IO outside of lock
-        // Note: This requires a slight refactor of SaveInternal to return content or handle IO separately.
-        // Given current structure, let's adjust SaveInternal_Locked to be pure data sync,
-        // and have a separate helper for IO or just accept that Save() holds lock during IO.
-
-        // To strictly follow "IO outside lock", we need to extract content here.
         std::string content;
         std::filesystem::path path;
-        {
-            std::shared_lock<std::shared_mutex> rLock(m_mutex); // Re-lock shared to read configData safely
-            content = m_configData.dump(4);
-            path = m_configDir / "logging_config.json";
-        }
 
-        AtomicWriteFile(path, content);
+        {
+
+            auto now = std::chrono::steady_clock::now();
+            std::chrono::duration<float> elapsed = now - m_lastSaveTime;
+
+            if (elapsed.count() > SAVE_THRESHOLD_SECONDS) {
+                shouldSave = true;
+                // 在锁外执行实际的 IO，
+                // 但需要确保状态是一致的。
+                // 为了简化这种模式，可以在这里调用 SaveInternal_Locked
+                // 或者解锁后调用公共的 Save。
+                // 为了最小化 IO 的锁定时间：
+                m_isDirty = false; // 乐观地标记为干净，如果保存失败，可能需要恢复,
+                                   // 但对于配置，下一帧重试是可以接受的。
+                m_lastSaveTime = now;
+
+                SyncStructsToJson_Locked();
+
+                // 需要在锁外写入内容
+                // 然而，AtomicWriteFile 需要路径和内容。
+                // 让我们坚持调用 SaveInternal_Locked，但接受 IO 在锁内以确保正确性
+                // 或者重构 SaveInternal，仅准备数据并返回内容。
+
+                // “最小化持锁时间”的更好方法：
+                // 1. 检查是否脏以及时间（完成）
+                // 2. 标记为干净并更新时间（完成）
+                // 3. 复制 IO 所需的数据（内容）
+                // 4. 解锁
+                // 5. 写入文件
+
+                content = m_configData.dump(4);
+                path = m_configDir / "logging_config.json";
+            }
+
+            if (shouldSave) {
+                // 在锁外执行 IO
+                // 注意：这需要稍微重构 SaveInternal，使其返回内容或单独处理 IO。
+                // 根据当前结构，让我们将 SaveInternal_Locked 调整为纯数据同步，
+                // 并为 IO 提供一个单独的辅助函数，或者接受在 IO 期间 Save() 持有锁。
+
+                // 为了严格遵循“在锁外执行 IO”，我们需要在这里提取内容。
+                if (!AtomicWriteFile(path, content)) {
+                    // 保存失败，重新标记为 dirty
+                    std::unique_lock<std::shared_mutex> lock(m_mutex);
+                    m_isDirty = true;
+                    ENGINE_ASSERT_MSG("Auto-save failed.");
+                }
+            }
+        }
     }
 }
 
@@ -234,11 +276,23 @@ void ConfigManager::LoadLoggingConfig_Locked(const std::filesystem::path &path) 
     if (std::filesystem::exists(path)) {
         try {
             std::ifstream ifs(path, std::ios::binary);
+            if (!ifs.is_open()) {
+                throw std::runtime_error("Cannot open file: " + path.string());
+            }
             nlohmann::json j = nlohmann::json::parse(ifs);
             if (j.contains("logging")) {
                 m_logConfig = j["logging"].get<LogConfig>();
+            } else {
+                // 非致命：使用默认值
+                m_logConfig = LogConfig();
             }
-        } catch (const std::exception &) {
+        } catch (const nlohmann::json::parse_error &e) {
+            // 致命：JSON 语法错误
+            ENGINE_ASSERT_FMT("JSON syntax error in %s: %s", path.string().c_str(), e.what());
+            throw std::runtime_error(std::string("JSON parse error: ") + e.what());
+        } catch (const std::exception &e) {
+            // 非致命：其他解析错误，使用默认值
+            ENGINE_ASSERT_FMT("Failed to parse logging config, using defaults: %s", e.what());
             m_logConfig = LogConfig();
         }
     } else {
@@ -251,34 +305,41 @@ void ConfigManager::LoadWindowConfig_Locked(const std::filesystem::path &path) {
     if (std::filesystem::exists(path)) {
         try {
             std::ifstream ifs(path, std::ios::binary);
+            if (!ifs.is_open()) {
+                throw std::runtime_error("Cannot open file: " + path.string());
+            }
             nlohmann::json j = nlohmann::json::parse(ifs);
             if (j.contains("window")) {
                 auto &winJson = j["window"];
                 m_windowConfig.title = L"DX12 Engine";
-                if (winJson.contains("title")) {
+                if (winJson.contains("title") && winJson["title"].is_string()) {
                     m_windowConfig.title = Utf8ToWstring(winJson["title"].get<std::string>());
                 }
                 if (winJson.contains("resolution")) {
                     auto &res = winJson["resolution"];
-                    if (res.contains("width"))
+                    if (res.contains("width") && res["width"].is_number_unsigned())
                         m_windowConfig.width = res["width"].get<uint32_t>();
-                    if (res.contains("height"))
+                    if (res.contains("height") && res["height"].is_number_unsigned())
                         m_windowConfig.height = res["height"].get<uint32_t>();
                 }
-                if (winJson.contains("mode")) {
+                if (winJson.contains("mode") && winJson["mode"].is_string()) {
                     m_windowConfig.mode = winJson["mode"].get<std::string>();
                 }
                 if (winJson.contains("behavior")) {
                     auto &behavior = winJson["behavior"];
-                    if (behavior.contains("resizable"))
+                    if (behavior.contains("resizable") && behavior["resizable"].is_boolean())
                         m_windowConfig.resizable = behavior["resizable"].get<bool>();
-                    if (behavior.contains("maximizable"))
+                    if (behavior.contains("maximizable") && behavior["maximizable"].is_boolean())
                         m_windowConfig.maximizable = behavior["maximizable"].get<bool>();
                 }
             } else {
                 m_windowConfig = WindowConfig();
             }
-        } catch (const std::exception &) {
+        } catch (const nlohmann::json::parse_error &e) {
+            ENGINE_ASSERT_FMT("JSON syntax error in %s: %s", path.string().c_str(), e.what());
+            throw std::runtime_error(std::string("JSON parse error: ") + e.what());
+        } catch (const std::exception &e) {
+            ENGINE_ASSERT_FMT("Failed to parse window config, using defaults: %s", e.what());
             m_windowConfig = WindowConfig();
         }
     } else {
@@ -288,13 +349,26 @@ void ConfigManager::LoadWindowConfig_Locked(const std::filesystem::path &path) {
 
 void ConfigManager::LoadAndMergeConfigs_Locked(const std::filesystem::path &userPath,
                                                const std::filesystem::path &defaultPath) {
-    // 保留旧方法以兼容（不再使用）
+    //    保留
 }
 
 void ConfigManager::SyncStructsToJson_Locked() {
     // REQUIRES: m_mutex is held by caller
     nlohmann::json logJson = m_logConfig;
     m_configData["logging"] = logJson;
+
+    // 手动构建 Window JSON (假设没有自动 to_json)
+    nlohmann::json winJson;
+    // 注意：wstring 转 string 可能需要辅助函数，这里简化处理
+    std::string titleStr(m_windowConfig.title.begin(), m_windowConfig.title.end());
+    winJson["title"] = titleStr;
+    winJson["resolution"]["width"] = m_windowConfig.width;
+    winJson["resolution"]["height"] = m_windowConfig.height;
+    winJson["mode"] = m_windowConfig.mode;
+    winJson["behavior"]["resizable"] = m_windowConfig.resizable;
+    winJson["behavior"]["maximizable"] = m_windowConfig.maximizable;
+
+    m_configData["window"] = winJson;
 }
 void ConfigManager::ParseJsonToStructs_Locked(const nlohmann::json &j) {
     // REQUIRES: m_mutex is held by caller
@@ -320,6 +394,7 @@ bool ConfigManager::SaveInternal_Locked() {
     std::string content = m_configData.dump(4);
 
     auto savePath = m_configDir / "logging_config.json";
+
     bool success = AtomicWriteFile(savePath, content);
 
     if (success) {
@@ -336,7 +411,11 @@ void ConfigManager::NotifySubscribers_Unlocked(const std::string &section) {
     if (it != m_subscribers.end()) {
         for (auto &cb : it->second) {
             if (cb) {
-                cb(section);
+                try {
+                    cb(section);
+                } catch (const std::exception &e) {
+                    ENGINE_ASSERT_FMT("Subscriber callback exception: %s", e.what());
+                }
             }
         }
     }

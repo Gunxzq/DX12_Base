@@ -1,11 +1,10 @@
 #pragma once
 
 #include "Common/Common.h"
-#include <nlohmann/json.hpp>
-#include <unordered_map>
-
 #include "LoggerConfig.h"
 #include "WindowConfig.h"
+
+#include <nlohmann/json.hpp>
 
 namespace DX12Engine {
 namespace Core {
@@ -28,7 +27,7 @@ public:
 
     /**
      * @brief 初始化配置管理器
-     * @param configDir 配置目录路径 (如 "Config")，会自动加载 logging_config.json 和 window.json
+     * @throw std::runtime_error 如果配置目录无效或关键配置文件损坏
      */
     void Initialize(const std::filesystem::path &configDir);
 
