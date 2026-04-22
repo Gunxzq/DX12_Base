@@ -362,3 +362,26 @@ class Game {
 | Phase 3 | AISystem* | AI 系统指针 |
 
 所有新增能力遵循相同模式：在 Context 中添加接口指针 → Bootstrap 填充 → Game 使用。
+
+
+
+
+## todo
+
+计时器：基础设施服务
+你说得对，计时器不应该属于 SceneManager。场景管理器管的是“空间”，计时器管的是“时间”。
+定位： 它是 GameContext 的直接成员，或者是一个独立的 TimeService。
+生命周期： 由 Bootstrap 创建，注入 GameContext。
+多计时器设计： 虽然游戏逻辑主要用一个主时钟，但为了扩展性（比如暂停菜单时的UI动画时间、网络延迟统计时间），我们可以预留接口。
+临时方案： GameContext 持有一个 MainTimer。
+未来方案： GameContext 持有一个 TimeManager，里面管理着 GameTime, UITime, NetworkTime 等。
+
+
+相机：场景/世界的一部分
+相机本质上是一个“观察者”。它必须依附于某个空间（世界坐标系）。
+定位： SceneManager 的成员。
+理由： 相机有位置、旋转，它需要知道自己在世界哪里。它和灯光、模型一样，都是场景图的一部分。
+多相机支持： 正如你提到的，未来会有“主摄像机”（透视投影）和“UI摄像机”（正交投影）。SceneManager 维护一个相机列表，并提供 GetActiveCamera() 接口，这是非常标准的做法。
+
+
+1. 暂时没有场景管理器，我们先将计时器和相机组合到context作为单个成员来完成
