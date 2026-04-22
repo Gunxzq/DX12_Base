@@ -20,11 +20,13 @@
 
 // ---------- C++ 标准库（高频） ----------
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
