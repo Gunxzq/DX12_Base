@@ -1,5 +1,4 @@
 #include "Core/Config/ConfigManager.h"
-#include <Windows.h>
 #include <fstream>
 #include <spdlog/spdlog.h>
 

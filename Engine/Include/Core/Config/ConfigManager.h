@@ -1,15 +1,8 @@
 #pragma once
 
-#include <chrono>
-#include <filesystem>
-#include <functional>
-#include <memory>
-#include <mutex>
+#include "Common/Common.h"
 #include <nlohmann/json.hpp>
-#include <shared_mutex>
-#include <string>
 #include <unordered_map>
-#include <vector>
 
 #include "LoggerConfig.h"
 #include "WindowConfig.h"

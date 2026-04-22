@@ -1,7 +1,7 @@
 #pragma once
 
+#include "Common/Common.h"
 #include <nlohmann/json.hpp>
-#include <string>
 
 namespace DX12Engine {
 namespace Core {

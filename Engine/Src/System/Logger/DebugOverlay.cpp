@@ -1,7 +1,6 @@
 #include "System/Logger/DebugOverlay.h"
+
 #include <algorithm>
-#include <sstream>
-#include <vector>
 
 namespace DX12Engine {
 namespace Core {

@@ -1,9 +1,6 @@
 #pragma once
 
-#include <filesystem>
-#include <memory>
-#include <string>
-
+#include "Common/Common.h"
 #include "System/Window/Window.h"
 
 namespace DX12Engine {

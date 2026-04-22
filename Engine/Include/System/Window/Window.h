@@ -1,8 +1,6 @@
 #pragma once
+#include "Common/Common.h"
 #include "Resource.h"
-#include <Windows.h>
-#include <functional>
-#include <string>
 
 namespace DX12Engine {
 namespace Core {

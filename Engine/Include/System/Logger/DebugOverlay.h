@@ -1,11 +1,8 @@
 #pragma once
 
+#include "Common/Common.h"
 #include <atomic>
-#include <chrono>
 #include <deque>
-#include <mutex>
-#include <string>
-#include <windows.h>
 
 namespace DX12Engine {
 namespace Core {
