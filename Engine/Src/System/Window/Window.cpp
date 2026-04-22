@@ -1,9 +1,11 @@
 #include "System/Window/Window.h"
+#include "Core/Config/WindowConfig.h"
 
 namespace DX12Engine {
 namespace Core {
 
-Window::Window(const Desc &desc) : m_Desc(desc) {}
+Window::Window(const WindowConfig &config)
+    : m_Title(config.title), m_InitWidth(config.width), m_InitHeight(config.height), m_IsResizable(config.resizable) {}
 
 Window::~Window() {
     if (m_hWnd) {
@@ -37,25 +39,24 @@ bool Window::Create() {
 
     // 指定样式
     DWORD style = WS_OVERLAPPEDWINDOW;
-    if (!m_Desc.resizable) {
+    if (!m_IsResizable) {
         style &= ~WS_THICKFRAME;
         style &= ~WS_MAXIMIZEBOX;
     }
 
-    RECT rect = {0, 0, static_cast<LONG>(m_Desc.width), static_cast<LONG>(m_Desc.height)};
+    RECT rect = {0, 0, static_cast<LONG>(m_InitWidth), static_cast<LONG>(m_InitHeight)};
     AdjustWindowRect(&rect, style, FALSE);
 
-    m_hWnd = CreateWindowExW(0, L"DX12WindowClass", m_Desc.title.c_str(), style, CW_USEDEFAULT, CW_USEDEFAULT,
+    m_hWnd = CreateWindowExW(0, L"DX12WindowClass", m_Title.c_str(), style, CW_USEDEFAULT, CW_USEDEFAULT,
                              rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, m_hInstance, this);
-
     if (!m_hWnd)
         return false;
 
     // 设置窗口位置
     SetWindowPos(m_hWnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 
-    m_Width = m_Desc.width;
-    m_Height = m_Desc.height;
+    m_Width = m_InitWidth;
+    m_Height = m_InitHeight;
 
     return true;
 }

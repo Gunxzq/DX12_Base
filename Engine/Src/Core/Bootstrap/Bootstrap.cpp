@@ -5,36 +5,74 @@
 #include "System/Logger/Logger.h"
 #include "System/Window/Window.h"
 
+namespace {
+void EarlyLog(const std::string &msg) {
+    ::OutputDebugStringA(msg.c_str());
+    ::OutputDebugStringA("\n");
+    fprintf(stderr, "%s\n", msg.c_str());
+}
+} // namespace
+
 namespace DX12Engine {
 namespace Core {
 
 Bootstrap::~Bootstrap() { Shutdown(); }
 
-void Bootstrap::Shutdown() {}
+void Bootstrap::Shutdown() {
+    // 1. 销毁 GameContext
+    m_context.reset();
+
+    // 2. 销毁 Window
+    m_window.reset();
+
+    // 3. 关闭 Logger (如果已初始化)
+    // 注意：Logger::Shutdown 是静态方法，内部会处理单例清理
+    try {
+        Logger::Shutdown();
+    } catch (...) {
+        // 忽略析构期间的异常
+    }
+
+    // 4. 关闭 ConfigManager
+    try {
+        ConfigManager::GetInstance().Shutdown();
+    } catch (...) {
+        // 忽略
+    }
+
+    m_isInitialized = false;
+}
 
 void Bootstrap::InitializeConfigManager(const std::filesystem::path &configDir) {
-    Logger::GetInstance()->Info("[Bootstrap] Initializing ConfigManager...");
+    EarlyLog("[Bootstrap] Initializing ConfigManager...");
+
     ConfigManager::GetInstance().Initialize(configDir);
+
+    EarlyLog("[Bootstrap] ConfigManager initialized.");
 }
 
 void Bootstrap::InitializeLogging() {
-    Logger::GetInstance()->Info("[Bootstrap] Initializing Logging...");
+    EarlyLog("[Bootstrap] Initializing Logging...");
+
+    // 获取配置 (此时 ConfigManager 必须已初始化)
     const auto &logConfig = ConfigManager::GetInstance().GetLogConfig();
+
+    // 任何获取实例，迫使创建
+    Logger::GetInstance();
+
+    // Logger::Init 内部会抛出异常如果失败
     Logger::Init(logConfig);
+
+    // 现在 Logger 可用了，后续日志可以使用 Logger
+    Logger::GetInstance()->Info("[Bootstrap] Logging system initialized.");
 }
 
 bool Bootstrap::CreateMainWindow() {
     Logger::GetInstance()->Info("[Bootstrap] Creating Window...");
 
-    Window::Desc desc;
-    {
-        const auto &windowConfig = ConfigManager::GetInstance().GetWindowConfig();
-        desc.title = windowConfig.title;
-        desc.width = windowConfig.width;
-        desc.height = windowConfig.height;
-        desc.resizable = windowConfig.resizable;
-    }
-    m_window = std::make_unique<Window>(desc);
+    const auto &windowConfig = ConfigManager::GetInstance().GetWindowConfig();
+
+    m_window = std::make_unique<Window>(windowConfig);
 
     if (!m_window->Create()) {
         Logger::GetInstance()->Error("[Bootstrap] Failed to create window");
@@ -46,12 +84,47 @@ bool Bootstrap::CreateMainWindow() {
 }
 
 void Bootstrap::InitializeModules() {
-    InitializeConfigManager("Config");
-    InitializeLogging();
-    CreateMainWindow();
+    try {
+        // 1. 配置 (基础)
+        InitializeConfigManager("Config");
+
+        // 2. 日志 (依赖配置)
+        InitializeLogging();
+
+        // 3. 窗口 (依赖配置)
+        if (!CreateMainWindow()) {
+            throw std::runtime_error("[Bootstrap] CreateMainWindow returned false.");
+        }
+
+    } catch (const std::exception &e) {
+        // 如果任何一步失败，记录错误并重新抛出
+        // 注意：如果 Logger 还没好，EarlyLog 会兜底
+        std::string errMsg = std::string("[Bootstrap] Initialization failed: ") + e.what();
+
+        // 尝试用 Logger 记录，如果 Logger 没好则用 EarlyLog
+        try {
+            if (Logger::GetInstance()) { // 简单的空指针检查，具体取决于 Logger 实现
+                Logger::GetInstance()->Critical(errMsg.c_str());
+            } else {
+                EarlyLog(errMsg);
+            }
+        } catch (...) {
+            EarlyLog(errMsg);
+        }
+
+        // 清理已初始化的部分
+        Shutdown();
+
+        // 重新抛出，让 main 函数决定如何处理（如弹窗）
+        throw;
+    }
 }
 
 GameContext *Bootstrap::CreateContext() {
+    if (!m_isInitialized) {
+        throw std::runtime_error("[Bootstrap] Cannot create context: Bootstrap not initialized.");
+    }
+
     m_context = std::make_unique<GameContext>();
     m_context->Config = &ConfigManager::GetInstance();
     m_context->Logging = Logger::GetInstance();

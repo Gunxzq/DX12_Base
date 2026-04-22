@@ -5,18 +5,14 @@
 namespace DX12Engine {
 namespace Core {
 
+struct WindowConfig;
+
 class Window {
 public:
     // 配置结构体，替代硬编码的字符串
-    struct Desc {
-        std::wstring title = L"default window title";
-        uint32_t width = 1280;
-        uint32_t height = 720;
-        bool resizable = true;
-    };
 
 public:
-    Window(const Desc &desc);
+    Window(const WindowConfig &config);
     ~Window();
 
     // 1. 初始化与创建
@@ -43,7 +39,12 @@ private:
 private:
     HWND m_hWnd = nullptr;
     HINSTANCE m_hInstance = nullptr;
-    Desc m_Desc;
+
+    // 存储简单状态
+    std::wstring m_Title;
+    uint32_t m_InitWidth = 0;
+    uint32_t m_InitHeight = 0;
+    bool m_IsResizable = false;
 
     // 运行时状态
     uint32_t m_Width = 0;

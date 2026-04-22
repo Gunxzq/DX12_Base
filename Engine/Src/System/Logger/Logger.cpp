@@ -16,18 +16,19 @@ namespace Core {
 // ========================================================================
 
 Logger *Logger::GetInstance() {
+    std::unique_lock<std::shared_mutex> lock(s_mutex);
     if (!s_instance) {
-        std::unique_lock<std::shared_mutex> lock(s_mutex);
-        if (!s_instance) {
-            s_instance = new Logger();
-        }
+        OutputDebugStringW(L"");
+        s_instance = new Logger();
     }
     return s_instance;
 }
 
 void Logger::Init(const LogConfig &config) {
     std::unique_lock<std::shared_mutex> lock(s_mutex);
-    GetInstance()->Init_Internal(config);
+
+    OutputDebugStringW(L"[Logger] Init 1\n");
+    s_instance->Init_Internal(config);
 }
 
 void Logger::Shutdown() {
@@ -52,10 +53,14 @@ Logger::~Logger() {
 }
 
 void Logger::Init_Internal(const LogConfig &config) {
+
+    OutputDebugStringW(L"[Logger] Init_Internal called\n");
     // 如果已经初始化，先关闭旧的
     if (s_isInitialized && m_logger) {
         Shutdown_Internal();
     }
+
+    OutputDebugStringW(L"[Logger] Initializing...\n");
 
     // 1. 委托工厂创建所有 Sinks
     auto sinks = SinkFactory::CreateSinks(config);
