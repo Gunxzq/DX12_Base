@@ -1,8 +1,15 @@
 #pragma once
 
+#include "Core/Context/GameTimer.h"
 #include <memory>
+namespace DX12Engine {
+namespace Renderer {
+class D3D12DeviceContext; // 这里声明的是 DX12Engine::Renderer::D3D12DeviceContext
+}
+} // namespace DX12Engine
 
 namespace DX12Engine {
+
 namespace Core {
 
 // ========================================================================
@@ -13,13 +20,6 @@ class Window;
 class ConfigManager;
 class Logger;
 class GameTimer;
-
-// 前向声明 Renderer 模块
-namespace DX12Engine {
-namespace Renderer {
-class D3D12DeviceContext;
-}
-}
 
 // ========================================================================
 // GameContext - 依赖注入容器

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Common/Common.h"
+#include "Core/Context/GameTimer.h"
+#include "Renderer/Core/D3D12DeviceContext.h"
 #include "System/Window/Window.h"
 
 namespace DX12Engine {
@@ -11,13 +13,6 @@ namespace Core {
 // ========================================================================
 class GameContext;
 class GameTimer;
-
-// 前向声明 Renderer 模块
-namespace DX12Engine {
-namespace Renderer {
-class D3D12DeviceContext;
-}
-}
 
 // ========================================================================
 // Bootstrap - 装配层，负责初始化基础设施和创建 GameContext
@@ -82,9 +77,9 @@ private:
 
     // ── 成员变量 ──
 
-    std::unique_ptr<Window> m_window;                   // 窗口
-    std::unique_ptr<GameContext> m_context;             // 游戏上下文
-    std::unique_ptr<GameTimer> m_mainTimer;             // 主计时器
+    std::unique_ptr<Window> m_window;                                          // 窗口
+    std::unique_ptr<GameContext> m_context;                                    // 游戏上下文
+    std::unique_ptr<GameTimer> m_mainTimer;                                    // 主计时器
     std::unique_ptr<DX12Engine::Renderer::D3D12DeviceContext> m_deviceContext; // D3D12 设备上下文
 
     // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问

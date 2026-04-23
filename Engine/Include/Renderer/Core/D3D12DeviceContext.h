@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Common/Common.h"
-#include "d3dUtil.h"
+#include "Common/d3dUtil.h"
 #include <cstdint>
 #include <wrl/client.h>
 

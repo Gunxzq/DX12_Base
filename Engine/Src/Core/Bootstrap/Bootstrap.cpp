@@ -101,8 +101,8 @@ bool Bootstrap::InitializeD3DDeviceContext() {
     params.clientHeight = windowConfig.height;
     params.backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
     params.depthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    params.enableDebugLayer = true;   // 默认启用调试层
-    params.enable4xMsaa = false;     // 默认禁用 MSAA
+    params.enableDebugLayer = true; // 默认启用调试层
+    params.enable4xMsaa = false;    // 默认禁用 MSAA
     params.minFeatureLevel = D3D_FEATURE_LEVEL_11_0;
 
     // 创建并初始化 D3D12 设备上下文

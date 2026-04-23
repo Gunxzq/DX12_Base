@@ -5,28 +5,21 @@
 
 
 
-## 全套依赖
+## 迁移
 
-### 物理引擎
-- **刚体**: Jolt Physics (碰撞检测、刚体模拟)
-- **软体**: NVIDIA FleX / PBD (布料、软体、破坏)
-- **流体**: DX12 Compute Shader (水、烟雾、流体模拟)
-
-### 音频
-- miniaudio
-
-### 资源加载
-- **模型**: Assimp
-- **图片**: stb_image
-
-### 数学库
-- DirectXMath
-
-### 系统/工具
-- **内存分配**: mimalloc (微软出品，优化多线程内存碎片和锁竞争)
-- **调试 UI**: Dear ImGui (运行时调试面板，引擎开发神器，支持实时调参无需重新编译)
+⚠️ 需要补充才能移除的功能
+D3DApp 功能	说明
+WM_ACTIVATE 暂停/恢复	游戏暂停时需要停止计时器
+WM_ENTERSIZEMOVE/EXITSIZEMOVE	拖动窗口时暂停渲染
+WM_GETMINMAXINFO	限制最小窗口大小
+CalculateFrameStats	帧率显示
+Set4xMsaaState	运行时切换 MSAA
+全屏切换	Alt+Enter
+鼠标消息处理	OnMouseDown/Up/Move
 
 
+
+## 自建PBD
 
 1. 流体/粒子：PBD-Fluid-in-Unity
 这个仓库是学习 SPH（平滑粒子流体动力学）+ PBD 混合实现的经典案例。你提到的 GridHash（空间哈希网格优化）和 FluidSolver 是它的核心，非常适合用来参考如何编写 HLSL Compute Shader。
