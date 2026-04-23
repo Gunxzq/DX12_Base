@@ -299,6 +299,14 @@ void D3D12DeviceContext::OnResize(uint32_t width, uint32_t height) {
 }
 
 ID3D12GraphicsCommandList *D3D12DeviceContext::BeginFrame() {
+    // 等待上一帧的 GPU 命令完成后再重置命令分配器
+    if (mFence->GetCompletedValue() < mCurrentFence) {
+        HANDLE eventHandle = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
+        ThrowIfFailed(mFence->SetEventOnCompletion(mCurrentFence, eventHandle));
+        WaitForSingleObject(eventHandle, INFINITE);
+        CloseHandle(eventHandle);
+    }
+
     ThrowIfFailed(mDirectCmdListAlloc->Reset());
     ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
 

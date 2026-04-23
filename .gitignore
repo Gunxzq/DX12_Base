@@ -38,3 +38,7 @@ desktop.ini
 
 # --- 第三方库 (可选) ---
 # ThirdParty/
+
+
+# 忽略日志
+logs/

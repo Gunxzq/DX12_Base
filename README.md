@@ -72,9 +72,6 @@ DX12_Base/
 │   ├── DX12_Base.rc
 │   └── Resource.h
 │
-├── Docs/                   # [项目文档]
-│   └── Engine/             # 引擎模块文档
-│
 ├── Engine/                 # [核心引擎代码]
 │   ├── Include/            # 公开头文件
 │   │   ├── Common/         # 公共基础 (d3dUtil, MathHelper, d3dx12)

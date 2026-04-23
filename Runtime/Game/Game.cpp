@@ -2,6 +2,8 @@
 #include "Core/Context/GameContext.h"
 #include "System/Logger/Logger.h"
 #include "System/Window/Window.h"
+#include "Renderer/Core/D3D12DeviceContext.h"
+#include "Common/d3dUtil.h"
 
 Game::Game(DX12Engine::Core::GameContext *context) : m_context(context), m_isRunning(false), m_isInitialized(false) {}
 
@@ -92,11 +94,28 @@ void Game::Update(float deltaTime) {
 }
 
 void Game::Render() {
-    // TODO: 渲染游戏画面
-    // m_context->Renderer->Clear();
-    // m_levelManager->Render();
-    // m_playerManager->Render();
-    // m_context->Renderer->Present();
+    auto *renderer = m_context->DeviceContext;
+
+    // 开始帧渲染，获取命令列表
+    ID3D12GraphicsCommandList *cmdList = renderer->BeginFrame();
+
+    // 获取当前 Back Buffer 的 RTV 和 DSV
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = renderer->GetCurrentBackBufferView();
+    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = renderer->GetDepthStencilView();
+
+    // 设置渲染目标
+    cmdList->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
+
+    // 清除渲染目标为 CornflowerBlue (0.4f, 0.6f, 0.9f)
+    const float clearColor[] = {0.4f, 0.6f, 0.9f, 1.0f};
+    cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
+    // 清除深度模板缓冲区
+    cmdList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+                                    1.0f, 0, 0, nullptr);
+
+    // 结束帧并呈现
+    renderer->EndFrame();
 }
 
 void Game::InitializeGameModules() {
