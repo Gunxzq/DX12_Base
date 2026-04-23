@@ -24,12 +24,17 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Bin/x64/${CMAKE_BUILD_TYP
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Lib/x64/${CMAKE_BUILD_TYPE})
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Lib/x64/${CMAKE_BUILD_TYPE})
 
+# ========================================================================
 # 2. 查找第三方依赖 (通过 vcpkg)
+# ========================================================================
 find_package(nlohmann_json CONFIG REQUIRED)
-find_package(DirectXTK12 CONFIG REQUIRED)
 find_package(concurrentqueue CONFIG REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(assimp CONFIG REQUIRED)
+find_package(mimalloc REQUIRED)
+find_package(Jolt CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 # ========================================================================
 # 3. 构建引擎核心库 (Static Library)
@@ -52,15 +57,17 @@ target_include_directories(DX12EngineCore PUBLIC
 # 链接依赖库
 target_link_libraries(DX12EngineCore PUBLIC 
     nlohmann_json::nlohmann_json
-    Microsoft::DirectXTK12
     concurrentqueue::concurrentqueue
     EnTT::EnTT
     spdlog::spdlog
     d3d12.lib
     dxgi.lib
     dxguid.lib
+    assimp::assimp
+    mimalloc-static
+    Jolt::Jolt
+    imgui::imgui
 )
-
 
 # ========================================================================
 # 4. 构建主程序 (Executable)
@@ -83,13 +90,16 @@ add_executable(${PROJECT_NAME} WIN32 ${RUNTIME_SOURCES} ${RUNTIME_RESOURCES})
 
 
 
-# 在 add_executable 或 target_compile_definitions 中添加
+# 主程序编译定义
+# 【关键】MI_OVERRIDE=ON 必须定义在最终可执行文件目标上
+# 静态库不保留宏定义，会导致 mimalloc 无法替换全局 new/malloc
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     UNICODE
     _UNICODE
+    MI_OVERRIDE=ON
 )
 
-# 同时也给引擎库加上，保持一致
+# 引擎库编译定义 (仅保留 UNICODE)
 target_compile_definitions(DX12EngineCore PRIVATE
     UNICODE
     _UNICODE

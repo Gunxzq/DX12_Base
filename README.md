@@ -27,11 +27,15 @@ cd DX12_Base
 cd D:\Dev\vcpkg
 
 # 安装核心依赖 (x64-windows  triplet)
-.\vcpkg install nlohmann-json:x64-windows
-.\vcpkg install directxtk12:x64-windows
-.\vcpkg install concurrentqueue:x64-windows
-.\vcpkg install entt:x64-windows
-.\vcpkg install spdlog:x64-windows
+.\vcpkg install nlohmann-json:x64-windows ^
+concurrentqueue:x64-windows ^
+entt:x64-windows ^
+spdlog:x64-windows ^
+assimp:x64-windows ^
+mimalloc:x64-windows ^
+joltphysics:x64-windows ^
+imgui[dx12-binding]:x64-windows ^
+gtest:x64-windows
 ```
 
 
@@ -54,48 +58,46 @@ cd D:\Dev\vcpkg
 DX12_Base/
 │
 ├── .vscode/                # VS Code 配置 (CMake, C/C++ 设置)
-│   ├── settings.json
-│   └── ...
+│   ├── c_cpp_properties.json
+│   └── settings.json
 │
-├── Build/                  # [构建产物] (Git Ignored)
-│   ├── Bin/                # 可执行文件 (.exe) 和 PDB
-│   │   └── x64/
-│   │       └── Debug/
-│   └── Intermediate/       # 中间文件 (.obj, .tlog)
-│       └── x64/
-│           └── Debug/
-│
-├── Config/                 # [配置文件]
-│   └── ...                 # 存放 JSON/YAML 等运行时配置文件
+├── Config/                 # [配置文件] JSON 格式
+│   ├── logging_config.json
+│   └── window.json
 │
 ├── Content/                # [数据资产] (构建时自动复制到输出目录)
 │   ├── Models/             # 3D 模型 (.obj, .gltf, .fbx)
-│   └── Textures/           # 纹理资源 (.dds, .png, .jpg)
+│   ├── Textures/           # 纹理资源 (.dds, .png, .jpg)
+│   ├── DX12_Base.ico
+│   ├── DX12_Base.rc
+│   └── Resource.h
 │
 ├── Docs/                   # [项目文档]
-│   ├── Architecture.md
-│   └── Notes.md
+│   └── Engine/             # 引擎模块文档
 │
 ├── Engine/                 # [核心引擎代码]
-│   ├── Include/            # 公开头文件 (接口定义)
-│   │   ├── Core/
-│   │   │   ├── Config/     # 配置模块头文件
-│   │   │   └── Logger/     # 日志模块头文件
-│   │   └── Renderer/       # 渲染模块头文件
+│   ├── Include/            # 公开头文件
+│   │   ├── Common/         # 公共基础 (d3dUtil, MathHelper, d3dx12)
+│   │   ├── Core/           # 核心模块
+│   │   │   ├── Bootstrap/  # 启动引导
+│   │   │   ├── Config/     # 配置管理
+│   │   │   └── Context/    # 相机、游戏上下文、计时器
+│   │   ├── Renderer/       # 渲染模块
+│   │   └── System/         # 系统模块
+│   │       ├── Logger/     # 日志系统
+│   │       └── Window/     # 窗口管理
 │   └── Src/                # 源码实现
-│       └── Core/
-│           ├── Config/     # 配置模块实现
-│           └── Logger/     # 日志模块实现
 │
 ├── Runtime/                # [业务逻辑/入口]
-│   ├── DX12_Base.cpp       # WinMain 入口与主循环
-│   └── ...                 # 其他应用层代码
+│   ├── Application/        # 应用程序入口
+│   └── Game/               # 游戏逻辑
 │
 ├── Shaders/                # [着色器代码]
-│   ├── Source/             # HLSL 源码
-│   └── Compiled/           # 编译后的 .cso (可选，也可运行时编译)
+│
+├── Tests/                  # [单元测试] Google Test
 │
 ├── CMakeLists.txt          # CMake 构建脚本
+├── CMakeSettings.json      # VS CMake 配置
 └── README.md               # 项目说明
 ```
 ## 4. 技术栈与依赖说明
@@ -103,16 +105,21 @@ DX12_Base/
 | 库名称 | 用途描述 |
 | :--- | :--- |
 | DirectX 12 | 底层图形 API，提供高性能渲染能力。 |
-| DirectXTK12 | DX12 辅助库，简化纹理加载、模型加载、SpriteBatch 等常见操作。 |
 | nlohmann/json | 现代 C++ JSON 库，用于解析 Config/ 下的配置文件及场景数据。 |
 | spdlog | 高性能 C++ 日志库，用于引擎内部调试信息输出与错误追踪。 |
 | concurrentqueue | 无锁并发队列，用于多线程环境下的命令缓冲提交或任务调度。 |
 | EnTT | ECS (Entity-Component-System) 框架，用于游戏对象管理与架构解耦。 |
+| assimp | 3D 模型加载库，支持多种模型格式 (.obj, .gltf, .fbx 等)。 |
+| mimalloc | 高性能内存分配器，支持全局替换使能 (MI_OVERRIDE=ON)。 |
+| Jolt Physics | 物理引擎，用于刚体碰撞、关节等物理模拟。 |
+| Dear ImGui | 即时模式 GUI 库，用于调试界面和编辑器工具。 |
+| Google Test | 单元测试框架 (可选，需开启 BUILD_TESTS)。 |
 
 ## 5. 开发规范
 
 - **代码风格**: 遵循 Google C++ Style Guide 或项目内置的 `.clang-format`。
-- **头文件包含**:
+- **头文件包含**: 
   - 引擎内部模块间引用请使用相对路径或基于 `Engine/Include` 的路径。
   - 例如: `#include "Core/Logger/Logger.h"`
 - **资源管理**: 所有运行时需要的静态资源（模型、纹理）应放置在 `Content/` 目录下，CMake 会在构建后自动将其复制到可执行文件同级目录。
+- **内存管理**: 项目默认启用 mimalloc 全局替换 (MI_OVERRIDE=ON)，std::vector 等容器会自动使用 mimalloc 分配器，无需额外配置。
