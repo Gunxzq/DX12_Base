@@ -44,6 +44,18 @@ bool D3D12DeviceContext::Initialize(const InitParams &params) {
     CreateDescriptorHeaps();
     CreateDepthStencilBuffer();
 
+    // 获取 Back Buffer 并创建 RTV (原 OnResize 的初始化逻辑)
+    mCurrBackBuffer = 0;
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHeapHandle(mRtvHeap->GetCPUDescriptorHandleForHeapStart());
+    for (UINT i = 0; i < SwapChainBufferCount; i++) {
+        ThrowIfFailed(mSwapChain->GetBuffer(i, IID_PPV_ARGS(&mSwapChainBuffer[i])));
+        md3dDevice->CreateRenderTargetView(mSwapChainBuffer[i].Get(), nullptr, rtvHeapHandle);
+        rtvHeapHandle.Offset(1, mRtvDescriptorSize);
+    }
+
+    // 设置视口和裁剪矩形
+    UpdateViewportAndScissorRect();
+
     return true;
 }
 
@@ -164,6 +176,10 @@ void D3D12DeviceContext::CreateDescriptorHeaps() {
 }
 
 void D3D12DeviceContext::CreateDepthStencilBuffer() {
+    // 重置命令列表（CreateCommandAllocators 时已关闭）
+    ThrowIfFailed(mDirectCmdListAlloc->Reset());
+    ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+
     D3D12_RESOURCE_DESC depthStencilDesc = {};
     depthStencilDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     depthStencilDesc.Alignment = 0;

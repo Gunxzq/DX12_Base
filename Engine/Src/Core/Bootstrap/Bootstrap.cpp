@@ -84,6 +84,9 @@ bool Bootstrap::CreateMainWindow() {
         return false;
     }
 
+    // SwapChain 创建前需要窗口已显示
+    m_window->Show();
+
     Logger::GetInstance()->Info("[Bootstrap] Window created successfully");
     return true;
 }
