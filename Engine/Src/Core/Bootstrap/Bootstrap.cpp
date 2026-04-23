@@ -96,17 +96,26 @@ bool Bootstrap::InitializeD3DDeviceContext() {
 
     // 获取窗口配置
     const auto &windowConfig = ConfigManager::GetInstance().GetWindowConfig();
+    const auto &rendererConfig = ConfigManager::GetInstance().GetRendererConfig();
 
     // 配置 D3D12 设备上下文参数
     DX12Engine::Renderer::D3D12DeviceContext::InitParams params;
+
     params.hwnd = m_window->GetHandle();
     params.clientWidth = windowConfig.width;
     params.clientHeight = windowConfig.height;
-    params.backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-    params.depthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    params.enableDebugLayer = true; // 默认启用调试层
-    params.enable4xMsaa = false;    // 默认禁用 MSAA
-    params.minFeatureLevel = D3D_FEATURE_LEVEL_11_0;
+
+    // 直接使用配置中已转换的枚举值
+    params.backBufferFormat = rendererConfig.formats.BackBufferFormatEnum;
+    params.depthStencilFormat = rendererConfig.formats.DepthStencilFormatEnum;
+
+    params.enableDebugLayer = rendererConfig.device.enableDebugLayer;
+
+    // MSAA 处理
+    params.enable4xMsaa = rendererConfig.msaa.enabled && rendererConfig.msaa.sampleCount >= 4;
+
+    // 使用已转换的 Feature Level
+    params.minFeatureLevel = rendererConfig.device.FeatureLevelEnum;
 
     // 创建并初始化 D3D12 设备上下文
     m_deviceContext = std::make_unique<DX12Engine::Renderer::D3D12DeviceContext>();

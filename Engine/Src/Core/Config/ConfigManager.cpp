@@ -71,6 +71,7 @@ void ConfigManager::Initialize(const std::filesystem::path &configDir) {
     try {
         LoadLoggingConfig_Locked(configDir / "logging_config.json");
         LoadWindowConfig_Locked(configDir / "window.json");
+        LoadRendererConfig_Locked(configDir / "renderer.json");
     } catch (const std::exception &e) {
         // 致命错误：记录、中断、抛出
         ENGINE_ASSERT_FMT("Initialization failed during load: %s", e.what());
@@ -128,6 +129,15 @@ const WindowConfig &ConfigManager::GetWindowConfig() const {
 }
 
 /**
+ * @brief 获取渲染器配置
+ * @return const RendererConfig&
+ */
+const RendererConfig &ConfigManager::GetRendererConfig() const {
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    return m_rendererConfig;
+}
+
+/**
  * @brief 设置日志全局等级
  * @param level
  * @date 2026-04-18
@@ -176,6 +186,7 @@ void ConfigManager::Reload() {
     try {
         LoadLoggingConfig_Locked(m_configDir / "logging_config.json");
         LoadWindowConfig_Locked(m_configDir / "window.json");
+        LoadRendererConfig_Locked(m_configDir / "renderer.json");
     } catch (const std::exception &e) {
         ENGINE_ASSERT_FMT("Reload failed: %s", e.what());
         // Reload 失败通常不抛出异常，而是保持旧配置，但这里我们记录错误
@@ -344,6 +355,39 @@ void ConfigManager::LoadWindowConfig_Locked(const std::filesystem::path &path) {
         }
     } else {
         m_windowConfig = WindowConfig();
+    }
+}
+
+void ConfigManager::LoadRendererConfig_Locked(const std::filesystem::path &path) {
+    // REQUIRES: m_mutex is held by caller
+    if (std::filesystem::exists(path)) {
+        try {
+            std::ifstream ifs(path, std::ios::binary);
+            if (!ifs.is_open()) {
+                throw std::runtime_error("Cannot open file: " + path.string());
+            }
+            nlohmann::json j = nlohmann::json::parse(ifs);
+
+            if (j.contains("renderer")) {
+                m_rendererConfig = j["renderer"].get<RendererConfig>();
+
+                // 执行后处理转换（字符串 -> 枚举）
+                m_rendererConfig.PostLoad();
+            } else {
+                m_rendererConfig = RendererConfig();
+                m_rendererConfig.PostLoad();
+            }
+        } catch (const nlohmann::json::parse_error &e) {
+            ENGINE_ASSERT_FMT("JSON syntax error in %s: %s", path.string().c_str(), e.what());
+            throw std::runtime_error(std::string("JSON parse error: ") + e.what());
+        } catch (const std::exception &e) {
+            ENGINE_ASSERT_FMT("Failed to parse renderer config, using defaults: %s", e.what());
+            m_rendererConfig = RendererConfig();
+            m_rendererConfig.PostLoad();
+        }
+    } else {
+        m_rendererConfig = RendererConfig();
+        m_rendererConfig.PostLoad();
     }
 }
 

@@ -79,7 +79,7 @@ void D3D12DeviceContext::CreateFactory() {
 void D3D12DeviceContext::CreateDevice() {
     // Try to create hardware device.
     HRESULT hardwareResult = D3D12CreateDevice(nullptr, // default adapter
-                                                mParams.minFeatureLevel, IID_PPV_ARGS(md3dDevice.GetAddressOf()));
+                                               mParams.minFeatureLevel, IID_PPV_ARGS(md3dDevice.GetAddressOf()));
 
     // Fallback to WARP device.
     if (FAILED(hardwareResult)) {
@@ -212,9 +212,8 @@ void D3D12DeviceContext::CreateDepthStencilBuffer() {
     md3dDevice->CreateDepthStencilView(mDepthStencilBuffer.Get(), &dsvDesc, GetDepthStencilView());
 
     // Transition depth stencil to depth write state
-    CD3DX12_RESOURCE_BARRIER barrier =
-        CD3DX12_RESOURCE_BARRIER::Transition(mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_COMMON,
-                                             D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_DEPTH_WRITE);
     mCommandList->ResourceBarrier(1, &barrier);
     ThrowIfFailed(mCommandList->Close());
     ID3D12CommandList *cmdLists[] = {mCommandList.Get()};
@@ -252,8 +251,8 @@ void D3D12DeviceContext::OnResize(uint32_t width, uint32_t height) {
     // Resize swap chain
     DXGI_SWAP_CHAIN_DESC sd = {};
     ThrowIfFailed(mSwapChain->GetDesc(&sd));
-    ThrowIfFailed(mSwapChain->ResizeBuffers(SwapChainBufferCount, mClientWidth, mClientHeight, mBackBufferFormat,
-                                           sd.Flags));
+    ThrowIfFailed(
+        mSwapChain->ResizeBuffers(SwapChainBufferCount, mClientWidth, mClientHeight, mBackBufferFormat, sd.Flags));
 
     mCurrBackBuffer = 0;
 
@@ -360,7 +359,7 @@ void D3D12DeviceContext::FlushCommandQueue() {
 
 D3D12_CPU_DESCRIPTOR_HANDLE D3D12DeviceContext::GetCurrentBackBufferView() const {
     return CD3DX12_CPU_DESCRIPTOR_HANDLE(mRtvHeap->GetCPUDescriptorHandleForHeapStart(), mCurrBackBuffer,
-                                          mRtvDescriptorSize);
+                                         mRtvDescriptorSize);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE D3D12DeviceContext::GetDepthStencilView() const {
@@ -416,9 +415,9 @@ void D3D12DeviceContext::LogOutputDisplayModes(IDXGIOutput *output, DXGI_FORMAT 
 
     for (auto &mode : modeList) {
         std::wstring text = L"Width = " + std::to_wstring(mode.Width) + L" " + L"Height = " +
-                           std::to_wstring(mode.Height) + L" " + L"Refresh = " +
-                           std::to_wstring(mode.RefreshRate.Numerator) + L"/" +
-                           std::to_wstring(mode.RefreshRate.Denominator) + L"\n";
+                            std::to_wstring(mode.Height) + L" " + L"Refresh = " +
+                            std::to_wstring(mode.RefreshRate.Numerator) + L"/" +
+                            std::to_wstring(mode.RefreshRate.Denominator) + L"\n";
         OutputDebugString(text.c_str());
     }
 }

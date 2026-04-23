@@ -2,6 +2,7 @@
 
 #include "Common/Common.h"
 #include "LoggerConfig.h"
+#include "RendererConfig.h"
 #include "WindowConfig.h"
 
 #include <nlohmann/json.hpp>
@@ -68,6 +69,12 @@ public:
      */
     const WindowConfig &GetWindowConfig() const;
 
+    /**
+     * @brief 获取渲染器配置
+     * @return const RendererConfig&
+     */
+    const RendererConfig &GetRendererConfig() const;
+
     // --- 3. 修改配置 (Write) ---
 
     /**
@@ -123,14 +130,23 @@ private:
     /**
      * @brief 加载日志配置
      * @attention REQUIRES: Caller must hold m_mutex (unique).
+     * @param path 配置文件路径
      */
     void LoadLoggingConfig_Locked(const std::filesystem::path &path);
 
     /**
      * @brief 加载窗口配置
      * @attention REQUIRES: Caller must hold m_mutex (unique).
+     * @param path 配置文件路径
      */
     void LoadWindowConfig_Locked(const std::filesystem::path &path);
+
+    /**
+     * @brief 加载渲染器配置
+     * @attention REQUIRES: Caller must hold m_mutex (unique).
+     * @param path 配置文件路径
+     */
+    void LoadRendererConfig_Locked(const std::filesystem::path &path);
 
     /**
      * @brief 加载并合并 JSON 文件
@@ -180,6 +196,7 @@ private:
     // 强类型配置实例
     LogConfig m_logConfig;
     WindowConfig m_windowConfig;
+    RendererConfig m_rendererConfig;
 
     // 原始 JSON 数据
     nlohmann::json m_configData;
