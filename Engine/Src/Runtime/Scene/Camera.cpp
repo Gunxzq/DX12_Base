@@ -2,7 +2,7 @@
 // Camera.h by Frank Luna (C) 2011 All Rights Reserved.
 //***************************************************************************************
 
-#include "Core/Context/Camera.h"
+#include "Runtime/Scene/Camera.h"
 
 using namespace DirectX;
 

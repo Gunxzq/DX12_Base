@@ -1,6 +1,8 @@
 #include "Core/Bootstrap/Bootstrap.h"
 #include "Core/Config/ConfigManager.h"
 #include "Core/Context/GameContext.h"
+#include "Renderer/Core/D3D12DeviceContext.h"
+#include "Runtime/Scene/Camera.h"
 #include "System/Logger/DebugOverlay.h"
 #include "System/Logger/Logger.h"
 #include "System/Window/Window.h"
@@ -22,10 +24,13 @@ void Bootstrap::Shutdown() {
     // 1. 销毁 GameContext
     m_context.reset();
 
-    // 2. 销毁 Window
+    // 2. 销毁 D3D12 设备上下文
+    m_deviceContext.reset();
+
+    // 3. 销毁 Window
     m_window.reset();
 
-    // 3. 关闭 Logger (如果已初始化)
+    // 4. 关闭 Logger (如果已初始化)
     // 注意：Logger::Shutdown 是静态方法，内部会处理单例清理
     try {
         Logger::Shutdown();
@@ -33,7 +38,7 @@ void Bootstrap::Shutdown() {
         // 忽略析构期间的异常
     }
 
-    // 4. 关闭 ConfigManager
+    // 5. 关闭 ConfigManager
     try {
         ConfigManager::GetInstance().Shutdown();
     } catch (...) {
@@ -83,6 +88,35 @@ bool Bootstrap::CreateMainWindow() {
     return true;
 }
 
+bool Bootstrap::InitializeD3DDeviceContext() {
+    Logger::GetInstance()->Info("[Bootstrap] Initializing D3D12 Device Context...");
+
+    // 获取窗口配置
+    const auto &windowConfig = ConfigManager::GetInstance().GetWindowConfig();
+
+    // 配置 D3D12 设备上下文参数
+    DX12Engine::Renderer::D3D12DeviceContext::InitParams params;
+    params.hwnd = m_window->GetHandle();
+    params.clientWidth = windowConfig.width;
+    params.clientHeight = windowConfig.height;
+    params.backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    params.depthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    params.enableDebugLayer = true;   // 默认启用调试层
+    params.enable4xMsaa = false;     // 默认禁用 MSAA
+    params.minFeatureLevel = D3D_FEATURE_LEVEL_11_0;
+
+    // 创建并初始化 D3D12 设备上下文
+    m_deviceContext = std::make_unique<DX12Engine::Renderer::D3D12DeviceContext>();
+
+    if (!m_deviceContext->Initialize(params)) {
+        Logger::GetInstance()->Error("[Bootstrap] Failed to initialize D3D12 Device Context");
+        return false;
+    }
+
+    Logger::GetInstance()->Info("[Bootstrap] D3D12 Device Context initialized successfully");
+    return true;
+}
+
 void Bootstrap::InitializeModules() {
     try {
         // 1. 配置 (基础)
@@ -94,6 +128,11 @@ void Bootstrap::InitializeModules() {
         // 3. 窗口 (依赖配置)
         if (!CreateMainWindow()) {
             throw std::runtime_error("[Bootstrap] CreateMainWindow returned false.");
+        }
+
+        // 4. D3D12 设备上下文 (依赖窗口句柄)
+        if (!InitializeD3DDeviceContext()) {
+            throw std::runtime_error("[Bootstrap] InitializeD3DDeviceContext returned false.");
         }
 
     } catch (const std::exception &e) {
@@ -125,10 +164,15 @@ GameContext *Bootstrap::CreateContext() {
         throw std::runtime_error("[Bootstrap] Cannot create context: Bootstrap not initialized.");
     }
 
+    // 创建主计时器（在窗口和配置之后）
+    m_mainTimer = std::make_unique<GameTimer>();
+
     m_context = std::make_unique<GameContext>();
     m_context->Config = &ConfigManager::GetInstance();
     m_context->Logging = Logger::GetInstance();
     m_context->Window = m_window.get();
+    m_context->MainTimer = m_mainTimer.get();
+    m_context->DeviceContext = m_deviceContext.get();
 
     return m_context.get();
 }

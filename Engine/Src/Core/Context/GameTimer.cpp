@@ -4,6 +4,8 @@
 
 #include "Core/Context/GameTimer.h"
 
+namespace DX12Engine {
+namespace Core {
 GameTimer::GameTimer()
     : mSecondsPerCount(0.0), mDeltaTime(-1.0), mBaseTime(0), mPausedTime(0), mPrevTime(0), mCurrTime(0),
       mStopped(false) {
@@ -107,3 +109,6 @@ void GameTimer::Tick() {
         mDeltaTime = 0.0;
     }
 }
+
+} // namespace Core
+} // namespace DX12Engine

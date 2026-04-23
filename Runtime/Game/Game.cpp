@@ -38,7 +38,9 @@ int Game::Run() {
 
     m_context->Logging->Info("[Game] Starting game loop...");
     m_isRunning = true;
-    m_lastFrameTime = std::chrono::steady_clock::now();
+
+    // 初始化主计时器
+    m_context->MainTimer->Reset();
 
     // 主循环就绪后才显示窗口
     m_context->Window->Show();
@@ -48,8 +50,9 @@ int Game::Run() {
         // 处理 Windows 消息
         m_context->Window->ProcessMessages();
 
-        // 计算帧时间
-        m_deltaTime = CalculateDeltaTime();
+        // 更新计时器
+        m_context->MainTimer->Tick();
+        m_deltaTime = m_context->MainTimer->DeltaTime();
 
         // 更新逻辑
         Update(m_deltaTime);
@@ -120,18 +123,4 @@ void Game::ShutdownGameModules() {
     // m_inputManager.reset();
 
     m_context->Logging->Info("[Game] Game modules shutdown complete");
-}
-
-float Game::CalculateDeltaTime() {
-    auto currentTime = std::chrono::steady_clock::now();
-    std::chrono::duration<float> elapsed = currentTime - m_lastFrameTime;
-    m_lastFrameTime = currentTime;
-
-    // 限制最大帧时间（防止卡顿后的跳帧）
-    float delta = elapsed.count();
-    if (delta > 0.1f) {
-        delta = 0.1f;
-    }
-
-    return delta;
 }

@@ -12,6 +12,14 @@ namespace Core {
 class Window;
 class ConfigManager;
 class Logger;
+class GameTimer;
+
+// 前向声明 Renderer 模块
+namespace DX12Engine {
+namespace Renderer {
+class D3D12DeviceContext;
+}
+}
 
 // ========================================================================
 // GameContext - 依赖注入容器
@@ -34,6 +42,11 @@ public:
     Window *Window = nullptr;        // 窗口管理
     ConfigManager *Config = nullptr; // 配置管理
     Logger *Logging = nullptr;       // 日志系统
+    GameTimer *MainTimer = nullptr;  // 主计时器
+
+    // ── 渲染子系统指针 ──
+
+    Renderer::D3D12DeviceContext *DeviceContext = nullptr; // D3D12 设备上下文
 
     // ── 便捷访问方法 ──
 

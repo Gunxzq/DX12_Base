@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Core/Context/GameContext.h"
-#include <chrono>
 #include <memory>
 
 // ========================================================================
@@ -66,20 +65,14 @@ private:
     void InitializeGameModules();
     void ShutdownGameModules();
 
-    // ── 帧时间计算 ──
-
-    float CalculateDeltaTime();
-
     // ── 成员变量 ──
 
     DX12Engine::Core::GameContext *m_context; // 注入的上下文
-    bool m_isRunning = false;                 // 运行状态
-    bool m_isInitialized = false;             // 初始化状态
+    bool m_isRunning = false;                  // 运行状态
+    bool m_isInitialized = false;              // 初始化状态
 
     // 帧时间追踪
-    std::chrono::steady_clock::time_point m_lastFrameTime;
     float m_deltaTime = 0.0f;
-    float m_fixedTimeAccumulator = 0.0f;
 
     // TODO: 游戏逻辑模块（后续扩展）
     // std::unique_ptr<InputManager>    m_inputManager;

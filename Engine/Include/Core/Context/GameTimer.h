@@ -7,6 +7,9 @@
 
 #include "Common/Common.h"
 
+namespace DX12Engine {
+namespace Core {
+
 class GameTimer {
 public:
     GameTimer();
@@ -31,5 +34,8 @@ private:
 
     bool mStopped;
 };
+
+} // namespace Core
+} // namespace DX12Engine
 
 #endif // GAMETIMER_H

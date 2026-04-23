@@ -23,7 +23,7 @@
 #include <memory>
 #include <wrl.h>
 
-#include "Renderer/DDSTextureLoader.h"
+#include "Renderer/Utils/DDSTextureLoader.h"
 
 using namespace Microsoft::WRL;
 

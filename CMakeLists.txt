@@ -63,6 +63,7 @@ target_link_libraries(DX12EngineCore PUBLIC
     d3d12.lib
     dxgi.lib
     dxguid.lib
+    d3dcompiler.lib
     assimp::assimp
     mimalloc-static
     Jolt::Jolt
