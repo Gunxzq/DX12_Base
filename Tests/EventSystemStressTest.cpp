@@ -5,13 +5,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
-#include <fstream>
+#include <mutex>
 #include <random>
 #include <thread>
 #include <vector>
-#include <mutex>
 
 // ===== 调试日志到文件 =====
 #define TEST_DEBUG 1
@@ -19,57 +19,51 @@
 #include <iomanip>
 
 namespace {
-    std::mutex g_testLogMutex;
-    std::ofstream g_testDebugLogFile;
+std::mutex g_testLogMutex;
+std::ofstream g_testDebugLogFile;
 
-    void InitTestDebugLogFile() {
-        static bool initialized = false;
+void InitTestDebugLogFile() {
+    static bool initialized = false;
+    if (!initialized) {
+        std::lock_guard<std::mutex> lock(g_testLogMutex);
         if (!initialized) {
-            std::lock_guard<std::mutex> lock(g_testLogMutex);
-            if (!initialized) {
-                auto now = std::chrono::system_clock::now();
-                auto time_t_now = std::chrono::system_clock::to_time_t(now);
-                auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now.time_since_epoch()) % 1000;
-                
-                std::ostringstream filename;
-                filename << "test_debug_"
-                        << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S")
-                        << "_" << std::setfill('0') << std::setw(3) << ms.count()
-                        << ".log";
-                
-                g_testDebugLogFile.open(filename.str(), std::ios::out | std::ios::trunc);
-                initialized = true;
-            }
-        }
-    }
-
-    void TestDebugLog(const char* msg) {
-        InitTestDebugLogFile();
-        if (g_testDebugLogFile.is_open()) {
-            std::lock_guard<std::mutex> lock(g_testLogMutex);
             auto now = std::chrono::system_clock::now();
             auto time_t_now = std::chrono::system_clock::to_time_t(now);
-            auto ms = std::chrono::duration_cast<std::chrono::microseconds>(
-                now.time_since_epoch()) % 1000000;
-            
-            g_testDebugLogFile << "[" << std::put_time(std::localtime(&time_t_now), "%H:%M:%S")
-                              << "." << std::setfill('0') << std::setw(6) << ms.count()
-                              << "] [Test] " << msg << std::endl;
-            g_testDebugLogFile.flush();
-        }
-    }
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
-    void TestDebugLog(const std::string& msg) {
-        TestDebugLog(msg.c_str());
+            std::ostringstream filename;
+            filename << "test_debug_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S") << "_"
+                     << std::setfill('0') << std::setw(3) << ms.count() << ".log";
+
+            g_testDebugLogFile.open(filename.str(), std::ios::out | std::ios::trunc);
+            initialized = true;
+        }
     }
 }
 
-#define TEST_DBG(msg) do { \
-    std::ostringstream ss; \
-    ss << msg; \
-    TestDebugLog(ss.str()); \
-} while(0)
+void TestDebugLog(const char *msg) {
+    InitTestDebugLogFile();
+    if (g_testDebugLogFile.is_open()) {
+        std::lock_guard<std::mutex> lock(g_testLogMutex);
+        auto now = std::chrono::system_clock::now();
+        auto time_t_now = std::chrono::system_clock::to_time_t(now);
+        auto ms = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()) % 1000000;
+
+        g_testDebugLogFile << "[" << std::put_time(std::localtime(&time_t_now), "%H:%M:%S") << "." << std::setfill('0')
+                           << std::setw(6) << ms.count() << "] [Test] " << msg << std::endl;
+        g_testDebugLogFile.flush();
+    }
+}
+
+void TestDebugLog(const std::string &msg) { TestDebugLog(msg.c_str()); }
+} // namespace
+
+#define TEST_DBG(msg)                                                                                                  \
+    do {                                                                                                               \
+        std::ostringstream ss;                                                                                         \
+        ss << msg;                                                                                                     \
+        TestDebugLog(ss.str());                                                                                        \
+    } while (0)
 #else
 #define TEST_DBG(msg) ((void)0)
 #endif
@@ -85,16 +79,18 @@ namespace Event {
 class EventSystemStressTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // ===== "急救手术"：精准扩容 =====
-        // 测试强度：4 线程 × 2500 条 = 10000 条消息
-        // 安全边际：留 2 倍余量，确保不会因为容量不足导致测试失败
-        constexpr uint32_t BUCKET_CAPACITY = 16384; // 每个桶 16K 条消息
-        constexpr uint32_t ARENA_CAPACITY = 65536;  // Arena 支持 64K 消息
+        // ===== 容量参数由测试用例控制 =====
+        // 计算公式: TotalMessages × SafetyFactor (1.25x 余量)
+        constexpr uint32_t NUM_THREADS = 8;
+        constexpr uint32_t MSG_PER_THREAD = 5000;
+        constexpr uint32_t TOTAL_MSGS = NUM_THREADS * MSG_PER_THREAD;
+        constexpr uint32_t BUCKET_CAPACITY = 8192;                         // 每个桶 8K
+        constexpr uint32_t ARENA_CAPACITY = TOTAL_MSGS + (TOTAL_MSGS / 4); // Arena = 50K (留 25% 余量)
 
         // 初始化 Arena 和 BucketManager
-        m_arena = std::make_unique<MessageArena>(ARENA_CAPACITY); // 64K 槽位，防止溢出
+        m_arena = std::make_unique<MessageArena>(ARENA_CAPACITY);
         m_bucketManager = std::make_unique<BucketManager>();
-        m_bucketManager->Initialize(*m_arena, BUCKET_CAPACITY); // 每个桶 16K 容量
+        m_bucketManager->Initialize(*m_arena, BUCKET_CAPACITY);
     }
 
     void TearDown() override {
@@ -118,9 +114,11 @@ struct StressTestStats {
 // 测试用例1：多线程高并发写入与读取 (Throughput Test)
 // ========================================================================
 TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
-    // 测试强度：4 线程 × 2,500 条 = 10,000 条消息
-    constexpr int NUM_PRODUCER_THREADS = 4;
-    constexpr int MESSAGES_PER_THREAD = 2500;
+    // ===== 2026-04-29 拉高压力测试 =====
+    // 生产环境通常 2-4 线程，这里用 8 线程模拟高并发场景
+    // 每个线程 5000 条，总计 40000 条消息
+    constexpr int NUM_PRODUCER_THREADS = 8;
+    constexpr int MESSAGES_PER_THREAD = 5000;
     constexpr uint64_t TOTAL_MESSAGES = static_cast<uint64_t>(NUM_PRODUCER_THREADS) * MESSAGES_PER_THREAD;
 
     StressTestStats stats;
@@ -218,9 +216,9 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
             if (evt->Padding == UNINIT_MAGIC) {
                 // 详细调试信息
                 uint32_t *data = reinterpret_cast<uint32_t *>(payloadPtr);
-                TEST_DBG("ERROR: Corrupted (uninitialized) at index=" << index
-                          << ", Width=" << evt->Width << ", Height=" << evt->Height
-                          << ", Padding=0x" << std::hex << evt->Padding);
+                TEST_DBG("ERROR: Corrupted (uninitialized) at index=" << index << ", Width=" << evt->Width
+                                                                      << ", Height=" << evt->Height << ", Padding=0x"
+                                                                      << std::hex << evt->Padding);
                 stats.errorOccurred.store(true);
                 stats.errorMessage = "Uninitialized padding at index " + std::to_string(index);
                 break;
@@ -248,10 +246,8 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
 
     // 输出性能数据
     TEST_DBG("Produced " << TOTAL_MESSAGES << " messages.");
-    TEST_DBG("Producer Time: " << prodDurationMs << " ms ("
-              << (TOTAL_MESSAGES / prodDurationMs * 1000) << " msg/s)");
-    TEST_DBG("Consumer Time: " << consDurationMs << " ms ("
-              << (TOTAL_MESSAGES / consDurationMs * 1000) << " msg/s)");
+    TEST_DBG("Producer Time: " << prodDurationMs << " ms (" << (TOTAL_MESSAGES / prodDurationMs * 1000) << " msg/s)");
+    TEST_DBG("Consumer Time: " << consDurationMs << " ms (" << (TOTAL_MESSAGES / consDurationMs * 1000) << " msg/s)");
 
     // 验证收到的样本数据合理性
     if (!receivedEvents.empty()) {

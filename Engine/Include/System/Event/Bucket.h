@@ -13,10 +13,17 @@ namespace Event {
 
 enum class DiscardPolicy { None, Throttle, Sample };
 
-// 建议：根据实际帧率预算设置，例如 1000 条/帧 * 2 帧 = 2000
-// 注意：moodycamel ConcurrentQueue 的内部块大小可能限制实际容量
-// 设置为一个较大的默认值，确保不会成为瓶颈
-constexpr uint32_t REASONABLE_CAPACITY = 32768; // 32K
+// ===== 2026-04-29 精准容量配置 =====
+// 容量计算公式：MaxMessagesPerFrame × ExpectedMaxLatencyFrames × SafetyFactor
+// 
+// 生产环境推荐值（典型游戏）：
+// - 高频事件（碰撞、物理）: 500 条/帧
+// - 延迟容忍: 3 帧
+// - 安全系数: 2x
+// - 结果: 500 × 3 × 2 = 3000 ≈ 4096
+//
+// 注意：测试用例应显式传入更大值进行压测
+constexpr uint32_t REASONABLE_CAPACITY = 4096; // 4K（生产环境合理默认值）
 
 // ===== "急救手术"：Sample 策略最大重试次数，防止物理死锁 =====
 constexpr int MAX_SAMPLE_RETRY_COUNT = 10000;
@@ -36,24 +43,50 @@ public:
     Bucket(uint32_t capacity, DiscardPolicy policy)
         : m_lastServeTimeUs(0), m_policy(policy), m_queue(capacity), m_processedCountThisFrame(0), m_generation(0) {}
 
+    /**
+     * @brief 初始化桶 - 使用冷启动优化
+     *
+     * 采用"临时队列交换法"(Swap Trick) 确保队列内部拥有足够的内存块。
+     *
+     * 手术步骤：
+     * 1. 创建临时队列，传入目标容量
+     * 2. 暴力填充：enqueue_bulk 强制分配所有内存块
+     * 3. 清空数据，保留结构
+     * 4. swap 接管预热好的内存结构
+     *
+     * @param capacity 目标容量
+     * @param policy 丢弃策略
+     */
     void Initialize(uint32_t capacity, DiscardPolicy policy) {
         m_policy = policy;
-        capacity = capacity > 0 ? capacity : REASONABLE_CAPACITY;
+        capacity = (capacity > 0) ? capacity : REASONABLE_CAPACITY;
 
-        // ===== "急救手术"：使用批量预分配 =====
-        // moodycamel::ConcurrentQueue 的构造函数参数可能不是直接容量限制
-        // 使用 enqueue_bulk 批量操作来确保正确的内部分配
-        moodycamel::ConcurrentQueue<MessageIndex> newQueue;
-        std::vector<MessageIndex> temp(capacity);
-        for (auto &idx : temp)
-            idx = 0;
-        // 批量入队，触发足够的内部块分配
-        size_t enqueued = newQueue.enqueue_bulk(temp.data(), capacity);
-        // 清空队列，但保留分配的空间
+        // ===== 2026-04-29 冷启动优化 =====
+        // 目标：确保队列内部拥有足够的"块(Block)"来容纳 capacity 个元素
+        // 原理：利用临时对象预分配内存块，然后 Swap 接管
+
+        // 1. 创建临时队列
+        moodycamel::ConcurrentQueue<MessageIndex> tempQueue(capacity);
+
+        // 2. 准备占位符数据
+        std::vector<MessageIndex> placeholders(capacity, 0);
+
+        // 3. 暴力入队 (Enqueue Bulk)
+        // 关键：强制 tempQueue 申请足够的内存块
+        size_t actuallyEnqueued = tempQueue.enqueue_bulk(placeholders.data(), capacity);
+        if (actuallyEnqueued < capacity) {
+            // 内存不足，按实际分配量继续
+        }
+
+        // 4. 清空数据，保留内存块结构
         MessageIndex dummy;
-        while (newQueue.try_dequeue(dummy))
-            ;
-        m_queue.swap(newQueue);
+        while (tempQueue.try_dequeue(dummy)) {
+            // 只读出数据，不释放内存
+        }
+
+        // 5. swap 接管
+        m_queue.swap(tempQueue);
+        // tempQueue 离开作用域，被销毁（此时为空，销毁极快）
     }
 
     /**
@@ -64,23 +97,26 @@ public:
     bool Push(MessageIndex index) {
         switch (m_policy) {
         case DiscardPolicy::Sample: { // 丢旧存新
-            // ===== "急救手术"：防死锁保护 =====
+            // ===== 2026-04-29 优化：try + 兜底扩容 =====
+            // 1. 先尝试无锁入队（快速路径）
+            if (m_queue.try_enqueue(index))
+                return true;
+
+            // 2. 满了，尝试 dequeue 腾空间
             MessageIndex dummy;
-            int retryCount = 0;
-            while (retryCount < MAX_SAMPLE_RETRY_COUNT) {
+            if (m_queue.try_dequeue(dummy)) {
+                // 腾出空间后重试
                 if (m_queue.try_enqueue(index))
                     return true;
-                // 队列满，强制移除一个旧的
-                if (m_queue.try_dequeue(dummy)) {
-                    retryCount++;
-                    continue; // 移除后重试入队
-                }
-                // yield 让出 CPU，减少竞争
-                std::this_thread::yield();
-                retryCount++;
             }
-            // 达到最大重试次数，返回失败（而不是死循环）
-            return false;
+
+            // 3. 仍失败，enqueue 兜底扩容（防止死锁）
+            try {
+                m_queue.enqueue(index);
+                return true;
+            } catch (const std::bad_alloc &) {
+                return false;
+            }
         }
         case DiscardPolicy::Throttle: {        // 静默丢弃
             return m_queue.try_enqueue(index); // 满了就丢弃新数据
