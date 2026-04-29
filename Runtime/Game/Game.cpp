@@ -1,9 +1,9 @@
 #include "Game.h"
+#include "Common/d3dUtil.h"
 #include "Core/Context/GameContext.h"
+#include "Renderer/Core/D3D12DeviceContext.h"
 #include "System/Logger/Logger.h"
 #include "System/Window/Window.h"
-#include "Renderer/Core/D3D12DeviceContext.h"
-#include "Common/d3dUtil.h"
 
 Game::Game(DX12Engine::Core::GameContext *context) : m_context(context), m_isRunning(false), m_isInitialized(false) {}
 
@@ -111,8 +111,7 @@ void Game::Render() {
     cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
     // 清除深度模板缓冲区
-    cmdList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
-                                    1.0f, 0, 0, nullptr);
+    cmdList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
     // 结束帧并呈现
     renderer->EndFrame();

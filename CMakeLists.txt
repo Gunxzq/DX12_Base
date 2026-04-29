@@ -54,6 +54,17 @@ target_include_directories(DX12EngineCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/Content
 )
 
+
+# 【关键修改 1】为引擎库也添加 MI_OVERRIDE 定义
+# 确保引擎内部的所有代码都使用 mimalloc 的重载操作符
+target_compile_definitions(DX12EngineCore PRIVATE
+    UNICODE
+    _UNICODE
+    MI_OVERRIDE=ON
+)
+
+
+
 # 链接依赖库
 target_link_libraries(DX12EngineCore PUBLIC 
     nlohmann_json::nlohmann_json
