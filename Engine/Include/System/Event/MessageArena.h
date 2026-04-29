@@ -202,8 +202,8 @@ public:
      * @brief 获取物理内存池使用量（调试用）
      * @note 由于使用统一 Slot，按已分配的 Slot 数量计算
      */
-    inline size_t GetPoolUsage() const { 
-        return static_cast<size_t>(m_writeIndex.load(std::memory_order_relaxed)) * DEFAULT_SLOT_SIZE; 
+    inline size_t GetPoolUsage() const {
+        return static_cast<size_t>(m_writeIndex.load(std::memory_order_relaxed)) * DEFAULT_SLOT_SIZE;
     }
 
     /**
@@ -220,9 +220,9 @@ private:
     // SoA Buffers - 每个 buffer 独立对齐以防止伪共享
     // 使用 alignas(64) 确保每个数组起始于新的 Cache Line
 
-    alignas(64) EventTypeHash *m_typeBuffer;    // uint32_t
-    alignas(64) uint32_t *m_senderBuffer;        // uint32_t
-    alignas(64) uint64_t *m_timeBuffer;          // uint64_t
+    alignas(64) EventTypeHash *m_typeBuffer; // uint32_t
+    alignas(64) uint32_t *m_senderBuffer;    // uint32_t
+    alignas(64) uint64_t *m_timeBuffer;      // uint64_t
 
     // 物理内存池：统一 Slot 大小的连续内存块
     // 每个 Slot 大小固定为 DEFAULT_SLOT_SIZE (32 字节)

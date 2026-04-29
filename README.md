@@ -112,7 +112,32 @@ DX12_Base/
 | Dear ImGui | 即时模式 GUI 库，用于调试界面和编辑器工具。 |
 | Google Test | 单元测试框架 (可选，需开启 BUILD_TESTS)。 |
 
-## 5. 开发规范
+## 6. 事件系统优先级
+
+本引擎采用基于优先级的消息队列系统，支持 **5 级优先级调度**：
+
+| 优先级 | 名称 | 典型用途 | 策略 |
+|:------|:-----|:---------|:-----|
+| P0 | Critical | 系统告警（内存溢出、强制退出） | None |
+| P1 | High | 物理系统（碰撞、触发器） | None |
+| P2 | Normal | 游戏逻辑（扣血、技能） | None |
+| P3 | Low | 渲染系统（特效、UI） | Sample |
+| P4 | Background | 异步任务（资源加载结果） | Throttle |
+
+### 策略说明
+
+- **None**: 队列满时直接丢弃
+- **Sample**: 队列满时丢弃最旧的消息，保留新的
+- **Throttle**: 队列满时静默丢弃新消息
+
+### 优先级配置
+
+相关配置位于 `Engine/Include/System/Event/BucketManager.h`：
+```cpp
+static constexpr uint32_t MAX_PRIORITY_LEVELS = 5; // P0-P4
+```
+
+## 7. 开发规范
 
 - **代码风格**: 遵循 Google C++ Style Guide 或项目内置的 `.clang-format`。
 - **头文件包含**: 

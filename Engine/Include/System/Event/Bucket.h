@@ -15,7 +15,7 @@ enum class DiscardPolicy { None, Throttle, Sample };
 
 // ===== 2026-04-29 精准容量配置 =====
 // 容量计算公式：MaxMessagesPerFrame × ExpectedMaxLatencyFrames × SafetyFactor
-// 
+//
 // 生产环境推荐值（典型游戏）：
 // - 高频事件（碰撞、物理）: 500 条/帧
 // - 延迟容忍: 3 帧
@@ -26,15 +26,14 @@ enum class DiscardPolicy { None, Throttle, Sample };
 // 注意：测试用例应显式传入更大值进行压测
 constexpr uint32_t REASONABLE_CAPACITY = 2048; // 2K（生产环境默认值，省内存）
 
-// ===== "急救手术"：Sample 策略最大重试次数，防止物理死锁 =====
-constexpr int MAX_SAMPLE_RETRY_COUNT = 10000;
-
 class Bucket {
 public:
     /**
      * @brief 默认构造函数
      */
-    Bucket() : m_lastServeTimeUs(0), m_policy(DiscardPolicy::None), m_processedCountThisFrame(0), m_generation(0), m_evictedCount(0) {}
+    Bucket()
+        : m_lastServeTimeUs(0), m_policy(DiscardPolicy::None), m_processedCountThisFrame(0), m_generation(0),
+          m_evictedCount(0) {}
 
     /**
      * @brief 构造函数（直接初始化）
@@ -42,7 +41,8 @@ public:
      * @param policy 丢弃策略
      */
     Bucket(uint32_t capacity, DiscardPolicy policy)
-        : m_lastServeTimeUs(0), m_policy(policy), m_queue(capacity), m_processedCountThisFrame(0), m_generation(0), m_evictedCount(0) {}
+        : m_lastServeTimeUs(0), m_policy(policy), m_queue(capacity), m_processedCountThisFrame(0), m_generation(0),
+          m_evictedCount(0) {}
 
     /**
      * @brief 初始化桶 - 使用冷启动优化
