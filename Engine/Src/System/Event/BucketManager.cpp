@@ -239,6 +239,22 @@ void BucketManager::UpdateActiveMask() {
     m_activeMask.store(newMask, std::memory_order_release);
 }
 
+uint64_t BucketManager::GetTotalPendingCount() const {
+    uint64_t total = 0;
+    for (uint32_t i = 0; i < MAX_PRIORITY_LEVELS; ++i) {
+        total += m_buckets[i].SizeApprox();
+    }
+    return total;
+}
+
+uint64_t BucketManager::GetTotalEvictedCount() const {
+    uint64_t total = 0;
+    for (uint32_t i = 0; i < MAX_PRIORITY_LEVELS; ++i) {
+        total += m_buckets[i].GetEvictedCount();
+    }
+    return total;
+}
+
 float BucketManager::CalculateEffectivePriority(uint32_t basePriority, uint64_t lastServeTimeUs,
                                                 uint64_t currentTimeUs) const {
     // 如果从未被服务过，lastServeTimeUs 为 0

@@ -78,19 +78,19 @@ namespace Event {
 
 class EventSystemStressTest : public ::testing::Test {
 protected:
-    void SetUp() override {
-        // ===== 容量参数由测试用例控制 =====
-        // 计算公式: TotalMessages × SafetyFactor (1.25x 余量)
-        constexpr uint32_t NUM_THREADS = 8;
-        constexpr uint32_t MSG_PER_THREAD = 5000;
-        constexpr uint32_t TOTAL_MSGS = NUM_THREADS * MSG_PER_THREAD;
-        constexpr uint32_t BUCKET_CAPACITY = 8192;                         // 每个桶 8K
-        constexpr uint32_t ARENA_CAPACITY = TOTAL_MSGS + (TOTAL_MSGS / 4); // Arena = 50K (留 25% 余量)
+    // 风暴测试参数: 8 线程 × 2000 条 = 16000 条消息，桶容量 8192
+    // 这会导致 ~8000 条消息被 Sample 策略踢出
+    static constexpr uint32_t STORM_THREADS = 8;
+    static constexpr uint32_t STORM_MSG_PER_THREAD = 2000;
+    static constexpr uint32_t STORM_TOTAL_MSGS = STORM_THREADS * STORM_MSG_PER_THREAD; // 16000
+    static constexpr uint32_t STORM_BUCKET_CAP = 8192;                                   // 桶只能装 8K
+    static constexpr uint32_t STORM_ARENA_CAP = STORM_TOTAL_MSGS + 4096;                // Arena = 20K
 
-        // 初始化 Arena 和 BucketManager
-        m_arena = std::make_unique<MessageArena>(ARENA_CAPACITY);
+    void SetUp() override {
+        // 默认风暴测试配置 (会被各测试用例覆盖)
+        m_arena = std::make_unique<MessageArena>(STORM_ARENA_CAP);
         m_bucketManager = std::make_unique<BucketManager>();
-        m_bucketManager->Initialize(*m_arena, BUCKET_CAPACITY);
+        m_bucketManager->Initialize(*m_arena, STORM_BUCKET_CAP);
     }
 
     void TearDown() override {
@@ -111,15 +111,117 @@ struct StressTestStats {
 };
 
 // ========================================================================
-// 测试用例1：多线程高并发写入与读取 (Throughput Test)
+// 测试用例1：风暴测试 - 16000 条消息冲击 8192 桶
+// 观察 Sample 策略疯狂踢旧人 (~8000 条被丢弃)
+// ========================================================================
+TEST_F(EventSystemStressTest, StormFloodingTest) {
+    // 重新初始化以适应风暴参数
+    m_bucketManager.reset();
+    m_arena.reset();
+    m_arena = std::make_unique<MessageArena>(STORM_ARENA_CAP);
+    m_bucketManager = std::make_unique<BucketManager>();
+    m_bucketManager->Initialize(*m_arena, STORM_BUCKET_CAP);
+
+    constexpr uint64_t TOTAL_MSGS = STORM_TOTAL_MSGS; // 16000
+    constexpr uint32_t BUCKET_CAP = STORM_BUCKET_CAP;  // 8192
+
+    // 打印参数到终端
+    std::cout << "\n========== STORM TEST ==========" << std::endl;
+    std::cout << "  Threads: " << STORM_THREADS << ", Msg/Thread: " << STORM_MSG_PER_THREAD << std::endl;
+    std::cout << "  Total msgs: " << TOTAL_MSGS << ", Bucket cap: " << BUCKET_CAP << std::endl;
+    std::cout << "  Expected evicted: ~" << (TOTAL_MSGS - BUCKET_CAP) << std::endl;
+
+    StressTestStats stats;
+    std::vector<std::thread> producers;
+
+    // --- 1. 启动生产者线程 (所有消息强制进入 P3_Sample 桶) ---
+    auto startProdTime = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < STORM_THREADS; ++i) {
+        producers.emplace_back([this, &stats, i]() {
+            for (int j = 0; j < STORM_MSG_PER_THREAD; ++j) {
+                MessageIndex index = m_arena->AllocateSlot();
+                if (index == MessageArena::INVALID_INDEX) {
+                    stats.errorOccurred.store(true);
+                    stats.errorMessage = "Arena overflow at thread " + std::to_string(i) + " msg " + std::to_string(j);
+                    return;
+                }
+
+                // 强制使用 P3_Low (Sample 桶)，所有消息挤入同一个桶触发踢人
+                EventPriority prio = EventPriority::P3_Low;
+                WindowResizeEvent event(static_cast<uint32_t>(i * 10000 + j), static_cast<uint32_t>(800 + j));
+                event.Priority = prio;
+
+                m_arena->WriteMessage(index, event.GetTypeHash(), 0, &event, sizeof(event));
+
+                bool pushSuccess = m_bucketManager->PushMessage(index, prio);
+                if (pushSuccess) {
+                    stats.producedCount.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    for (auto &t : producers) { t.join(); }
+
+    auto endProdTime = std::chrono::high_resolution_clock::now();
+    double prodDurationMs = std::chrono::duration<double, std::milli>(endProdTime - startProdTime).count();
+
+    // --- 2. 统计 ---
+    uint64_t evicted = m_bucketManager->GetTotalEvictedCount();
+    uint64_t stored = m_bucketManager->GetTotalPendingCount();
+
+    std::cout << "\n--- Storm Result ---" << std::endl;
+    std::cout << "  Produced: " << TOTAL_MSGS << std::endl;
+    std::cout << "  Stored in buckets: " << stored << std::endl;
+    std::cout << "  Evicted (Sample kicked): " << evicted << std::endl;
+    std::cout << "  Producer time: " << prodDurationMs << " ms" << std::endl;
+
+    ASSERT_FALSE(stats.errorOccurred.load()) << "Error: " << stats.errorMessage;
+
+    // --- 3. 消费所有消息 ---
+    uint64_t consumed = 0;
+    auto startConsTime = std::chrono::high_resolution_clock::now();
+
+    while (true) {
+        MessageIndex index;
+        EventPriority prio;
+        if (m_bucketManager->PopNextMessage(index, prio)) {
+            consumed++;
+            stats.consumedCount.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            break;
+        }
+    }
+
+    auto endConsTime = std::chrono::high_resolution_clock::now();
+    double consDurationMs = std::chrono::duration<double, std::milli>(endConsTime - startConsTime).count();
+
+    std::cout << "  Consumed: " << consumed << std::endl;
+    std::cout << "  Consumer time: " << consDurationMs << " ms" << std::endl;
+
+    // --- 4. 验证 ---
+    // 预期 evicted = TOTAL_MSGS - BUCKET_CAP = 16000 - 8192 = 7808
+    EXPECT_GE(evicted, TOTAL_MSGS - BUCKET_CAP) << "Sample eviction should kick expected amount";
+    EXPECT_EQ(stats.consumedCount.load(), stats.producedCount.load());
+}
+
+// ========================================================================
+// 测试用例2：增强压力测试 - 8 线程 × 5000 条 = 40000 条
 // ========================================================================
 TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
-    // ===== 2026-04-29 拉高压力测试 =====
-    // 生产环境通常 2-4 线程，这里用 8 线程模拟高并发场景
-    // 每个线程 5000 条，总计 40000 条消息
     constexpr int NUM_PRODUCER_THREADS = 8;
     constexpr int MESSAGES_PER_THREAD = 5000;
     constexpr uint64_t TOTAL_MESSAGES = static_cast<uint64_t>(NUM_PRODUCER_THREADS) * MESSAGES_PER_THREAD;
+    constexpr uint32_t ARENA_CAP = TOTAL_MESSAGES + (TOTAL_MESSAGES / 4); // 50K
+    constexpr uint32_t BUCKET_CAP = 16384;                                  // 16K 桶
+
+    // 重新初始化
+    m_bucketManager.reset();
+    m_arena.reset();
+    m_arena = std::make_unique<MessageArena>(ARENA_CAP);
+    m_bucketManager = std::make_unique<BucketManager>();
+    m_bucketManager->Initialize(*m_arena, BUCKET_CAP);
 
     StressTestStats stats;
     std::vector<std::thread> producers;
@@ -128,6 +230,11 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
 
     std::atomic<int> pushFailThread{-1};
     std::atomic<int> pushFailAt{-1};
+
+    // 打印参数到终端
+    std::cout << "\n========== HIGH CONCURRENCY TEST ==========" << std::endl;
+    std::cout << "  Threads: " << NUM_PRODUCER_THREADS << ", Msg/Thread: " << MESSAGES_PER_THREAD << std::endl;
+    std::cout << "  Total msgs: " << TOTAL_MESSAGES << ", Arena: " << ARENA_CAP << ", Bucket: " << BUCKET_CAP << std::endl;
 
     // --- 1. 启动生产者线程 ---
     auto startProdTime = std::chrono::high_resolution_clock::now();
@@ -182,12 +289,13 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
     double prodDurationMs = std::chrono::duration<double, std::milli>(endProdTime - startProdTime).count();
 
     // --- 2. 消费者单线程读取 (模拟调度器) ---
-    TEST_DBG("Arena count after production: " << m_arena->GetCount());
-    TEST_DBG("Produced count: " << stats.producedCount.load());
-    TEST_DBG("Push fail thread: " << pushFailThread.load() << " at msg: " << pushFailAt.load());
+    std::cout << "\n--- High Concurrency Result ---" << std::endl;
+    std::cout << "  Arena count: " << m_arena->GetCount() << std::endl;
+    std::cout << "  Produced: " << stats.producedCount.load() << std::endl;
+    std::cout << "  Push fail: thread " << pushFailThread.load() << " at msg " << pushFailAt.load() << std::endl;
 
     if (stats.errorOccurred.load()) {
-        TEST_DBG("ERROR: " << stats.errorMessage);
+        std::cout << "  ERROR: " << stats.errorMessage << std::endl;
     }
     ASSERT_FALSE(stats.errorOccurred.load()) << "Producer error: " << stats.errorMessage;
     EXPECT_EQ(stats.producedCount.load(), TOTAL_MESSAGES);
@@ -215,10 +323,8 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
             constexpr uint32_t UNINIT_MAGIC = 0xCDCDCDCD;
             if (evt->Padding == UNINIT_MAGIC) {
                 // 详细调试信息
-                uint32_t *data = reinterpret_cast<uint32_t *>(payloadPtr);
-                TEST_DBG("ERROR: Corrupted (uninitialized) at index=" << index << ", Width=" << evt->Width
-                                                                      << ", Height=" << evt->Height << ", Padding=0x"
-                                                                      << std::hex << evt->Padding);
+                std::cout << "  ERROR: Corrupted at index=" << index << ", Width=" << evt->Width
+                          << ", Height=" << evt->Height << ", Padding=0x" << std::hex << evt->Padding << std::dec << std::endl;
                 stats.errorOccurred.store(true);
                 stats.errorMessage = "Uninitialized padding at index " + std::to_string(index);
                 break;
@@ -245,9 +351,9 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
     EXPECT_EQ(stats.consumedCount.load(), TOTAL_MESSAGES);
 
     // 输出性能数据
-    TEST_DBG("Produced " << TOTAL_MESSAGES << " messages.");
-    TEST_DBG("Producer Time: " << prodDurationMs << " ms (" << (TOTAL_MESSAGES / prodDurationMs * 1000) << " msg/s)");
-    TEST_DBG("Consumer Time: " << consDurationMs << " ms (" << (TOTAL_MESSAGES / consDurationMs * 1000) << " msg/s)");
+    std::cout << "  Produced: " << TOTAL_MESSAGES << " messages" << std::endl;
+    std::cout << "  Producer: " << prodDurationMs << " ms (" << (TOTAL_MESSAGES / prodDurationMs * 1000) << " msg/s)" << std::endl;
+    std::cout << "  Consumer: " << consDurationMs << " ms (" << (consumed / consDurationMs * 1000) << " msg/s)" << std::endl;
 
     // 验证收到的样本数据合理性
     if (!receivedEvents.empty()) {

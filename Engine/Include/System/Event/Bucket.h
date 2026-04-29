@@ -19,11 +19,12 @@ enum class DiscardPolicy { None, Throttle, Sample };
 // 生产环境推荐值（典型游戏）：
 // - 高频事件（碰撞、物理）: 500 条/帧
 // - 延迟容忍: 3 帧
-// - 安全系数: 2x
-// - 结果: 500 × 3 × 2 = 3000 ≈ 4096
+// - 安全系数: 1.3x（内存敏感场景）
+// - 结果: 500 × 3 × 1.3 = 1950 ≈ 2048
 //
+// 保守值：4096（留 2x 余量）
 // 注意：测试用例应显式传入更大值进行压测
-constexpr uint32_t REASONABLE_CAPACITY = 4096; // 4K（生产环境合理默认值）
+constexpr uint32_t REASONABLE_CAPACITY = 2048; // 2K（生产环境默认值，省内存）
 
 // ===== "急救手术"：Sample 策略最大重试次数，防止物理死锁 =====
 constexpr int MAX_SAMPLE_RETRY_COUNT = 10000;
@@ -33,7 +34,7 @@ public:
     /**
      * @brief 默认构造函数
      */
-    Bucket() : m_lastServeTimeUs(0), m_policy(DiscardPolicy::None), m_processedCountThisFrame(0), m_generation(0) {}
+    Bucket() : m_lastServeTimeUs(0), m_policy(DiscardPolicy::None), m_processedCountThisFrame(0), m_generation(0), m_evictedCount(0) {}
 
     /**
      * @brief 构造函数（直接初始化）
@@ -41,7 +42,7 @@ public:
      * @param policy 丢弃策略
      */
     Bucket(uint32_t capacity, DiscardPolicy policy)
-        : m_lastServeTimeUs(0), m_policy(policy), m_queue(capacity), m_processedCountThisFrame(0), m_generation(0) {}
+        : m_lastServeTimeUs(0), m_policy(policy), m_queue(capacity), m_processedCountThisFrame(0), m_generation(0), m_evictedCount(0) {}
 
     /**
      * @brief 初始化桶 - 使用冷启动优化
@@ -97,41 +98,30 @@ public:
     bool Push(MessageIndex index) {
         switch (m_policy) {
         case DiscardPolicy::Sample: { // 丢旧存新
-            // ===== 2026-04-29 优化：try + 兜底扩容 =====
             // 1. 先尝试无锁入队（快速路径）
             if (m_queue.try_enqueue(index))
                 return true;
 
-            // 2. 满了，尝试 dequeue 腾空间
+            // 2. 满了，dequeue 腾空间（被踢出的旧消息计入 evicted）
             MessageIndex dummy;
             if (m_queue.try_dequeue(dummy)) {
+                m_evictedCount.fetch_add(1, std::memory_order_relaxed);
                 // 腾出空间后重试
                 if (m_queue.try_enqueue(index))
                     return true;
             }
 
-            // 3. 仍失败，enqueue 兜底扩容（防止死锁）
-            try {
-                m_queue.enqueue(index);
-                return true;
-            } catch (const std::bad_alloc &) {
-                return false;
-            }
+            // 3. 仍失败，不扩容，直接丢弃（尊重容量限制）
+            return false;
         }
         case DiscardPolicy::Throttle: {        // 静默丢弃
             return m_queue.try_enqueue(index); // 满了就丢弃新数据
         }
-        case DiscardPolicy::None: // 默认不丢弃（可能阻塞或报错）
+        case DiscardPolicy::None: // 默认不丢弃
         default: {
-            // ===== "急救手术"：使用 enqueue 自动扩容 =====
             // try_enqueue 在队列满时返回 false，不会扩容
-            // enqueue 会在必要时自动扩容（除非内存耗尽）
-            try {
-                m_queue.enqueue(index);
-                return true;
-            } catch (const std::bad_alloc &) {
-                return false; // 内存不足时返回失败
-            }
+            // 如果需要严格容量限制，使用此策略即可
+            return m_queue.try_enqueue(index);
         }
         }
     }
@@ -166,6 +156,11 @@ public:
             return 0;
         return m_queue.try_dequeue_bulk(destinationBuffer, bufferSize);
     }
+
+    /**
+     * @brief 获取被 Sample 策略踢出的消息总数
+     */
+    uint64_t GetEvictedCount() const { return m_evictedCount.load(std::memory_order_relaxed); }
 
     bool IsEmpty() const { return m_queue.size_approx() == 0; }
 
@@ -244,6 +239,9 @@ private:
     std::atomic<uint64_t> m_generation;
 
     DiscardPolicy m_policy;
+
+    // 被 Sample 策略踢出的消息总数
+    std::atomic<uint64_t> m_evictedCount;
 };
 
 } // namespace Event

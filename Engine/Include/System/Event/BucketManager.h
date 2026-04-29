@@ -77,6 +77,18 @@ public:
      */
     void ResetFrame();
 
+    /**
+     * @brief 获取所有桶中的消息总数
+     * @return uint64_t 消息总数
+     */
+    uint64_t GetTotalPendingCount() const;
+
+    /**
+     * @brief 获取所有桶中被 Sample 策略踢出的消息总数
+     * @return uint64_t 被踢出的消息总数
+     */
+    uint64_t GetTotalEvictedCount() const;
+
 private:
     MessageArena *m_arena;
 
