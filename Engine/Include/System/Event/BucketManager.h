@@ -4,6 +4,7 @@
 #include "System/Event/Event.h"
 #include "System/Event/MessageArena.h"
 #include <array>
+#include <atomic>
 #include <cstdint>
 
 namespace DX12Engine {
@@ -17,6 +18,20 @@ static constexpr uint32_t MAX_PRIORITY_LEVELS = 5; // P0-P4
  * @brief 桶管理器
  *
  * 负责管理所有优先级桶，计算动态优先级，并供调度器查询下一个要处理的消息。
+ *
+ * @note 2026-04-29 "急救手术"并发安全改造：
+ *
+ * 1. ABA 问题防御：通过 Bucket.m_generation 版本号检测数据竞争
+ *    - 读取 Mask + Generation → 计算优先级 → 再次检查 Generation
+ *    - 如果 Generation 变了，说明数据被修改，放弃本次计算并重试
+ *
+ * 2. 惊群效应缓解：引入 CPU pause + 指数退避
+ *    - 重试次数过半时使用 _mm_pause() 或 yield()
+ *    - 避免 10 个线程空转把 CPU 核心锁死
+ *
+ * 3. 时间戳竞争优化：
+ *    - 改用原子递增（atomic_fetch_add）更新 LastServeTime
+ *    - 或者在单消费者模式下禁用写入（只读模式）
  */
 class BucketManager {
 public:
@@ -68,8 +83,8 @@ private:
     // 优先级桶数组
     std::array<Bucket, MAX_PRIORITY_LEVELS> m_buckets;
 
-    // 位掩码：第 i 位为 1 表示优先级 i 的桶非空
-    uint32_t m_activeMask;
+    // 位掩码：第 i 位为 1 表示优先级 i 的桶非空（使用原子操作保证线程安全）
+    std::atomic<uint32_t> m_activeMask;
 
     // 老化系数：每毫秒增加的优先级权重
     static constexpr float AGING_FACTOR_PER_MS = 0.1f;

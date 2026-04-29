@@ -44,8 +44,7 @@ using MessageIndex = uint32_t;
  * 注意：在逻辑事件结构体中，这些字段主要用于初始化。
  * 在物理 Arena 中，它们会被拆分存储。
  */
-#define EVENT_HEADER_FIELDS
-EventPriority Priority; /* 优先级 */
+#define EVENT_HEADER_FIELDS EventPriority Priority;
 
 /**
  * @brief 初始化事件头部

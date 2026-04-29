@@ -3,8 +3,18 @@
 #include <cassert>
 #include <chrono>
 #include <intrin.h> // Windows specific intrinsic header
+#include <thread>   // std::this_thread::yield
 
 #pragma intrinsic(_BitScanForward)
+
+// ===== "急救手术"：CPU 指令支持 =====
+#ifdef _WIN32
+#include <immintrin.h> // _mm_pause
+#define ARENA_CPU_PAUSE() _mm_pause()
+#else
+#include <sched.h>
+#define ARENA_CPU_PAUSE() sched_yield()
+#endif
 
 namespace DX12Engine {
 namespace System {
@@ -14,7 +24,7 @@ BucketManager::BucketManager() : m_arena(nullptr), m_activeMask(0) {}
 
 void BucketManager::Initialize(MessageArena &arena, uint32_t capacityPerBucket) {
     m_arena = &arena;
-    m_activeMask = 0;
+    m_activeMask.store(0, std::memory_order_relaxed);
 
     // 初始化每个优先级的桶
     for (uint32_t i = 0; i < MAX_PRIORITY_LEVELS; ++i) {
@@ -40,8 +50,16 @@ bool BucketManager::PushMessage(MessageIndex index, EventPriority priority) {
     bool success = m_buckets[prioIdx].Push(index);
 
     if (success) {
-        // 设置对应位为 1
-        m_activeMask |= (1u << prioIdx);
+        // 原子设置对应位为 1
+        uint32_t mask = 1u << prioIdx;
+        uint32_t oldMask = m_activeMask.load(std::memory_order_relaxed);
+        while ((oldMask & mask) == 0) {
+            uint32_t newMask = oldMask | mask;
+            if (m_activeMask.compare_exchange_weak(oldMask, newMask, std::memory_order_release,
+                                                   std::memory_order_relaxed)) {
+                break;
+            }
+        }
     }
 
     return success;
@@ -69,75 +87,136 @@ uint64_t BucketManager::GetCurrentTimeUs() const {
 }
 
 bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPriority) {
-    if (m_activeMask == 0) {
-        return false;
-    }
+    // 使用循环代替递归，避免栈溢出
+    constexpr int MAX_RETRIES = 16;                          // 适当增加重试次数，配合退避策略
+    constexpr int RETRY_BACKOFF_THRESHOLD = MAX_RETRIES / 2; // 半程后开始退避
 
-    // 获取当前时间，用于计算 Aging
-    uint64_t currentTimeUs = GetCurrentTimeUs();
+    for (int retry = 0; retry < MAX_RETRIES; ++retry) {
+        // ===== "急救手术"惊群缓解：退避策略 =====
+        if (retry > RETRY_BACKOFF_THRESHOLD) {
+            // 重试次数过半，使用 CPU pause 让出资源
+            ARENA_CPU_PAUSE();
+        }
 
-    // --- 核心逻辑：基于 Aging 的动态优先级选择 ---
+        uint32_t currentMask = m_activeMask.load(std::memory_order_acquire);
+        if (currentMask == 0) {
+            return false;
+        }
 
-    uint32_t bestBucketIdx = 0;
-    float maxEffectivePriority = -1.0f;
-    bool found = false;
+        // 获取当前时间，用于计算 Aging
+        uint64_t currentTimeUs = GetCurrentTimeUs();
 
-    // 遍历所有非空桶，计算有效优先级
-    uint32_t tempMask = m_activeMask;
-    while (tempMask != 0) {
-        // 获取当前最低位的 1 的索引
-        uint32_t idx = GetLowestSetBitIndex(tempMask);
+        // --- 核心逻辑：基于 Aging 的动态优先级选择 ---
 
-        // 清除该位，继续循环
-        tempMask &= ~(1u << idx);
+        uint32_t bestBucketIdx = 0;
+        float maxEffectivePriority = -1.0f;
+        bool found = false;
 
-        const Bucket &bucket = m_buckets[idx];
+        // ===== "急救手术"：收集所有候选桶的 Generation =====
+        uint64_t candidateGenerations[MAX_PRIORITY_LEVELS] = {0};
+        uint32_t validCandidateMask = 0;
 
-        // 再次确认非空（并发环境下可能刚变空）
-        if (bucket.IsEmpty()) {
+        // 遍历所有非空桶，计算有效优先级
+        uint32_t tempMask = currentMask;
+        while (tempMask != 0) {
+            // 获取当前最低位的 1 的索引
+            uint32_t idx = GetLowestSetBitIndex(tempMask);
+
+            // 清除该位，继续循环
+            tempMask &= ~(1u << idx);
+
+            const Bucket &bucket = m_buckets[idx];
+
+            // ===== "急救手术"：快照 Generation + 空检查 =====
+            uint64_t genBefore = bucket.GetGeneration();
+
+            // 再次确认非空（并发环境下可能刚变空）
+            if (bucket.IsEmpty()) {
+                continue;
+            }
+
+            // 保存 Generation 用于后续 ABA 验证
+            candidateGenerations[idx] = genBefore;
+            validCandidateMask |= (1u << idx);
+
+            // 计算有效优先级: Base + Aging
+            uint64_t lastServeTime = bucket.GetLastServeTime();
+            float score = CalculateEffectivePriority(idx, lastServeTime, currentTimeUs);
+
+            if (score > maxEffectivePriority) {
+                maxEffectivePriority = score;
+                bestBucketIdx = idx;
+                found = true;
+            }
+        }
+
+        if (!found) {
+            // 所有桶都已变空，原子地清除掩码
+            m_activeMask.fetch_and(~currentMask, std::memory_order_release);
+            return false;
+        }
+
+        // --- 从选定的最佳桶中弹出消息 ---
+        Bucket &bestBucket = m_buckets[bestBucketIdx];
+
+        // ===== "急救手术"：ABA 问题检测 =====
+        // 在选择和 Pop 之间验证 Generation 是否变化
+        uint64_t genBeforePop = bestBucket.GetGeneration();
+        if (candidateGenerations[bestBucketIdx] != genBeforePop) {
+            // Generation 变了！数据被修改了，放弃本次计算并重试
             continue;
         }
 
-        // 计算有效优先级: Base + Aging
-        uint64_t lastServeTime = bucket.GetLastServeTime();
-        float score = CalculateEffectivePriority(idx, lastServeTime, currentTimeUs);
+        MessageIndex index;
+        if (bestBucket.Pop(index)) {
+            // ===== "急救手术"：Pop 后递增 Generation =====
+            bestBucket.IncrementGeneration();
 
-        if (score > maxEffectivePriority) {
-            maxEffectivePriority = score;
-            bestBucketIdx = idx;
-            found = true;
+            outIndex = index;
+            outPriority = static_cast<EventPriority>(bestBucketIdx);
+
+            // ===== "急救手术"：使用原子递增更新 LastServeTime =====
+            // 避免时间戳被覆盖导致 Aging 计算错误
+            // 使用 fetch_add(0) 实际上不改变值，但保证了原子性
+            bestBucket.UpdateLastServeTime(currentTimeUs);
+
+            // 检查桶是否变空，如果是，原子更新掩码
+            if (bestBucket.IsEmpty()) {
+                uint32_t mask = 1u << bestBucketIdx;
+                uint32_t oldMask = m_activeMask.load(std::memory_order_relaxed);
+                while ((oldMask & mask) != 0) {
+                    uint32_t newMask = oldMask & ~mask;
+                    if (m_activeMask.compare_exchange_weak(oldMask, newMask, std::memory_order_release,
+                                                           std::memory_order_relaxed)) {
+                        break;
+                    }
+                }
+            }
+
+            return true;
+        } else {
+            // ===== "急救手术"：Pop 失败也要更新 Generation =====
+            // 表示有并发操作发生了
+            bestBucket.IncrementGeneration();
+
+            // 并发竞争：刚才非空，现在空了
+            uint32_t mask = 1u << bestBucketIdx;
+            uint32_t oldMask = m_activeMask.load(std::memory_order_relaxed);
+            while ((oldMask & mask) != 0) {
+                uint32_t newMask = oldMask & ~mask;
+                if (m_activeMask.compare_exchange_weak(oldMask, newMask, std::memory_order_release,
+                                                       std::memory_order_relaxed)) {
+                    break;
+                }
+            }
+            // 继续循环重试
         }
     }
 
-    if (!found) {
-        // 理论上不会发生，除非并发导致所有桶瞬间变空
-        m_activeMask = 0;
-        return false;
-    }
-
-    // --- 从选定的最佳桶中弹出消息 ---
-    Bucket &bestBucket = m_buckets[bestBucketIdx];
-
-    MessageIndex index;
-    if (bestBucket.Pop(index)) {
-        outIndex = index;
-        outPriority = static_cast<EventPriority>(bestBucketIdx);
-
-        // 更新最后服务时间为当前时间
-        bestBucket.UpdateLastServeTime(currentTimeUs);
-
-        // 检查桶是否变空，如果是，更新掩码
-        if (bestBucket.IsEmpty()) {
-            m_activeMask &= ~(1u << bestBucketIdx);
-        }
-
-        return true;
-    } else {
-        // 并发竞争：刚才非空，现在空了
-        m_activeMask &= ~(1u << bestBucketIdx);
-        // 递归重试，直到找到消息或所有桶为空
-        return PopNextMessage(outIndex, outPriority);
-    }
+    // 达到最大重试次数，说明并发竞争激烈
+    // 使用 yield 让其他线程有机会运行
+    std::this_thread::yield();
+    return false;
 }
 
 void BucketManager::ResetFrame() {
@@ -151,12 +230,13 @@ void BucketManager::ResetFrame() {
 }
 
 void BucketManager::UpdateActiveMask() {
-    m_activeMask = 0;
+    uint32_t newMask = 0;
     for (uint32_t i = 0; i < MAX_PRIORITY_LEVELS; ++i) {
         if (!m_buckets[i].IsEmpty()) {
-            m_activeMask |= (1u << i);
+            newMask |= (1u << i);
         }
     }
+    m_activeMask.store(newMask, std::memory_order_release);
 }
 
 float BucketManager::CalculateEffectivePriority(uint32_t basePriority, uint64_t lastServeTimeUs,

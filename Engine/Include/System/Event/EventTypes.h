@@ -24,12 +24,15 @@ struct WindowResizeEvent {
     uint32_t Width;
     uint32_t Height;
 
+    // 4. 显式填充字段（确保 sizeof = 12，无隐藏填充）
+    uint32_t Padding = 0;
+
     /**
      * @brief 构造函数
      * @param w 新宽度
      * @param h 新高度
      */
-    WindowResizeEvent(uint32_t w, uint32_t h) : INIT_EVENT_HEADER(EventPriority::P1_High), Width(w), Height(h) {}
+    WindowResizeEvent(uint32_t w, uint32_t h) : INIT_EVENT_HEADER(EventPriority::P1_High), Width(w), Height(h), Padding(0) {}
 
     // 禁用默认构造，强制提供宽高
     WindowResizeEvent() = delete;

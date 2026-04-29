@@ -39,6 +39,14 @@ void Logger::Shutdown() {
     }
 }
 
+void Logger::TestReset() {
+    std::unique_lock<std::shared_mutex> lock(s_mutex);
+    if (s_instance) {
+        s_instance->TestReset_Internal();
+        s_isInitialized = false;
+    }
+}
+
 Logger::~Logger() {
     // 确保在静态对象销毁时清理资源
     // 由于 s_instance 是静态指针，其指向对象的析构可能在 spdlog 全局对象之后
@@ -130,6 +138,32 @@ void Logger::Shutdown_Internal() {
     }
 
     s_isInitialized = false;
+}
+
+void Logger::TestReset_Internal() {
+    if (!m_logger) {
+        return;
+    }
+
+    try {
+        // 1. 刷新所有缓冲区，确保日志写入磁盘/控制台
+        m_logger->flush();
+
+        // 2. 注销 logger（如果已注册），避免重复注册时抛异常
+        try {
+            spdlog::drop(m_logger->name());
+        } catch (...) {
+            // 忽略注销失败
+        }
+
+        // 3. 重置本地共享指针，减少引用计数
+        m_logger.reset();
+
+        // 注意：不调用 spdlog::shutdown()，只清理当前实例，支持多次调用
+
+    } catch (const std::exception &e) {
+        fprintf(stderr, "[Logger] Error during test reset: %s\n", e.what());
+    }
 }
 
 } // namespace Core

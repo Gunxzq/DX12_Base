@@ -39,6 +39,16 @@ public:
      */
     static void Shutdown();
 
+    /**
+     * @brief 测试专用：安全重置 Logger 状态
+     * @details 与 Shutdown() 的区别：
+     *         - 不调用 spdlog::shutdown()（全局一次性操作）
+     *         - 只清理当前 logger 实例
+     *         - 支持在测试中多次调用
+     * @attention 仅供测试使用，生产代码应使用 Shutdown()
+     */
+    static void TestReset();
+
     // ========================================================================
     // 日志方法
     // ========================================================================
@@ -105,6 +115,12 @@ private:
      * @brief 内部关闭（需要持有锁）
      */
     void Shutdown_Internal();
+
+    /**
+     * @brief 测试专用内部重置（需要持有锁）
+     * @details 使用 spdlog::drop() 而非 spdlog::shutdown()，支持多次调用
+     */
+    void TestReset_Internal();
 
     // 底层 logger
     std::shared_ptr<spdlog::logger> m_logger;

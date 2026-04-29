@@ -1,3 +1,4 @@
+// File: d:\project\DX12_Base\Tests\ConfigTest.cpp
 #include "Core/Config/ConfigManager.h"
 #include "Core/Config/LoggerConfig.h"
 #include <filesystem>
@@ -13,14 +14,13 @@ using namespace DX12Engine::Core;
 // ========================================================================
 
 TEST(LogConfigTest, DeserializeFromManualJson) {
-    // 1. 手动构建一个标准的 JSON 对象 (模拟从文件读取的内容)
-    // 这样测试不依赖于 NLOHMANN_DEFINE_TYPE_INTRUSIVE 宏的具体行为，只关注数据映射
+    // 1. 手动构建一个标准的 JSON 对象
     json j;
     j["GlobalLevel"] = "debug";
     j["FlushLevel"] = "warn";
     j["FormatPattern"] = "[%l] %v";
 
-    // 嵌套结构
+    // 嵌套结构 - 确保与 LogConfig 结构体完全一致
     j["Sinks"]["Console"]["Enabled"] = false;
     j["Sinks"]["Console"]["Level"] = "info";
     j["Sinks"]["Console"]["Colorize"] = true;
@@ -32,12 +32,17 @@ TEST(LogConfigTest, DeserializeFromManualJson) {
     j["Sinks"]["File"]["Rotation"]["MaxSizeMb"] = 20;
     j["Sinks"]["File"]["Rotation"]["MaxFiles"] = 5;
 
+    j["Sinks"]["DebugOutput"]["Enabled"] = false;
+    j["Sinks"]["DebugOutput"]["Level"] = "debug";
+
+    j["Sinks"]["LogWindow"]["Enabled"] = true;
+    j["Sinks"]["LogWindow"]["Level"] = "debug";
+
     j["Sinks"]["Async"]["Enabled"] = true;
     j["Sinks"]["Async"]["QueueSize"] = 8192;
     j["Sinks"]["Async"]["OverflowPolicy"] = "discard";
 
     // 2. 尝试反序列化
-    // 如果 LogConfig 没有正确定义 from_json (无论是通过宏还是手动)，这里会编译错误或运行时异常
     ASSERT_NO_THROW({
         LogConfig config = j.get<LogConfig>();
 
@@ -69,12 +74,9 @@ TEST(LogConfigTest, SerializeToManualJsonCheck) {
 
     // 2. 序列化为 JSON
     json j;
-    ASSERT_NO_THROW({
-        j = original; // 依赖 to_json (由宏或手动定义提供)
-    });
+    ASSERT_NO_THROW({ j = original; });
 
-    // 3. 手动验证 JSON 关键字段是否符合预期
-    // 这里我们只关心关键业务字段，而不关心 JSON 的所有细节
+    // 3. 手动验证 JSON 关键字段
     EXPECT_EQ(j["GlobalLevel"], "error");
     EXPECT_EQ(j["Sinks"]["File"]["Path"], "logs/test.log");
     EXPECT_EQ(j["Sinks"]["File"]["Enabled"], true);
@@ -91,20 +93,21 @@ TEST(ConfigManagerTest, GetInstanceDoesNotCrash) {
 }
 
 TEST(ConfigManagerTest, SaveAndLoadFromFile) {
-    // 1. 准备临时文件路径
-    std::filesystem::path testDir = std::filesystem::current_path() / "TestOutput_Config";
+    // 1. 准备临时目录
+    std::filesystem::path testDir = std::filesystem::current_path() / "TestOutput_Config_Integration";
     std::filesystem::create_directories(testDir);
-    std::filesystem::path userConfigPath = testDir / "user_test_config.json";
+
+    // ConfigManager 始终保存到 logging_config.json
+    std::filesystem::path configFilePath = testDir / "logging_config.json";
 
     // 清理旧文件
-    if (std::filesystem::exists(userConfigPath)) {
-        std::filesystem::remove(userConfigPath);
+    if (std::filesystem::exists(configFilePath)) {
+        std::filesystem::remove(configFilePath);
     }
 
     // 2. 获取单例并初始化
     auto &manager = DX12Engine::Core::ConfigManager::GetInstance();
-
-    EXPECT_NO_THROW(manager.Initialize(userConfigPath));
+    EXPECT_NO_THROW(manager.Initialize(testDir));
 
     // 3. 修改配置 (在内存中)
     manager.SetLogGlobalLevel(LogLevel::Critical);
@@ -114,18 +117,21 @@ TEST(ConfigManagerTest, SaveAndLoadFromFile) {
     EXPECT_NO_THROW(manager.Save());
 
     // 5. 验证文件是否存在
-    ASSERT_TRUE(std::filesystem::exists(userConfigPath)) << "配置文件未生成！";
+    ASSERT_TRUE(std::filesystem::exists(configFilePath)) << "配置文件未生成！路径: " << configFilePath.string();
 
     // 6. 读取文件内容验证
-    std::ifstream fileStream(userConfigPath);
+    std::ifstream fileStream(configFilePath);
     ASSERT_TRUE(fileStream.is_open()) << "无法打开生成的配置文件进行验证！";
 
     json savedJson;
-    fileStream >> savedJson;
+    try {
+        fileStream >> savedJson;
+    } catch (...) {
+        FAIL() << "JSON 解析失败";
+    }
     fileStream.close();
 
     // 7. 验证内容
-    // 假设 ConfigManager 将日志配置保存在 "logging" 键下
     if (savedJson.contains("logging")) {
         const auto &logNode = savedJson["logging"];
 
@@ -139,7 +145,11 @@ TEST(ConfigManagerTest, SaveAndLoadFromFile) {
     }
 
     // 8. 清理
-    std::filesystem::remove(userConfigPath);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    if (std::filesystem::exists(configFilePath)) {
+        std::filesystem::remove(configFilePath);
+    }
     if (std::filesystem::is_empty(testDir)) {
         std::filesystem::remove(testDir);
     }
