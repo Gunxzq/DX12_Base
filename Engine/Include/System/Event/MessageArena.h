@@ -1,4 +1,3 @@
-// File: d:\project\DX12_Base\Engine\Include\System\Event\MessageArena.h
 #pragma once
 
 #include "System/Event/Event.h"
