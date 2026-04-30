@@ -69,6 +69,10 @@ public:
     uint32_t GetActiveCount() const;
     size_t GetMemoryUsage() const;
 
+    // --- 测试专用接口 ---
+    DataPool &GetDataPool() { return m_dataPool; }
+    const DataPool &GetDataPool() const { return m_dataPool; }
+
 private:
     ResourceManager() = default;
     ~ResourceManager() = default;

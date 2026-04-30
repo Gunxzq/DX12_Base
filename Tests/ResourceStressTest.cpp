@@ -1,7 +1,9 @@
 // File: d:\project\DX12_Base\Tests\ResourceStressTest.cpp
+#include "System/Resource/Core/DataPool.h"
 #include "System/Resource/ResourceManager.h"
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <mutex>
@@ -342,4 +344,206 @@ TEST_F(ResourceManagerStressTest, RapidCycleStress) {
     Logger::Log("[Test 3] Completed. Final Active Count: " + std::to_string(rm.GetActiveCount()));
 
     EXPECT_EQ(rm.GetActiveCount(), 0u);
+}
+
+// ========================================================================
+// 测试套件: DataPoolTest
+// 专门测试 DataPool 的内存分配功能
+// ========================================================================
+
+class DataPoolTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        Logger::Init();
+        Logger::Log("=== DataPool Test Started ===");
+        auto &rm = ResourceManager::GetInstance();
+        rm.Initialize();
+    }
+
+    void TearDown() override {
+        auto &rm = ResourceManager::GetInstance();
+        rm.ForceCleanupForTesting();
+        rm.Shutdown();
+        Logger::Log("=== DataPool Test Finished ===");
+    }
+};
+
+// ========================================================================
+// 测试用例 4: DataPool 基础分配
+// ========================================================================
+TEST_F(DataPoolTest, BasicAllocation) {
+    auto &rm = ResourceManager::GetInstance();
+
+    Logger::Log("[Test 4] Starting BasicAllocation.");
+
+    // 分配句柄
+    ResourceHandle h1 = rm.AllocateSlot(ResourceType::Mesh);
+    ASSERT_NE(h1.index, UINT32_MAX);
+
+    // 分配不同大小的内存
+    size_t size1 = 64;
+    void *ptr1 = rm.GetDataPool().Allocate(size1, 16);
+
+    // 注册数据
+    rm.RegisterData(h1, ptr1, size1);
+
+    // 验证
+    void *retrieved = rm.GetData(h1);
+    EXPECT_EQ(retrieved, ptr1);
+
+    rm.Release(h1);
+    Logger::Log("[Test 4] BasicAllocation passed.");
+}
+
+// ========================================================================
+// 测试用例 5: DataPool 对齐测试
+// ========================================================================
+TEST_F(DataPoolTest, AlignmentTest) {
+    auto &rm = ResourceManager::GetInstance();
+
+    Logger::Log("[Test 5] Starting AlignmentTest.");
+
+    const int NUM_ALLOCS = 100;
+    std::vector<std::pair<void *, size_t>> allocs;
+
+    // 测试不同对齐要求
+    std::vector<size_t> alignments = {8, 16, 32, 64, 128};
+
+    for (size_t align : alignments) {
+        for (int i = 0; i < 10; ++i) {
+            size_t size = 64 + (rand() % 256);
+            void *ptr = rm.GetDataPool().Allocate(size, align);
+
+            // 验证对齐
+            uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+            EXPECT_EQ(addr % align, 0u) << "Alignment failed for align=" << align;
+
+            allocs.push_back({ptr, size});
+        }
+    }
+
+    Logger::Log("[Test 5] AlignmentTest passed. Allocations: " + std::to_string(allocs.size()));
+}
+
+// ========================================================================
+// 测试用例 6: DataPool 大对象分配
+// ========================================================================
+TEST_F(DataPoolTest, LargeObjectAllocation) {
+    auto &rm = ResourceManager::GetInstance();
+
+    Logger::Log("[Test 6] Starting LargeObjectAllocation.");
+
+    // 分配超过 TLS Arena 大小的对象 (64KB)
+    size_t largeSize = 128 * 1024;
+    void *largePtr = rm.GetDataPool().Allocate(largeSize, 16);
+
+    ASSERT_NE(largePtr, nullptr);
+
+    // 验证对齐
+    uintptr_t addr = reinterpret_cast<uintptr_t>(largePtr);
+    EXPECT_EQ(addr % 16, 0u);
+
+    // 写入数据并验证
+    std::memset(largePtr, 0xAB, largeSize);
+
+    // 分配小块，验证没有覆盖大数据
+    void *smallPtr = rm.GetDataPool().Allocate(64, 16);
+    ASSERT_NE(smallPtr, nullptr);
+
+    Logger::Log("[Test 6] LargeObjectAllocation passed.");
+}
+
+// ========================================================================
+// 测试用例 7: DataPool 多线程分配
+// ========================================================================
+TEST_F(DataPoolTest, MultiThreadAllocation) {
+    const int NUM_THREADS = 4;
+    const int ALLOCS_PER_THREAD = 1000;
+
+    auto &rm = ResourceManager::GetInstance();
+
+    Logger::Log("[Test 7] Starting MultiThreadAllocation. Threads: " + std::to_string(NUM_THREADS));
+
+    std::atomic<int> allocCount{0};
+    std::vector<std::thread> threads;
+
+    auto workerFunc = [&](int threadId) {
+        std::mt19937 rng(threadId);
+        std::uniform_int_distribution<size_t> sizeDist(16, 1024);
+        std::vector<void *> localPtrs;
+
+        for (int i = 0; i < ALLOCS_PER_THREAD; ++i) {
+            size_t size = sizeDist(rng);
+            size_t align = 16;
+
+            void *ptr = rm.GetDataPool().Allocate(size, align);
+            ASSERT_NE(ptr, nullptr);
+
+            // 验证对齐
+            uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+            ASSERT_EQ(addr % align, 0u);
+
+            // 写入数据
+            std::memset(ptr, static_cast<int>(threadId), size);
+
+            localPtrs.push_back(ptr);
+            allocCount.fetch_add(1);
+        }
+
+        Logger::Log("[Test 7] Thread " + std::to_string(threadId) + " allocated " + std::to_string(localPtrs.size()) +
+                    " blocks.");
+    };
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        threads.emplace_back(workerFunc, i);
+    }
+
+    for (auto &t : threads) {
+        t.join();
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+    Logger::Log("[Test 7] MultiThreadAllocation completed in " + std::to_string(duration.count()) +
+                " ms. Total allocations: " + std::to_string(allocCount.load()));
+
+    EXPECT_GT(allocCount.load(), 0);
+}
+
+// ========================================================================
+// 测试用例 8: DataPool Reset 测试
+// ========================================================================
+TEST_F(DataPoolTest, ResetTest) {
+    auto &rm = ResourceManager::GetInstance();
+
+    Logger::Log("[Test 8] Starting ResetTest.");
+
+    // 分配一些数据
+    ResourceHandle h1 = rm.AllocateSlot(ResourceType::Mesh);
+    void *ptr1 = rm.GetDataPool().Allocate(1024, 16);
+    rm.RegisterData(h1, ptr1, 1024);
+
+    ResourceHandle h2 = rm.AllocateSlot(ResourceType::Texture);
+    void *ptr2 = rm.GetDataPool().Allocate(2048, 16);
+    rm.RegisterData(h2, ptr2, 2048);
+
+    // 重置前的大小
+    size_t sizeBefore = rm.GetMemoryUsage();
+    Logger::Log("[Test 8] Memory before reset: " + std::to_string(sizeBefore));
+
+    // 重置 DataPool
+    rm.GetDataPool().Reset();
+
+    // 重置后大小应该为 0（因为使用了内存池）
+    size_t sizeAfter = rm.GetMemoryUsage();
+    Logger::Log("[Test 8] Memory after reset: " + std::to_string(sizeAfter));
+
+    // 重新分配应该成功
+    void *ptr3 = rm.GetDataPool().Allocate(512, 16);
+    EXPECT_NE(ptr3, nullptr);
+
+    Logger::Log("[Test 8] ResetTest passed.");
 }
