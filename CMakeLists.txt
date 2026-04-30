@@ -111,10 +111,11 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     MI_OVERRIDE=ON
 )
 
-# 引擎库编译定义 (仅保留 UNICODE)
+# 引擎库编译定义 (与 EXE 保持一致，确保 mimalloc 正确注入)
 target_compile_definitions(DX12EngineCore PRIVATE
     UNICODE
     _UNICODE
+    MI_OVERRIDE=ON
 )
 
 

@@ -83,8 +83,8 @@ protected:
     static constexpr uint32_t STORM_THREADS = 8;
     static constexpr uint32_t STORM_MSG_PER_THREAD = 2000;
     static constexpr uint32_t STORM_TOTAL_MSGS = STORM_THREADS * STORM_MSG_PER_THREAD; // 16000
-    static constexpr uint32_t STORM_BUCKET_CAP = 8192;                                   // 桶只能装 8K
-    static constexpr uint32_t STORM_ARENA_CAP = STORM_TOTAL_MSGS + 4096;                // Arena = 20K
+    static constexpr uint32_t STORM_BUCKET_CAP = 8192;                                 // 桶只能装 8K
+    static constexpr uint32_t STORM_ARENA_CAP = STORM_TOTAL_MSGS + 4096;               // Arena = 20K
 
     void SetUp() override {
         // 默认风暴测试配置 (会被各测试用例覆盖)
@@ -123,7 +123,7 @@ TEST_F(EventSystemStressTest, StormFloodingTest) {
     m_bucketManager->Initialize(*m_arena, STORM_BUCKET_CAP);
 
     constexpr uint64_t TOTAL_MSGS = STORM_TOTAL_MSGS; // 16000
-    constexpr uint32_t BUCKET_CAP = STORM_BUCKET_CAP;  // 8192
+    constexpr uint32_t BUCKET_CAP = STORM_BUCKET_CAP; // 8192
 
     // 打印参数到终端
     std::cout << "\n========== STORM TEST ==========" << std::endl;
@@ -162,7 +162,9 @@ TEST_F(EventSystemStressTest, StormFloodingTest) {
         });
     }
 
-    for (auto &t : producers) { t.join(); }
+    for (auto &t : producers) {
+        t.join();
+    }
 
     auto endProdTime = std::chrono::high_resolution_clock::now();
     double prodDurationMs = std::chrono::duration<double, std::milli>(endProdTime - startProdTime).count();
@@ -214,7 +216,7 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
     constexpr int MESSAGES_PER_THREAD = 5000;
     constexpr uint64_t TOTAL_MESSAGES = static_cast<uint64_t>(NUM_PRODUCER_THREADS) * MESSAGES_PER_THREAD;
     constexpr uint32_t ARENA_CAP = TOTAL_MESSAGES + (TOTAL_MESSAGES / 4); // 50K
-    constexpr uint32_t BUCKET_CAP = 16384;                                  // 16K 桶
+    constexpr uint32_t BUCKET_CAP = 16384;                                // 16K 桶
 
     // 重新初始化
     m_bucketManager.reset();
@@ -234,7 +236,8 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
     // 打印参数到终端
     std::cout << "\n========== HIGH CONCURRENCY TEST ==========" << std::endl;
     std::cout << "  Threads: " << NUM_PRODUCER_THREADS << ", Msg/Thread: " << MESSAGES_PER_THREAD << std::endl;
-    std::cout << "  Total msgs: " << TOTAL_MESSAGES << ", Arena: " << ARENA_CAP << ", Bucket: " << BUCKET_CAP << std::endl;
+    std::cout << "  Total msgs: " << TOTAL_MESSAGES << ", Arena: " << ARENA_CAP << ", Bucket: " << BUCKET_CAP
+              << std::endl;
 
     // --- 1. 启动生产者线程 ---
     auto startProdTime = std::chrono::high_resolution_clock::now();
@@ -324,7 +327,8 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
             if (evt->Padding == UNINIT_MAGIC) {
                 // 详细调试信息
                 std::cout << "  ERROR: Corrupted at index=" << index << ", Width=" << evt->Width
-                          << ", Height=" << evt->Height << ", Padding=0x" << std::hex << evt->Padding << std::dec << std::endl;
+                          << ", Height=" << evt->Height << ", Padding=0x" << std::hex << evt->Padding << std::dec
+                          << std::endl;
                 stats.errorOccurred.store(true);
                 stats.errorMessage = "Uninitialized padding at index " + std::to_string(index);
                 break;
@@ -352,8 +356,10 @@ TEST_F(EventSystemStressTest, HighConcurrencyThroughput) {
 
     // 输出性能数据
     std::cout << "  Produced: " << TOTAL_MESSAGES << " messages" << std::endl;
-    std::cout << "  Producer: " << prodDurationMs << " ms (" << (TOTAL_MESSAGES / prodDurationMs * 1000) << " msg/s)" << std::endl;
-    std::cout << "  Consumer: " << consDurationMs << " ms (" << (consumed / consDurationMs * 1000) << " msg/s)" << std::endl;
+    std::cout << "  Producer: " << prodDurationMs << " ms (" << (TOTAL_MESSAGES / prodDurationMs * 1000) << " msg/s)"
+              << std::endl;
+    std::cout << "  Consumer: " << consDurationMs << " ms (" << (consumed / consDurationMs * 1000) << " msg/s)"
+              << std::endl;
 
     // 验证收到的样本数据合理性
     if (!receivedEvents.empty()) {

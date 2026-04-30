@@ -41,7 +41,12 @@ public:
      */
     void Reset();
 
-    // --- 调试/监控 ---
+    // --- 调试/监控 (要求调用者持有锁) ---
+    // REQUIRES: Caller must hold m_mutex.
+    bool Contains_Locked(void *ptr) const;
+    size_t GetTotalAllocatedSize_Locked() const;
+
+    // 线程安全版本 (内部加锁)
     bool Contains(void *ptr) const;
     size_t GetTotalAllocatedSize() const;
 
@@ -73,6 +78,11 @@ private:
      * @note 用于大对象或 TLS 段耗尽时的补充
      */
     void *AllocateRaw(size_t size, size_t alignment);
+
+    /**
+     * @brief 内部无锁版本：调用者必须持有 m_mutex
+     */
+    void *AllocateRaw_Locked(size_t size, size_t alignment);
 
     void AllocateBlockInternal();
 };

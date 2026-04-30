@@ -3,7 +3,8 @@
 #include "System/Resource/ResourceHandle.h"
 #include <atomic>
 #include <cassert>
-#include <mutex> // 确保包含 mutex
+#include <memory>
+#include <mutex>
 #include <vector>
 
 namespace DX12Engine {
@@ -21,14 +22,11 @@ public:
     HandlePool();
     ~HandlePool();
 
-    // 注意：如果头文件中声明了 Initialize/Shutdown，cpp中必须实现
-    // 如果只使用构造函数/析构函数，则不需要声明 Initialize/Shutdown
-    // 根据提供的 cpp 代码，似乎没有 Initialize/Shutdown 的公共接口调用，
-    // 但 ResourceManager.cpp 调用了 m_handlePool.Initialize() 和 Shutdown()。
-    // 因此需要在头文件中添加声明，或者在 cpp 中实现它们。
+    void Initialize();
+    void Shutdown();
 
-    void Initialize(); // 添加声明以匹配 ResourceManager 的调用
-    void Shutdown();   // 添加声明以匹配 ResourceManager 的调用
+    // 【新增】预分配到指定容量，减少扩容次数
+    void Preallocate(uint32_t targetCapacity);
 
     ResourceHandle AllocateSlot(ResourceType type);
     void FreeSlot(ResourceHandle handle);
@@ -46,14 +44,17 @@ public:
 private:
     mutable std::mutex m_mutex;
 
+    // 使用 unique_ptr 管理原子数组，避免 vector::resize() 拷贝 atomic 的问题
     std::vector<ResourceType> m_types;
-    std::vector<std::atomic<ResourceState>> m_states;
-    std::vector<uint32_t> m_generations;
-    std::vector<std::atomic<void *>> m_dataPtrs;
+    std::unique_ptr<std::atomic<ResourceState>[]> m_states;
+    std::unique_ptr<std::atomic<uint32_t>[]> m_generations; // 【修复】原子数组，防止 ABA 竞态
+    std::unique_ptr<std::atomic<void *>[]> m_dataPtrs;
 
     std::vector<uint32_t> m_freeIndices;
+    uint32_t m_capacity = 0;
 
-    static constexpr uint32_t INITIAL_CAPACITY = 1024;
+    // 初始化状态标志（防止 Shutdown 后其他线程继续访问已释放的数组）
+    bool m_initialized = false;
 
     void ExpandCapacity();
 };

@@ -3,6 +3,7 @@
 #include "System/Resource/Core/DataPool.h"
 #include "System/Resource/Core/HandlePool.h"
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 namespace DX12Engine {
@@ -16,7 +17,20 @@ public:
     void Initialize();
     void Shutdown();
 
+    /**
+     * @brief 强制清理所有延迟释放的资源（测试专用）
+     * @note 绕过帧延迟机制，立即处理 m_pendingReleases 中所有条目。
+     *       仅用于测试环境，生产代码不应调用此方法。
+     */
+    void ForceCleanupForTesting();
+
     // --- 被动调用接口 (由 TaskBucket 调用) ---
+
+    /**
+     * @brief 预分配句柄容量
+     * @note 用于测试或已知需要大量句柄的场景，避免运行时循环扩容
+     */
+    void Preallocate(uint32_t targetCapacity);
 
     /**
      * @brief 分配一个资源槽位
@@ -63,6 +77,9 @@ private:
     ResourceManager(const ResourceManager &) = delete;
     ResourceManager &operator=(const ResourceManager &) = delete;
 
+    // 初始化状态标志（用于防止重复初始化导致 TLS 状态残留）
+    bool m_initialized = false;
+
     HandlePool m_handlePool;
     DataPool m_dataPool;
 
@@ -73,6 +90,7 @@ private:
     };
 
     std::vector<PendingRelease> m_pendingReleases;
+    mutable std::mutex m_pendingMutex; // 保护 m_pendingReleases 的并发访问
 
     // 全局帧计数器引用 (假设引擎有全局帧计数)
     uint64_t GetCurrentFrame() const;

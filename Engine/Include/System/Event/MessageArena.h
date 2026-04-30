@@ -107,6 +107,20 @@ public:
                       size_t payloadSize);
 
     /**
+     * @brief 写入消息重载版本（自动推断大小）
+     *
+     * 方便调用者使用，自动计算 payload 大小。
+     * @param index 由 AllocateSlot 返回的索引
+     * @param typeHash 事件类型哈希
+     * @param senderId 发送者实体ID
+     * @param payloadPtr 指向实际事件数据的指针
+     */
+    template<typename T>
+    inline void WriteMessage(MessageIndex index, EventTypeHash typeHash, uint32_t senderId, T *payloadPtr) {
+        WriteMessage(index, typeHash, senderId, static_cast<void *>(payloadPtr), sizeof(T));
+    }
+
+    /**
      * @brief 将所有 TLS 本地缓冲区 flush 到全局 Arena
      *
      * 在帧末调用，确保所有线程的数据都已写入 Arena。

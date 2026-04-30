@@ -26,6 +26,9 @@ struct WindowResizeEvent {
 
     // 禁用默认构造，强制提供宽高
     WindowResizeEvent() = delete;
+
+    // 提供实例方法获取类型哈希 (兼容旧 API)
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
 
 } // namespace Event
