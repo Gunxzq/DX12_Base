@@ -15,16 +15,11 @@ namespace Resource {
 static thread_local DataPool::ThreadLocalArena t_tlsArena;
 
 void DataPool::Initialize() {
-    std::cout << "[DataPool] Initialize: acquiring lock..." << std::endl;
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::cout << "[DataPool] Initialize: lock acquired." << std::endl;
 
     if (m_blocks.empty()) {
-        std::cout << "[DataPool] Initialize: allocating first block..." << std::endl;
-        AllocateRaw_Locked(BLOCK_SIZE, 16); // Pre-allocate first block
-        std::cout << "[DataPool] Initialize: first block allocated." << std::endl;
+        AllocateRaw_Locked(BLOCK_SIZE, 16);
     }
-    std::cout << "[DataPool] Initialize: done, releasing lock." << std::endl;
 }
 
 void DataPool::Shutdown() {

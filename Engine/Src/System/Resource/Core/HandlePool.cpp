@@ -25,23 +25,17 @@ struct ThreadLocalCache {
 
 static thread_local ThreadLocalCache t_tlsCache;
 
-HandlePool::HandlePool() {
-}
+HandlePool::HandlePool() {}
 
 HandlePool::~HandlePool() { Shutdown(); }
 
 void HandlePool::Initialize() {
-    std::cout << "[HandlePool] Initialize: acquiring lock..." << std::endl;
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::cout << "[HandlePool] Initialize: lock acquired." << std::endl;
 
     if (!m_initialized || m_capacity == 0 || m_types.empty() || !m_states) {
-        std::cout << "[HandlePool] Initialize: expanding capacity..." << std::endl;
         ExpandCapacity();
-        std::cout << "[HandlePool] Initialize: capacity expanded to " << m_capacity << std::endl;
         m_initialized = true;
     }
-    std::cout << "[HandlePool] Initialize: done, releasing lock." << std::endl;
 }
 
 void HandlePool::Shutdown() {
@@ -57,7 +51,7 @@ void HandlePool::Shutdown() {
 
 void HandlePool::Preallocate(uint32_t targetCapacity) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    
+
     while (m_capacity < targetCapacity) {
         uint32_t oldCapacity = m_capacity;
         uint32_t newCapacity;
@@ -68,20 +62,18 @@ void HandlePool::Preallocate(uint32_t targetCapacity) {
         } else {
             newCapacity = oldCapacity + 65536;
         }
-        
+
         if (newCapacity < targetCapacity) {
             newCapacity = targetCapacity;
         }
-        
-        std::cout << "[HandlePool] Preallocate: " << oldCapacity << " -> " << newCapacity << std::endl;
-        
+
         auto newStates = std::make_unique<std::atomic<ResourceState>[]>(newCapacity);
         auto newDataPtrs = std::make_unique<std::atomic<void *>[]>(newCapacity);
         auto newGenerations = std::make_unique<std::atomic<uint32_t>[]>(newCapacity);
-        
+
         std::vector<ResourceType> newTypes;
         newTypes.reserve(newCapacity);
-        
+
         size_t estimatedFreeCount = oldCapacity > 0 ? m_freeIndices.size() + (newCapacity - oldCapacity) : newCapacity;
         std::vector<uint32_t> newFreeIndices;
         newFreeIndices.reserve(estimatedFreeCount);
@@ -102,7 +94,7 @@ void HandlePool::Preallocate(uint32_t targetCapacity) {
         m_dataPtrs = std::move(newDataPtrs);
         m_generations = std::move(newGenerations);
         m_types = std::move(newTypes);
-        
+
         for (uint32_t idx : m_freeIndices) {
             newFreeIndices.push_back(idx);
         }
@@ -114,7 +106,7 @@ void HandlePool::Preallocate(uint32_t targetCapacity) {
 
 void HandlePool::ExpandCapacity() {
     uint32_t oldCapacity = (!m_states || m_types.empty()) ? 0 : m_capacity;
-    
+
     uint32_t newCapacity;
     if (oldCapacity == 0) {
         newCapacity = INITIAL_CAPACITY;
@@ -128,15 +120,13 @@ void HandlePool::ExpandCapacity() {
     assert(newCapacity <= 10000000 && "ExpandCapacity: newCapacity too large!");
     (void)newCapacity;
 
-    std::cout << "[HandlePool] ExpandCapacity: " << oldCapacity << " -> " << newCapacity << std::endl;
-
     auto newStates = std::make_unique<std::atomic<ResourceState>[]>(newCapacity);
     auto newDataPtrs = std::make_unique<std::atomic<void *>[]>(newCapacity);
     auto newGenerations = std::make_unique<std::atomic<uint32_t>[]>(newCapacity);
-    
+
     std::vector<ResourceType> newTypes;
     newTypes.reserve(newCapacity);
-    
+
     size_t estimatedFreeCount = oldCapacity > 0 ? m_freeIndices.size() + (newCapacity - oldCapacity) : newCapacity;
     std::vector<uint32_t> newFreeIndices;
     newFreeIndices.reserve(estimatedFreeCount);
@@ -157,7 +147,7 @@ void HandlePool::ExpandCapacity() {
     m_dataPtrs = std::move(newDataPtrs);
     m_generations = std::move(newGenerations);
     m_types = std::move(newTypes);
-    
+
     for (uint32_t idx : m_freeIndices) {
         newFreeIndices.push_back(idx);
     }

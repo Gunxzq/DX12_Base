@@ -18,46 +18,28 @@ ResourceManager &ResourceManager::GetInstance() {
 }
 
 void ResourceManager::Initialize() {
-    // TLS defense: prevent repeated initialization causing TLS state residue
     if (m_initialized) {
-        std::cout << "[ResourceManager] Initialize: already initialized, forcing shutdown first..." << std::endl;
         Shutdown();
     }
 
-    std::cout << "[ResourceManager] Initialize: starting..." << std::endl;
-    std::cout << "[ResourceManager] Initialize: calling HandlePool::Initialize()..." << std::endl;
     m_handlePool.Initialize();
-    std::cout << "[ResourceManager] Initialize: HandlePool done." << std::endl;
-    std::cout << "[ResourceManager] Initialize: calling DataPool::Initialize()..." << std::endl;
     m_dataPool.Initialize();
-    std::cout << "[ResourceManager] Initialize: DataPool done." << std::endl;
 
     m_pendingReleases.reserve(1024);
     s_globalFrameCount = 0;
     m_initialized = true;
-
-    std::cout << "[ResourceManager] Initialized." << std::endl;
 }
 
 void ResourceManager::Shutdown() {
-    std::cout << "[ResourceManager] Shutting down..." << std::endl;
-
-    // 1. Force immediate release of all pending resources
     ForceCleanupForTesting();
 
-    // 2. Shutdown underlying pools
     m_dataPool.Shutdown();
     m_handlePool.Shutdown();
 
-    // TLS defense: reset initialization state
     m_initialized = false;
-
-    std::cout << "[ResourceManager] Shutdown complete." << std::endl;
 }
 
 void ResourceManager::ForceCleanupForTesting() {
-    std::cout << "[ResourceManager] ForceCleanupForTesting: processing " << m_pendingReleases.size() << " pending releases..." << std::endl;
-
     std::vector<PendingRelease> pending;
     {
         std::lock_guard<std::mutex> lock(m_pendingMutex);
@@ -73,19 +55,13 @@ void ResourceManager::ForceCleanupForTesting() {
         }
         m_handlePool.FreeSlot(pr.handle);
     }
-
-    std::cout << "[ResourceManager] ForceCleanupForTesting: released " << pending.size() << " handles." << std::endl;
 }
 
 // --- Passive Interface ---
 
-void ResourceManager::Preallocate(uint32_t targetCapacity) {
-    m_handlePool.Preallocate(targetCapacity);
-}
+void ResourceManager::Preallocate(uint32_t targetCapacity) { m_handlePool.Preallocate(targetCapacity); }
 
-ResourceHandle ResourceManager::AllocateSlot(ResourceType type) {
-    return m_handlePool.AllocateSlot(type);
-}
+ResourceHandle ResourceManager::AllocateSlot(ResourceType type) { return m_handlePool.AllocateSlot(type); }
 
 void ResourceManager::RegisterData(ResourceHandle handle, void *dataPtr, size_t size) {
     if (!m_handlePool.Validate(handle)) {
@@ -96,7 +72,7 @@ void ResourceManager::RegisterData(ResourceHandle handle, void *dataPtr, size_t 
     ResourceState currentState = m_handlePool.GetState(handle);
     if (currentState != ResourceState::Loading) {
         if (currentState == ResourceState::Ready) {
-            std::cerr << "[Warning] RegisterData called on already Ready handle." << std::endl;
+
             return;
         }
         assert(false && "RegisterData: Handle is not in Loading state");
@@ -182,9 +158,7 @@ uint32_t ResourceManager::GetActiveCount() const { return m_handlePool.GetActive
 
 size_t ResourceManager::GetMemoryUsage() const { return m_dataPool.GetTotalAllocatedSize(); }
 
-uint64_t ResourceManager::GetCurrentFrame() const {
-    return s_globalFrameCount;
-}
+uint64_t ResourceManager::GetCurrentFrame() const { return s_globalFrameCount; }
 
 } // namespace Resource
 } // namespace System
