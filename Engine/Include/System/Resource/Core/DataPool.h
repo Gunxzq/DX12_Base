@@ -1,5 +1,6 @@
-// DataPool.h
 #pragma once
+#include "Core/Config/ResourceConfig.h"
+#include "System/Resource/Core/DataPoolContext.h"
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -11,80 +12,98 @@ namespace Resource {
 
 class DataPool {
 public:
-    struct ThreadLocalArena {
-        static constexpr size_t ARENA_SIZE = 64 * 1024; // 假设的大小，根据实际定义调整
-        char *currentPtr = nullptr;
-        char *endPtr = nullptr;
-        bool initialized = false;
-    };
-
-    // 初始化
-    void Initialize();
-    //  shutdown
-    void Shutdown();
-
     // --- 核心接口 ---
 
     /**
-     * @brief 分配内存 (线程安全，内部自动处理 TLS)
+     * @brief 设置池ID（用于TLS索引）
+     * @note 由 ResourceManager 在初始化时调用
+     */
+    void SetPoolID(uint8_t id) { m_poolID = id; }
+    uint8_t GetPoolID() const { return m_poolID; }
+
+    /**
+     * @brief 初始化数据池
+     * @param name 调试名称
+     * @param totalSize 池的总大小
+     * @param alignment 默认对齐方式
+     * @param strategy 分配策略
+     * @param blockSize 固定块大小（Block策略使用）
+     */
+    void Initialize(const std::string &name, size_t totalSize, size_t alignment,
+                    MemoryStrategy strategy = MemoryStrategy::Linear, size_t blockSize = 0);
+
+    void Shutdown();
+
+    /**
+     * @brief 分配内存
      */
     void *Allocate(size_t size, size_t alignment = 16);
 
     /**
-     * @brief 释放内存 (在线性分配器中通常为空操作，依赖 Reset)
+     * @brief 释放内存（支持 Block 策略）
      */
     void Free(void *ptr);
 
     /**
-     * @brief 重置所有已分配内存 (用于帧结束或关卡切换)
-     * @note 调用后所有之前分配的指针失效
+     * @brief 重置所有已分配内存
      */
     void Reset();
 
-    // --- 调试/监控 (要求调用者持有锁) ---
-    // REQUIRES: Caller must hold m_mutex.
+    // --- 调试/监控 ---
     bool Contains_Locked(void *ptr) const;
     size_t GetTotalAllocatedSize_Locked() const;
-
-    // 线程安全版本 (内部加锁)
     bool Contains(void *ptr) const;
     size_t GetTotalAllocatedSize() const;
 
+    // --- 统计 ---
+    size_t GetFreeBlockCount() const;
+    size_t GetUsedBlockCount() const;
+
 private:
     mutable std::mutex m_mutex;
+
     // 内部结构：内存块
     struct Block {
-        void *start;
-        size_t size;
-        size_t used; // 当前块已使用的字节数
+        void *start = nullptr;
+        size_t size = 0;
+        size_t used = 0;
     };
 
-    // 全局内存块列表
+    // 固定块槽位（用于 Block 策略）
+    struct Slot {
+        bool free = true;
+        size_t size = 0;
+    };
+
     std::vector<Block> m_blocks;
+    std::vector<Slot> m_slots;      // Block 策略的槽位数组
+    std::vector<uint64_t> m_bitmap; // 位图标记槽位空闲状态
 
-    // 默认大块大小 (64MB)
+    std::string m_name;
+    size_t m_totalSize = 0;
+    size_t m_alignment = 16;
+    size_t m_blockSize = 0; // 固定块大小
+    uint8_t m_poolID = 0;
+    MemoryStrategy m_strategy = MemoryStrategy::Linear;
+
     static constexpr size_t BLOCK_SIZE = 64 * 1024 * 1024;
+    static constexpr size_t TLS_ARENA_SIZE = 64 * 1024;
 
-    // --- 内部辅助函数 ---
-
-    /**
-     * @brief 从全局池分配一个新的 TLS Arena 段
-     * @return 指向新段起始位置的指针，失败返回 nullptr
-     */
-    void *AllocateTLSSegment();
-
-    /**
-     * @brief 原始分配：直接从全局大块中分配内存 (加锁)
-     * @note 用于大对象或 TLS 段耗尽时的补充
-     */
+    // --- 内部辅助 ---
     void *AllocateRaw(size_t size, size_t alignment);
-
-    /**
-     * @brief 内部无锁版本：调用者必须持有 m_mutex
-     */
     void *AllocateRaw_Locked(size_t size, size_t alignment);
+    void *AllocateFromTLSArena(size_t size, size_t alignment);
+    void *AllocateLinear(size_t size, size_t alignment);
+    void *AllocateBlock(size_t size, size_t alignment);
+    void *AllocateBlock_Locked(size_t size, size_t alignment);
 
     void AllocateBlockInternal();
+    void AllocateSlotsInternal();
+
+    // 位图操作
+    int FindFreeSlot_Locked();
+    void MarkSlotUsed(int index);
+    void MarkSlotFree(int index);
 };
 
 } // namespace Resource

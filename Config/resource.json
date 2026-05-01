@@ -1,0 +1,31 @@
+{
+  "HandlePoolConfig": {
+    "MaxTotalHandles": 262144,
+    "InitialFreeListReserve": 262144
+  },
+  "MemoryPools": [
+    {
+      "HandleTag": 1,
+      "Name": "TexturePool",
+      "Strategy": "Linear",
+      "MaxHandles": 65536,      
+      "SizeMB": 512,
+      "Alignment": 16
+    },
+    {
+      "HandleTag": 2,
+      "Name": "PhysicsShapes",
+      "Strategy": "FixedSizeBlock",
+      "MaxHandles": 16384,     
+      "BlockSize": 64,
+      "Count": 10000
+    },
+    {
+      "HandleTag": 3,
+      "Name": "VFXParticles",
+      "Strategy": "RingBuffer",
+      "MaxHandles": 131072,     
+      "SizeMB": 128
+    }
+  ]
+}

@@ -16,8 +16,26 @@ struct ThreadLocalCache {
     static constexpr size_t BATCH_SIZE = 64;
     static constexpr size_t HIGH_WATER_MARK = BATCH_SIZE * 4;
 
+    // 指向拥有此缓存的 HandlePool 实例
+    HandlePool *owner = nullptr;
+
     ~ThreadLocalCache() {
-        if (!freeIndices.empty()) {
+        // 线程退出时，必须归还所有缓存的索引
+        // 否则这些索引会永久丢失，导致 GetActiveCount 不归零
+        if (owner && !freeIndices.empty()) {
+            ReturnToGlobal();
+        }
+        freeIndices.clear();
+    }
+
+    void ReturnToGlobal() {
+        if (!owner || !owner->m_initialized || freeIndices.empty()) {
+            return;
+        }
+        // 直接归还到全局空闲列表（持有 owner 的锁）
+        std::lock_guard<std::mutex> lock(owner->m_mutex);
+        if (owner->m_initialized) {
+            owner->m_freeIndices.insert(owner->m_freeIndices.end(), freeIndices.begin(), freeIndices.end());
             freeIndices.clear();
         }
     }
@@ -29,16 +47,72 @@ HandlePool::HandlePool() {}
 
 HandlePool::~HandlePool() { Shutdown(); }
 
-void HandlePool::Initialize() {
+void HandlePool::Initialize(const InitConfig &config) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     if (!m_initialized || m_capacity == 0 || m_types.empty() || !m_states) {
-        ExpandCapacity();
+        // 内部调用 Preallocate 预分配到目标容量
+        uint32_t targetCapacity = config.maxTotalHandles > 0 ? config.maxTotalHandles : INITIAL_CAPACITY;
+        if (targetCapacity > m_capacity) {
+            Preallocate_Locked(targetCapacity);
+        }
         m_initialized = true;
     }
 }
 
+void HandlePool::HarvestTLSCaches() {
+    // 显式收割当前线程的 TLS 缓存中的索引
+    // 由 ResourceManager::ForceCleanupForTesting() 调用，确保测试结束时回收所有借用的索引
+    if (t_tlsCache.owner != this) {
+        return;
+    }
+
+    if (!t_tlsCache.freeIndices.empty()) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_freeIndices.insert(m_freeIndices.end(), t_tlsCache.freeIndices.begin(), t_tlsCache.freeIndices.end());
+        t_tlsCache.freeIndices.clear();
+    }
+    // 置空 owner 防止 ThreadLocalCache 析构时重复归还
+    t_tlsCache.owner = nullptr;
+}
+
+void HandlePool::ForceResetForTesting() {
+    // 强制重置池子状态，绕过所有检查
+    // 仅用于测试环境：将所有槽位强制标记为 Empty，使 GetActiveCount() 返回 0
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (!m_states) {
+        return;
+    }
+
+    // 1. 把所有槽位强制标记为空闲态（绕过 Validate 检查）
+    for (uint32_t i = 0; i < m_capacity; ++i) {
+        m_states[i].store(ResourceState::Empty, std::memory_order_release);
+        m_dataPtrs[i].store(nullptr, std::memory_order_relaxed);
+        // generation 保留不变，避免已分配句柄的代数校验出问题
+    }
+
+    // 2. 重建空闲列表（所有槽位都可分配）
+    m_freeIndices.clear();
+    m_freeIndices.reserve(m_capacity);
+    for (uint32_t i = 0; i < m_capacity; ++i) {
+        m_freeIndices.push_back(i);
+    }
+
+    // 3. 收割 TLS 缓存并置空
+    if (t_tlsCache.owner == this && !t_tlsCache.freeIndices.empty()) {
+        m_freeIndices.insert(m_freeIndices.end(), t_tlsCache.freeIndices.begin(), t_tlsCache.freeIndices.end());
+        t_tlsCache.freeIndices.clear();
+    }
+    if (t_tlsCache.owner == this) {
+        t_tlsCache.owner = nullptr;
+    }
+}
+
 void HandlePool::Shutdown() {
+    // 先收割当前线程的 TLS 缓存
+    HarvestTLSCaches();
+
     std::lock_guard<std::mutex> lock(m_mutex);
     m_initialized = false;
     m_types.clear();
@@ -51,6 +125,11 @@ void HandlePool::Shutdown() {
 
 void HandlePool::Preallocate(uint32_t targetCapacity) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    Preallocate_Locked(targetCapacity);
+}
+
+void HandlePool::Preallocate_Locked(uint32_t targetCapacity) {
+    // REQUIRES: Caller must hold m_mutex.
 
     while (m_capacity < targetCapacity) {
         uint32_t oldCapacity = m_capacity;
@@ -156,8 +235,12 @@ void HandlePool::ExpandCapacity() {
     m_capacity = newCapacity;
 }
 
-ResourceHandle HandlePool::AllocateSlot(ResourceType type) {
+ResourceHandle HandlePool::AllocateSlot(ResourceType type, uint8_t poolId) {
     uint32_t index = 0;
+
+    // 绑定当前 HandlePool 实例到 TLS 缓存
+    // 这样线程退出时析构函数能正确归还索引
+    t_tlsCache.owner = this;
 
     // 1. Try TLS cache first (lock-free)
     if (!t_tlsCache.freeIndices.empty()) {
@@ -171,10 +254,7 @@ ResourceHandle HandlePool::AllocateSlot(ResourceType type) {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (!m_initialized || m_freeIndices.empty()) {
                 if (!m_initialized) {
-                    ResourceHandle invalidHandle;
-                    invalidHandle.index = UINT32_MAX;
-                    invalidHandle.generation = 0;
-                    return invalidHandle;
+                    return ResourceHandle::Invalid();
                 }
                 ExpandCapacity();
             }
@@ -186,10 +266,7 @@ ResourceHandle HandlePool::AllocateSlot(ResourceType type) {
         std::lock_guard<std::mutex> lock(m_mutex);
 
         if (!m_initialized) {
-            ResourceHandle invalidHandle;
-            invalidHandle.index = UINT32_MAX;
-            invalidHandle.generation = 0;
-            return invalidHandle;
+            return ResourceHandle::Invalid();
         }
 
         if (m_freeIndices.empty()) {
@@ -215,6 +292,7 @@ ResourceHandle HandlePool::AllocateSlot(ResourceType type) {
     ResourceHandle handle;
     handle.index = index;
     handle.generation = m_generations[index].load(std::memory_order_relaxed);
+    handle.poolId = poolId;
 
     return handle;
 }

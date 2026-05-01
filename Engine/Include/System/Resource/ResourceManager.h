@@ -1,7 +1,10 @@
 // ResourceManager.h
 #pragma once
+#include "Core/Config/ResourceConfig.h"
 #include "System/Resource/Core/DataPool.h"
+#include "System/Resource/Core/DataPoolContext.h"
 #include "System/Resource/Core/HandlePool.h"
+#include "System/Resource/ResourceHandle.h"
 #include <cstdint>
 #include <mutex>
 #include <vector>
@@ -10,11 +13,13 @@ namespace DX12Engine {
 namespace System {
 namespace Resource {
 
+// ========================================================================
+
 class ResourceManager {
 public:
     static ResourceManager &GetInstance();
 
-    void Initialize();
+    void Initialize(const ResourceSystemConfig &config);
     void Shutdown();
 
     /**
@@ -28,7 +33,7 @@ public:
 
     /**
      * @brief 预分配句柄容量
-     * @note 用于测试或已知需要大量句柄的场景，避免运行时循环扩容
+     * @note 用于测试或已知需要大量句柄的场景
      */
     void Preallocate(uint32_t targetCapacity);
 
@@ -70,8 +75,8 @@ public:
     size_t GetMemoryUsage() const;
 
     // --- 测试专用接口 ---
-    DataPool &GetDataPool() { return m_dataPool; }
-    const DataPool &GetDataPool() const { return m_dataPool; }
+    // DataPool &GetDataPool() { return m_dataPool; }
+    // const DataPool &GetDataPool() const { return m_dataPool; }
 
 private:
     ResourceManager() = default;
@@ -85,7 +90,8 @@ private:
     bool m_initialized = false;
 
     HandlePool m_handlePool;
-    DataPool m_dataPool;
+
+    std::map<uint8_t, std::unique_ptr<DataPool>> m_dataPools;
 
     // 延迟回收机制
     struct PendingRelease {
@@ -98,6 +104,12 @@ private:
 
     // 全局帧计数器引用 (假设引擎有全局帧计数)
     uint64_t GetCurrentFrame() const;
+    ResourceSystemConfig m_config;
+
+    // 根据配置初始化数据池路由表
+    void InitializeDataPoolsFromConfig(const ResourceSystemConfig &config);
+
+    DataPool *GetDataPoolForHandle(ResourceHandle handle) const;
 };
 
 } // namespace Resource
