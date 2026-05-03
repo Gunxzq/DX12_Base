@@ -35,6 +35,7 @@ find_package(assimp CONFIG REQUIRED)
 find_package(mimalloc REQUIRED)
 find_package(Jolt CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(Taskflow CONFIG REQUIRED)
 
 # ========================================================================
 # 3. 构建引擎核心库 (Static Library)
@@ -79,6 +80,7 @@ target_link_libraries(DX12EngineCore PUBLIC
     mimalloc-static
     Jolt::Jolt
     imgui::imgui
+    Taskflow::Taskflow
 )
 
 # ========================================================================
