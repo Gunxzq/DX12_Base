@@ -46,6 +46,13 @@ void ResourceManager::Shutdown() {
 
     m_dataPools.clear();
     m_handlePool.Shutdown();
+
+    // 清理路径映射
+    {
+        std::unique_lock lock(m_assetMutex);
+        m_assetMap.clear();
+    }
+
     m_initialized = false;
 }
 
@@ -133,7 +140,6 @@ void ResourceManager::RegisterData(ResourceHandle handle, void *dataPtr, size_t 
     ResourceState currentState = m_handlePool.GetState(handle);
     if (currentState != ResourceState::Loading) {
         if (currentState == ResourceState::Ready) {
-
             return;
         }
         assert(false && "RegisterData: Handle is not in Loading state");
@@ -194,6 +200,8 @@ void ResourceManager::Update(float deltaTime) {
     uint64_t currentFrame = GetCurrentFrame();
 
     std::vector<PendingRelease> toRelease;
+    std::vector<std::string> releasedPaths; // 需要从映射表中移除的路径
+
     {
         std::lock_guard<std::mutex> lock(m_pendingMutex);
         auto it = m_pendingReleases.begin();
@@ -207,6 +215,20 @@ void ResourceManager::Update(float deltaTime) {
         }
     }
 
+    // 收集待释放的路径
+    {
+        std::shared_lock lock(m_assetMutex);
+        for (const auto &pr : toRelease) {
+            for (const auto &pair : m_assetMap) {
+                if (pair.second.handle == pr.handle) {
+                    releasedPaths.push_back(pair.first);
+                    break;
+                }
+            }
+        }
+    }
+
+    // 执行释放
     for (auto &pr : toRelease) {
         void *ptr = m_handlePool.GetDataPtr(pr.handle);
         if (ptr) {
@@ -216,6 +238,14 @@ void ResourceManager::Update(float deltaTime) {
             }
         }
         m_handlePool.FreeSlot(pr.handle);
+    }
+
+    // 从映射表移除
+    if (!releasedPaths.empty()) {
+        std::unique_lock lock(m_assetMutex);
+        for (const auto &path : releasedPaths) {
+            m_assetMap.erase(path);
+        }
     }
 }
 
@@ -239,6 +269,141 @@ DataPool *ResourceManager::GetDataPoolForHandle(ResourceHandle handle) const {
         return it->second.get();
     }
     return nullptr;
+}
+
+// ========================================================================
+// 路径映射实现（原 ResourceCache 功能）
+// 状态直接通过 HandlePool 查询，不重复存储
+// ========================================================================
+
+ResourceHandle ResourceManager::GetHandle(const std::string &path) const {
+    std::shared_lock lock(m_assetMutex);
+    auto it = m_assetMap.find(path);
+    if (it != m_assetMap.end() && it->second.handle.IsValid()) {
+        return it->second.handle;
+    }
+    return ResourceHandle::Invalid();
+}
+
+bool ResourceManager::IsLoaded(const std::string &path) const {
+    ResourceHandle handle = GetHandle(path);
+    if (!handle.IsValid()) {
+        return false;
+    }
+    return m_handlePool.GetState(handle) == ResourceState::Ready;
+}
+
+bool ResourceManager::IsLoading(const std::string &path) const {
+    ResourceHandle handle = GetHandle(path);
+    if (!handle.IsValid()) {
+        return false;
+    }
+    return m_handlePool.GetState(handle) == ResourceState::Loading;
+}
+
+ResourceState ResourceManager::GetStatus(const std::string &path) const {
+    ResourceHandle handle = GetHandle(path);
+    if (!handle.IsValid()) {
+        return ResourceState::Empty;
+    }
+    return m_handlePool.GetState(handle);
+}
+
+ResourceHandle ResourceManager::RegisterPath(const std::string &path, ResourceType type) {
+    std::unique_lock lock(m_assetMutex);
+
+    // 已存在则直接返回
+    auto it = m_assetMap.find(path);
+    if (it != m_assetMap.end()) {
+        return it->second.handle;
+    }
+
+    // 分配新句柄（HandlePool 会设置状态为 Loading）
+    ResourceHandle handle = AllocateSlot(type);
+
+    // 注册映射
+    AssetInfo info;
+    info.handle = handle;
+    info.refCount = 1;
+    m_assetMap[path] = info;
+
+    return handle;
+}
+
+void ResourceManager::UnregisterPath(const std::string &path) {
+    std::unique_lock lock(m_assetMutex);
+    auto it = m_assetMap.find(path);
+    if (it != m_assetMap.end()) {
+        // 释放对应的句柄
+        Release(it->second.handle);
+        m_assetMap.erase(it);
+    }
+}
+
+std::vector<std::string> ResourceManager::GetPendingPaths() const {
+    std::shared_lock lock(m_assetMutex);
+    std::vector<std::string> result;
+    for (const auto &pair : m_assetMap) {
+        ResourceState state = m_handlePool.GetState(pair.second.handle);
+        if (state == ResourceState::Loading || state == ResourceState::Empty) {
+            result.push_back(pair.first);
+        }
+    }
+    return result;
+}
+
+void ResourceManager::AddRef(const std::string &path) {
+    std::shared_lock lock(m_assetMutex);
+    auto it = m_assetMap.find(path);
+    if (it != m_assetMap.end()) {
+        it->second.refCount++;
+    }
+}
+
+void ResourceManager::ReleaseRef(const std::string &path) {
+    std::unique_lock lock(m_assetMutex);
+    auto it = m_assetMap.find(path);
+    if (it != m_assetMap.end()) {
+        if (it->second.refCount > 0) {
+            it->second.refCount--;
+        }
+        // 引用归零且已加载，可以延迟释放
+        if (it->second.refCount == 0) {
+            ResourceState state = m_handlePool.GetState(it->second.handle);
+            if (state == ResourceState::Ready) {
+                Release(it->second.handle);
+            }
+        }
+    }
+}
+
+uint32_t ResourceManager::GetRefCount(const std::string &path) const {
+    std::shared_lock lock(m_assetMutex);
+    auto it = m_assetMap.find(path);
+    if (it != m_assetMap.end()) {
+        return it->second.refCount;
+    }
+    return 0;
+}
+
+size_t ResourceManager::GetAssetCount() const {
+    std::shared_lock lock(m_assetMutex);
+    return m_assetMap.size();
+}
+
+void ResourceManager::CleanupUnused() {
+    std::unique_lock lock(m_assetMutex);
+    for (auto it = m_assetMap.begin(); it != m_assetMap.end();) {
+        if (it->second.refCount == 0) {
+            ResourceState state = m_handlePool.GetState(it->second.handle);
+            if (state == ResourceState::Ready) {
+                Release(it->second.handle);
+            }
+            it = m_assetMap.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 } // namespace Resource

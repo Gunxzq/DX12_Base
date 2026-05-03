@@ -7,6 +7,8 @@
 #include "System/Resource/ResourceHandle.h"
 #include <cstdint>
 #include <mutex>
+#include <shared_mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace DX12Engine {
@@ -15,6 +17,17 @@ namespace Resource {
 
 // ========================================================================
 
+/**
+ * @brief 资产管理器
+ *
+ * 核心职责：
+ * 1. 句柄管理 (HandlePool) - TLS 优化、Generation 防错
+ * 2. 内存管理 (DataPool) - Linear/RingBuffer/FixedSizeBlock
+ * 3. 延迟释放 - 3 帧延迟回收
+ * 4. 路径映射 - Path -> Handle 的映射表（原 ResourceCache 功能）
+ *
+ * 状态管理：委托给 HandlePool，使用 ResourceState 枚举
+ */
 class ResourceManager {
 public:
     static ResourceManager &GetInstance();
@@ -70,13 +83,63 @@ public:
      */
     void Update(float deltaTime);
 
-    // --- 调试/监控接口 ---
+    // ------------------------------------------------------------------
+    // 路径映射（新增：原 ResourceCache 功能）
+    // ------------------------------------------------------------------
+
+    /**
+     * @brief 通过路径获取资源句柄
+     * @return 有效的句柄，或 Invalid() 如果不存在
+     */
+    ResourceHandle GetHandle(const std::string &path) const;
+
+    /**
+     * @brief 检查资源是否已加载
+     */
+    bool IsLoaded(const std::string &path) const;
+
+    /**
+     * @brief 检查资源是否正在加载
+     */
+    bool IsLoading(const std::string &path) const;
+
+    /**
+     * @brief 获取资源加载状态
+     */
+    ResourceState GetStatus(const std::string &path) const;
+
+    /**
+     * @brief 注册路径映射（由异步加载系统调用）
+     * @note 加载开始时调用，创建 Handle 并映射路径
+     */
+    ResourceHandle RegisterPath(const std::string &path, ResourceType type);
+
+    /**
+     * @brief 取消路径映射（加载失败时调用）
+     */
+    void UnregisterPath(const std::string &path);
+
+    /**
+     * @brief 获取所有待加载的路径
+     */
+    std::vector<std::string> GetPendingPaths() const;
+
+    // ------------------------------------------------------------------
+    // 引用计数
+    // ------------------------------------------------------------------
+
+    void AddRef(const std::string &path);
+    void ReleaseRef(const std::string &path);
+    uint32_t GetRefCount(const std::string &path) const;
+
+    // ------------------------------------------------------------------
+    // 调试/监控
+    // ------------------------------------------------------------------
+
     uint32_t GetActiveCount() const;
     size_t GetMemoryUsage() const;
-
-    // --- 测试专用接口 ---
-    // DataPool &GetDataPool() { return m_dataPool; }
-    // const DataPool &GetDataPool() const { return m_dataPool; }
+    size_t GetAssetCount() const;
+    void CleanupUnused();
 
 private:
     ResourceManager() = default;
@@ -86,29 +149,35 @@ private:
     ResourceManager(const ResourceManager &) = delete;
     ResourceManager &operator=(const ResourceManager &) = delete;
 
-    // 初始化状态标志（用于防止重复初始化导致 TLS 状态残留）
+    // 初始化状态
     bool m_initialized = false;
 
+    // 句柄池
     HandlePool m_handlePool;
 
+    // 数据池
     std::map<uint8_t, std::unique_ptr<DataPool>> m_dataPools;
 
-    // 延迟回收机制
+    // 延迟回收
     struct PendingRelease {
         ResourceHandle handle;
-        uint64_t releaseFrame; // 使用帧计数器而非时间，更精确
+        uint64_t releaseFrame;
     };
-
     std::vector<PendingRelease> m_pendingReleases;
-    mutable std::mutex m_pendingMutex; // 保护 m_pendingReleases 的并发访问
+    mutable std::mutex m_pendingMutex;
 
-    // 全局帧计数器引用 (假设引擎有全局帧计数)
+    // 路径映射表（原 ResourceCache 核心功能）
+    // 注意：状态信息直接通过 HandlePool 查询，这里只存储元数据
+    struct AssetInfo {
+        ResourceHandle handle;
+        uint32_t refCount = 0;
+    };
+    mutable std::unordered_map<std::string, AssetInfo> m_assetMap;
+    mutable std::shared_mutex m_assetMutex;
+
     uint64_t GetCurrentFrame() const;
     ResourceSystemConfig m_config;
-
-    // 根据配置初始化数据池路由表
     void InitializeDataPoolsFromConfig(const ResourceSystemConfig &config);
-
     DataPool *GetDataPoolForHandle(ResourceHandle handle) const;
 };
 
