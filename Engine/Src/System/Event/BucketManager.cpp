@@ -20,10 +20,10 @@ namespace DX12Engine {
 namespace System {
 namespace Event {
 
-BucketManager::BucketManager() : m_arena(nullptr), m_activeMask(0) {}
+BucketManager::BucketManager() : m_activeMask(0) {}
 
-void BucketManager::Initialize(MessageArena &arena, uint32_t capacityPerBucket) {
-    m_arena = &arena;
+void BucketManager::Initialize(uint32_t capacityPerBucket) {
+
     m_activeMask.store(0, std::memory_order_relaxed);
 
     // 初始化每个优先级的桶
@@ -42,7 +42,7 @@ void BucketManager::Initialize(MessageArena &arena, uint32_t capacityPerBucket) 
 }
 
 bool BucketManager::PushMessage(MessageIndex index, EventPriority priority) {
-    if (!m_arena || static_cast<uint32_t>(priority) >= MAX_PRIORITY_LEVELS) {
+    if (static_cast<uint32_t>(priority) >= MAX_PRIORITY_LEVELS) {
         return false;
     }
 

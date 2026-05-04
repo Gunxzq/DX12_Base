@@ -1,6 +1,24 @@
 #pragma once
 #include "System/Event/Event.h"
-#include "System/Event/EventRegistry.h" // 引入注册表
+#include "System/Event/EventRegistry.h"
+
+/**
+ * @brief MessageArena 使用规范
+ *
+ * 1. 发送资源句柄 (32-bit Handle):
+ *    arena.WriteMessage(i, hash, sender, resourceHandle);
+ *    // 读取: uint32_t handle = static_cast<uint32_t>(payloadBuffer[i]);
+ *
+ * 2. 发送双值事件 (如 WindowResize: Width, Height):
+ *    arena.WriteMessage(i, hash, sender, width, height);
+ *    // 读取:
+ *    //   uint32_t w = static_cast<uint32_t>(payloadBuffer[i] & 0xFFFFFFFF);
+ *    //   uint32_t h = static_cast<uint32_t>(payloadBuffer[i] >> 32);
+ *
+ * 3. 发送复杂结构体:
+ *    不建议直接发送大结构体。请将大结构体放入临时对象池，获取其 Handle，
+ *    然后按情况 1 发送 Handle。
+ */
 
 namespace DX12Engine {
 namespace System {

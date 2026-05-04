@@ -2,7 +2,6 @@
 
 #include "System/Event/Bucket.h"
 #include "System/Event/Event.h"
-#include "System/Event/MessageArena.h"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -48,7 +47,7 @@ public:
      * @param arena 引用全局消息缓冲区
      * @param capacityPerBucket 每个桶的初始容量建议
      */
-    void Initialize(MessageArena &arena, uint32_t capacityPerBucket = 1024);
+    void Initialize(uint32_t capacityPerBucket = 1024);
 
     /**
      * @brief 将消息索引推入指定优先级的桶
@@ -90,9 +89,7 @@ public:
     uint64_t GetTotalEvictedCount() const;
 
 private:
-    MessageArena *m_arena;
-
-    // 优先级桶数组
+      // 优先级桶数组
     std::array<Bucket, MAX_PRIORITY_LEVELS> m_buckets;
 
     // 位掩码：第 i 位为 1 表示优先级 i 的桶非空（使用原子操作保证线程安全）

@@ -4,247 +4,155 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
-#include <vector>
+#include <cstring> // for memset
+#include <mutex>
 
 namespace DX12Engine {
 namespace System {
 namespace Event {
 
-/**
- * @brief 全局消息缓冲区 (Global Message Arena)
- *
- * 采用 Structure of Arrays (SoA) 布局，优化缓存命中率。
- * 支持多线程无锁写入（通过原子索引分配）。
- *
- * @note 架构说明 (2026-04-29 统一 Slot 改造):
- *
- * 原始设计中，Arena 仅作为"元数据缓冲区"，负责存储 Type/Sender/Timestamp，
- * 而 Payload 指向外部数据（如 ENTT 组件或堆内存）。这要求调用方自行管理生命周期。
- *
- * 当前实现增加了物理内存池支持，作为"脚手架"方案：
- * - Arena 内部维护一个大块物理内存池 (m_dataPool)
- * - 每个 Slot 大小固定为 32 字节，所有事件自动补齐到统一大小
- * - WriteMessage 会将 payload 数据 memcpy 到 Arena 内部
- * - 这样做可以解决栈对象生命周期问题，直到 ENTT 框架搭建完成
- *
- * 统一 Slot 大小的优势：
- * 1. 内存布局可预测：index * SLOT_SIZE 直接算地址，无需指针数组
- * 2. 消除大小不一致：所有事件统一大小，代码更安全
- * 3. 简化消费者访问：可直接 reinterpret_cast 读取数据
- *
- * 当 ENTT 集成后，可以将 SLOT_SIZE 改为 8 字节，只存指针即可。
- */
-
-// TLS 缓冲区大小：每个线程 64KB，本地缓冲消除竞争
 static constexpr size_t TLS_BUFFER_SIZE = 64 * 1024;
-// 对齐要求：16 字节 (SSE), 64 字节 (Cache Line)
-static constexpr size_t ALIGNMENT_SSE = 16;
 static constexpr size_t ALIGNMENT_CACHE_LINE = 64;
-// 统一 Slot 大小：所有事件补齐到 32 字节
-// 设计考量：
-// - 足够容纳大多数事件（大多数事件 < 32 字节）
-// - 2 的幂次，便于位运算优化
-// - 兼容 SSE/AVX 对齐要求
-static constexpr size_t DEFAULT_SLOT_SIZE = 32;
+static constexpr uint32_t MAX_TLS_CONTEXTS = 64;
+
 class MessageArena {
 public:
-    // 默认容量：支持 65536 条未处理消息
     static constexpr uint32_t DEFAULT_CAPACITY = 65536;
-    // 物理内存池大小：8MB，每个消息最大假设 256 字节，约可存 32768 条
-    static constexpr size_t DEFAULT_POOL_SIZE = 8 * 1024 * 1024;
-    // 每个消息的最大尺寸（安全限制，防止恶意数据）
-    static constexpr size_t MAX_PAYLOAD_SIZE = 1024;
 
     /**
      * @brief TLS 本地缓冲区上下文
-     *
-     * 每个线程拥有独立的本地缓冲区，避免全局原子竞争。
-     * 帧末时，所有线程的本地缓冲区会批量 flush 到全局 Arena。
      */
     struct alignas(ALIGNMENT_CACHE_LINE) TLSContext {
-        uint8_t buffer[TLS_BUFFER_SIZE];
-        size_t offset;
-        bool flushed; // 本帧是否已 flush
+        struct LocalMeta {
+            EventTypeHash typeHash;
+            uint32_t senderId;
 
-        TLSContext() : offset(0), flushed(false) {}
+            /**
+             * @brief 64位负载数据，采用联合语义存储：
+             *
+             * 【布局约定】：
+             * - 低 32 位 (Bits 0-31):  存储【值类型】或【资源句柄】。
+             *   - 如果是简单事件（如 WindowResize），这里存储第一个参数（如 Width）。
+             *   - 如果是资源事件，这里存储 ResourceHandle。
+             *
+             * - 高 32 位 (Bits 32-63): 存储【辅助值】或【扩展信息】。
+             *   - 如果是简单事件，这里存储第二个参数（如 Height）。
+             *   - 如果是资源事件，通常为 0。
+             *
+             * 【使用示例】：
+             * 1. 资源加载: payload = static_cast<uint64_t>(handle);
+             * 2. 窗口变化: payload = (static_cast<uint64_t>(height) << 32) | width;
+             */
+            uint64_t payloadData;
+        };
+
+        static constexpr size_t MAX_LOCAL_MESSAGES = 512;
+        LocalMeta localMetas[MAX_LOCAL_MESSAGES];
+        uint32_t localCount;
+        std::atomic<bool> isRegistered;
+
+        TLSContext() : localCount(0), isRegistered(false) {}
+
+        void Reset() { localCount = 0; }
     };
 
-    // 获取当前线程的 TLS 上下文（线程本地存储）
     static TLSContext &GetTLSContext();
+    void RegisterTLSContext(TLSContext *ctx);
 
-    MessageArena(uint32_t capacity = DEFAULT_CAPACITY, size_t poolSize = DEFAULT_POOL_SIZE);
+    MessageArena(uint32_t capacity = DEFAULT_CAPACITY);
     ~MessageArena();
 
-    // 禁止拷贝
     MessageArena(const MessageArena &) = delete;
     MessageArena &operator=(const MessageArena &) = delete;
 
     /**
-     * @brief 分配一个消息槽位
-     *
-     * 线程安全。通过原子操作获取唯一索引。
-     * @return 分配的索引，如果已满返回 INVALID_INDEX
+     * @brief 写入原始 64 位负载数据
+     * @param index         消息索引（保留字段，当前未使用）
+     * @param typeHash      消息类型哈希
+     * @param senderId      发送者 ID
+     * @param payloadData   打包后的 64 位数据
+     *                      - 低 32 位: 主要值/句柄
+     *                      - 高 32 位: 次要值/扩展
      */
-    MessageIndex AllocateSlot();
+    void WriteMessage(MessageIndex index, EventTypeHash typeHash, uint32_t senderId, uint64_t payloadData);
 
     /**
-     * @brief 写入消息元数据到指定索引
-     *
-     * 生产者在线程本地构造好事件后，调用此方法写入 Arena。
-     *
-     * @note 内部实现：
-     * 1. 优先使用 TLS 本地缓冲区（无锁，消除伪共享）
-     * 2. TLS 满了则回退到全局 Arena 池
-     * 3. 所有数据按 16 字节对齐，防止 SSE 错误
-     *
-     * @param index 由 AllocateSlot 返回的索引
-     * @param typeHash 事件类型哈希
-     * @param senderId 发送者实体ID (0表示系统事件)
-     * @param payloadPtr 指向实际事件数据的指针 (通常在栈上)
-     * @param payloadSize payload 的实际大小（字节）
+     * @brief 便捷重载：写入单一句柄或值（自动填充高 32 位为 0）
      */
-    void WriteMessage(MessageIndex index, EventTypeHash typeHash, uint32_t senderId, void *payloadPtr,
-                      size_t payloadSize);
-
-    /**
-     * @brief 写入消息重载版本（自动推断大小）
-     *
-     * 方便调用者使用，自动计算 payload 大小。
-     * @param index 由 AllocateSlot 返回的索引
-     * @param typeHash 事件类型哈希
-     * @param senderId 发送者实体ID
-     * @param payloadPtr 指向实际事件数据的指针
-     */
-    template<typename T>
-    inline void WriteMessage(MessageIndex index, EventTypeHash typeHash, uint32_t senderId, T *payloadPtr) {
-        WriteMessage(index, typeHash, senderId, static_cast<void *>(payloadPtr), sizeof(T));
+    inline void WriteMessage(MessageIndex index, EventTypeHash typeHash, uint32_t senderId, uint32_t valueOrHandle) {
+        WriteMessage(index, typeHash, senderId, static_cast<uint64_t>(valueOrHandle));
     }
 
     /**
-     * @brief 将所有 TLS 本地缓冲区 flush 到全局 Arena
-     *
-     * 在帧末调用，确保所有线程的数据都已写入 Arena。
-     * 必须在主线程（消费者线程）中调用。
+     * @brief 便捷重载：写入两个 32 位值（如 Width, Height）
+     * @param val1 存入低 32 位
+     * @param val2 存入高 32 位
      */
+    inline void WriteMessage(MessageIndex index, EventTypeHash typeHash, uint32_t senderId, uint32_t val1,
+                             uint32_t val2) {
+        uint64_t packed = (static_cast<uint64_t>(val2) << 32) | static_cast<uint64_t>(val1);
+        WriteMessage(index, typeHash, senderId, packed);
+    }
+
     void FlushAllTLS();
-
-    /**
-     * @brief 获取消息类型
-     * @param index 消息索引
-     */
-    inline EventTypeHash GetType(MessageIndex index) const {
-        assert(index < m_capacity);
-        return m_typeBuffer[index];
-    }
-
-    /**
-     * @brief 获取发送者ID
-     */
-    inline uint32_t GetSender(MessageIndex index) const {
-        assert(index < m_capacity);
-        return m_senderBuffer[index];
-    }
-
-    /**
-     * @brief 获取负载指针
-     *
-     * 消费者需要自行将 void* cast 为具体事件类型。
-     * @note 由于使用统一 Slot 大小，直接通过 index * SLOT_SIZE 计算地址。
-     */
-    inline void *GetPayload(MessageIndex index) const {
-        assert(index < m_capacity);
-        // 内存屏障：确保读取到生产者写入的最新数据
-        std::atomic_thread_fence(std::memory_order_acquire);
-        return const_cast<uint8_t *>(m_dataPool) + static_cast<size_t>(index) * DEFAULT_SLOT_SIZE;
-    }
-
-    /**
-     * @brief 获取负载指针（带对齐检查，用于调试）
-     *
-     * @param index 消息索引
-     * @param requireAlignment 要求的对齐字节数
-     * @return 对齐后的指针（如果不是对齐的，返回原始指针）
-     * @note 统一 Slot 大小天然 16 字节对齐，此检查主要用于验证
-     */
-    inline void *GetPayloadAligned(MessageIndex index, size_t requireAlignment = ALIGNMENT_SSE) const {
-        void *ptr = GetPayload(index);
-#if defined(_DEBUG)
-        uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
-        if (addr % requireAlignment != 0) {
-            // 指针未对齐！这是危险的，可能导致 SSE 错误
-            // 在 Debug 模式下触发断言
-            assert(false && "Arena Payload Misaligned! SSE access will crash.");
-        }
-#endif
-        return ptr;
-    }
-
-    /**
-     * @brief 获取物理内存池起始地址（用于指针范围验证）
-     */
-    inline const uint8_t *GetPoolStart() const { return m_dataPool; }
-
-    /**
-     * @brief 获取物理内存池大小
-     */
-    inline size_t GetPoolSize() const { return m_poolSize; }
-
-    /**
-     * @brief 获取时间戳
-     */
-    inline uint64_t GetTimestamp(MessageIndex index) const {
-        assert(index < m_capacity);
-        std::atomic_thread_fence(std::memory_order_acquire);
-        return m_timeBuffer[index];
-    }
-
-    /**
-     * @brief 重置写指针 (帧末调用)
-     *
-     * 注意：这不会清除数据，只是允许下一帧复用空间。
-     * 真正的清理由消费端完成。
-     */
     void ResetFrame();
 
-    /**
-     * @brief 获取当前帧已分配的消息数量
-     */
-    inline uint32_t GetCount() const { return m_writeIndex.load(std::memory_order_relaxed); }
+    // --- 访问接口 ---
+
+    inline uint32_t GetCount() const { return m_currentFrameMessageCount; }
+    inline uint32_t GetOverflowCountLastFrame() const { return m_lastFrameOverflowCount; }
+
+    inline const EventTypeHash *GetTypeBuffer() const { return m_currentFrameTypeBuffer; }
+    inline const uint32_t *GetSenderBuffer() const { return m_currentFrameSenderBuffer; }
+    inline const uint64_t *GetTimestampBuffer() const { return m_currentFrameTimeBuffer; }
 
     /**
-     * @brief 获取物理内存池使用量（调试用）
-     * @note 由于使用统一 Slot，按已分配的 Slot 数量计算
+     * @brief 获取当前帧的 Payload 数组
+     * @return uint64_t* 指向连续内存，每个元素遵循上述位布局约定
      */
-    inline size_t GetPoolUsage() const {
-        return static_cast<size_t>(m_writeIndex.load(std::memory_order_relaxed)) * DEFAULT_SLOT_SIZE;
-    }
-
-    /**
-     * @brief 获取统一 Slot 大小
-     */
-    inline size_t GetSlotSize() const { return DEFAULT_SLOT_SIZE; }
+    inline const uint64_t *GetPayloadBuffer() const { return m_currentFramePayloadBuffer; }
 
     static constexpr MessageIndex INVALID_INDEX = 0xFFFFFFFF;
 
 private:
     uint32_t m_capacity;
-    size_t m_poolSize;
 
-    // SoA Buffers - 每个 buffer 独立对齐以防止伪共享
-    // 使用 alignas(64) 确保每个数组起始于新的 Cache Line
+    // --- 帧间双缓冲结构 (纯 SoA，无 Blob) ---
+    struct FrameData {
+        EventTypeHash *typeBuffer;
+        uint32_t *senderBuffer;
+        uint64_t *timeBuffer;
+        uint64_t *payloadBuffer; // ✅ 升级为 64 位，遵循位布局约定
 
-    alignas(64) EventTypeHash *m_typeBuffer; // uint32_t
-    alignas(64) uint32_t *m_senderBuffer;    // uint32_t
-    alignas(64) uint64_t *m_timeBuffer;      // uint64_t
+        uint32_t messageCount;
 
-    // 物理内存池：统一 Slot 大小的连续内存块
-    // 每个 Slot 大小固定为 DEFAULT_SLOT_SIZE (32 字节)
-    // 布局：| Slot 0 (32B) | Slot 1 (32B) | Slot 2 (32B) | ... |
-    // 当 ENTT 集成后，此功能应被移除或简化为只存指针。
-    alignas(64) uint8_t *m_dataPool;
+        FrameData()
+            : typeBuffer(nullptr), senderBuffer(nullptr), timeBuffer(nullptr), payloadBuffer(nullptr), messageCount(0) {
+        }
 
-    // 原子写索引，用于无锁分配（SoA 元数据）
-    std::atomic<uint32_t> m_writeIndex;
+        void Reset() { messageCount = 0; }
+    };
+
+    FrameData m_frames[2];
+    int m_currentFrameIndex;
+
+    // 监控数据
+    std::atomic<uint32_t> m_lastFrameOverflowCount{0};
+
+    // 当前帧视图
+    uint32_t m_currentFrameMessageCount;
+    const EventTypeHash *m_currentFrameTypeBuffer;
+    const uint32_t *m_currentFrameSenderBuffer;
+    const uint64_t *m_currentFrameTimeBuffer;
+    const uint64_t *m_currentFramePayloadBuffer; // ✅
+
+    // TLS 注册表
+    std::atomic<uint32_t> m_tlsContextCount;
+    TLSContext *m_tlsContexts[MAX_TLS_CONTEXTS];
+
+    void EnsureTLSBufferInitialized(TLSContext &ctx);
+    void AllocateFrameMemory(FrameData &frame);
+    void FreeFrameMemory(FrameData &frame);
 };
 
 } // namespace Event
