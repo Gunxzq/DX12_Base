@@ -7,7 +7,7 @@
 
 #pragma intrinsic(_BitScanForward)
 
-// ===== "急救手术"：CPU 指令支持 =====
+// ===== CPU 指令支持 =====
 #ifdef _WIN32
 #include <immintrin.h> // _mm_pause
 #define ARENA_CPU_PAUSE() _mm_pause()
@@ -112,7 +112,7 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
         float maxEffectivePriority = -1.0f;
         bool found = false;
 
-        // ===== "急救手术"：收集所有候选桶的 Generation =====
+        // ===== 收集所有候选桶的 Generation =====
         uint64_t candidateGenerations[MAX_PRIORITY_LEVELS] = {0};
         uint32_t validCandidateMask = 0;
 
@@ -127,7 +127,7 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
 
             const Bucket &bucket = m_buckets[idx];
 
-            // ===== "急救手术"：快照 Generation + 空检查 =====
+            // ===== 快照 Generation + 空检查 =====
             uint64_t genBefore = bucket.GetGeneration();
 
             // 再次确认非空（并发环境下可能刚变空）
@@ -159,7 +159,7 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
         // --- 从选定的最佳桶中弹出消息 ---
         Bucket &bestBucket = m_buckets[bestBucketIdx];
 
-        // ===== "急救手术"：ABA 问题检测 =====
+        // ===== ABA 问题检测 =====
         // 在选择和 Pop 之间验证 Generation 是否变化
         uint64_t genBeforePop = bestBucket.GetGeneration();
         if (candidateGenerations[bestBucketIdx] != genBeforePop) {
@@ -169,13 +169,13 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
 
         MessageIndex index;
         if (bestBucket.Pop(index)) {
-            // ===== "急救手术"：Pop 后递增 Generation =====
+            // ===== Pop 后递增 Generation =====
             bestBucket.IncrementGeneration();
 
             outIndex = index;
             outPriority = static_cast<EventPriority>(bestBucketIdx);
 
-            // ===== "急救手术"：使用原子递增更新 LastServeTime =====
+            // ===== 使用原子递增更新 LastServeTime =====
             // 避免时间戳被覆盖导致 Aging 计算错误
             // 使用 fetch_add(0) 实际上不改变值，但保证了原子性
             bestBucket.UpdateLastServeTime(currentTimeUs);
@@ -195,7 +195,7 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
 
             return true;
         } else {
-            // ===== "急救手术"：Pop 失败也要更新 Generation =====
+            // ===== Pop 失败也要更新 Generation =====
             // 表示有并发操作发生了
             bestBucket.IncrementGeneration();
 

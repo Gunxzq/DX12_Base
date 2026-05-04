@@ -45,48 +45,50 @@ void MessageArena::RegisterTLSContext(TLSContext *ctx) {
     }
 }
 
-void MessageArena::AllocateFrameMemory(FrameData &frame) {
-    // 分配四个定长数组
-    frame.typeBuffer =
-        static_cast<EventTypeHash *>(ArenaAlignedMalloc(m_capacity * sizeof(EventTypeHash), ALIGNMENT_CACHE_LINE));
-    frame.senderBuffer =
-        static_cast<uint32_t *>(ArenaAlignedMalloc(m_capacity * sizeof(uint32_t), ALIGNMENT_CACHE_LINE));
-    frame.timeBuffer = static_cast<uint64_t *>(ArenaAlignedMalloc(m_capacity * sizeof(uint64_t), ALIGNMENT_CACHE_LINE));
+void MessageArena::AllocateRingMemory() {
+    // 分配环形缓冲区的四个定长数组
+    m_ring.typeBuffer =
+        static_cast<EventTypeHash *>(ArenaAlignedMalloc(RING_BUFFER_SIZE * sizeof(EventTypeHash), ALIGNMENT_CACHE_LINE));
+    m_ring.senderBuffer =
+        static_cast<uint32_t *>(ArenaAlignedMalloc(RING_BUFFER_SIZE * sizeof(uint32_t), ALIGNMENT_CACHE_LINE));
+    m_ring.timeBuffer = static_cast<uint64_t *>(ArenaAlignedMalloc(RING_BUFFER_SIZE * sizeof(uint64_t), ALIGNMENT_CACHE_LINE));
+    m_ring.payloadBuffer =
+        static_cast<uint64_t *>(ArenaAlignedMalloc(RING_BUFFER_SIZE * sizeof(uint64_t), ALIGNMENT_CACHE_LINE));
 
-    // ✅ Payload 现在是 uint64_t 数组
-    frame.payloadBuffer =
-        static_cast<uint64_t *>(ArenaAlignedMalloc(m_capacity * sizeof(uint64_t), ALIGNMENT_CACHE_LINE));
-
-    if (!frame.typeBuffer || !frame.senderBuffer || !frame.timeBuffer || !frame.payloadBuffer) {
-        ARENA_DBG("Failed to allocate frame memory");
+    if (!m_ring.typeBuffer || !m_ring.senderBuffer || !m_ring.timeBuffer || !m_ring.payloadBuffer) {
+        ARENA_DBG("Failed to allocate ring buffer memory");
     }
 }
 
-void MessageArena::FreeFrameMemory(FrameData &frame) {
-    ArenaAlignedFree(frame.typeBuffer);
-    ArenaAlignedFree(frame.senderBuffer);
-    ArenaAlignedFree(frame.timeBuffer);
-    ArenaAlignedFree(frame.payloadBuffer);
+void MessageArena::FreeRingMemory() {
+    ArenaAlignedFree(m_ring.typeBuffer);
+    ArenaAlignedFree(m_ring.senderBuffer);
+    ArenaAlignedFree(m_ring.timeBuffer);
+    ArenaAlignedFree(m_ring.payloadBuffer);
 
-    frame.typeBuffer = nullptr;
-    frame.senderBuffer = nullptr;
-    frame.timeBuffer = nullptr;
-    frame.payloadBuffer = nullptr;
+    m_ring.typeBuffer = nullptr;
+    m_ring.senderBuffer = nullptr;
+    m_ring.timeBuffer = nullptr;
+    m_ring.payloadBuffer = nullptr;
 }
 
 MessageArena::MessageArena(uint32_t capacity)
-    : m_capacity(capacity), m_currentFrameIndex(0), m_currentFrameMessageCount(0), m_currentFrameTypeBuffer(nullptr),
-      m_currentFrameSenderBuffer(nullptr), m_currentFrameTimeBuffer(nullptr), m_currentFramePayloadBuffer(nullptr),
-      m_tlsContextCount(0), m_lastFrameOverflowCount(0) {
+    : m_globalIndexCounter(0),
+      m_currentFrameStartIndex(0),
+      m_currentFrameMessageCount(0),
+      m_currentFrameTypeBuffer(nullptr),
+      m_currentFrameSenderBuffer(nullptr),
+      m_currentFrameTimeBuffer(nullptr),
+      m_currentFramePayloadBuffer(nullptr),
+      m_tlsContextCount(0),
+      m_overflowCount(0),
+      m_lastFlushedIndex(0) {
     memset(m_tlsContexts, 0, sizeof(m_tlsContexts));
-
-    AllocateFrameMemory(m_frames[0]);
-    AllocateFrameMemory(m_frames[1]);
+    AllocateRingMemory();
 }
 
 MessageArena::~MessageArena() {
-    FreeFrameMemory(m_frames[0]);
-    FreeFrameMemory(m_frames[1]);
+    FreeRingMemory();
 }
 
 void MessageArena::EnsureTLSBufferInitialized(TLSContext &ctx) {
@@ -114,17 +116,59 @@ void MessageArena::WriteMessage(MessageIndex index, EventTypeHash typeHash, uint
     meta.payloadData = payloadData;
 }
 
-void MessageArena::FlushAllTLS() {
-    int nextFrameIndex = (m_currentFrameIndex + 1) % 2;
-    FrameData &nextFrame = m_frames[nextFrameIndex];
-    nextFrame.Reset();
+MessageIndex MessageArena::WriteMessageAndGetIndex(EventTypeHash typeHash, uint32_t senderId, uint64_t payloadData) {
+    // 1. 原子分配全局索引 (多线程安全)
+    uint32_t globalIndex = m_globalIndexCounter.fetch_add(1, std::memory_order_relaxed);
 
+    // 2. 计算环形缓冲区槽位
+    uint32_t ringSlot = globalIndex % RING_BUFFER_SIZE;
+
+    // 3. 熔断器检查：防止覆盖未读取的数据
+    // 如果新消息距离上次刷新位置超过 RING_BUFFER_SIZE，说明有覆盖风险
+    uint32_t lastFlushed = m_lastFlushedIndex.load(std::memory_order_acquire);
+    uint32_t distance = globalIndex - lastFlushed;
+
+    if (distance >= RING_BUFFER_SIZE) {
+        // 环形缓冲区溢出，数据将被覆盖
+        // 记录溢出次数（用于监控）
+        m_overflowCount.fetch_add(1, std::memory_order_relaxed);
+        ARENA_DBG("Ring buffer overflow detected! Message will overwrite unread data.");
+        // 不返回 INVALID_INDEX，让写入继续（熔断不断流，只是记录）
+        // 如果需要严格保护，可改为: return INVALID_INDEX;
+    }
+
+    // 4. 获取 TLS 上下文
+    TLSContext &tls = GetTLSContext();
+    EnsureTLSBufferInitialized(tls);
+
+    // 5. 检查 TLS 本地缓冲区是否已满
+    if (tls.localCount >= TLSContext::MAX_LOCAL_MESSAGES) {
+        ARENA_DBG("TLS Buffer Full! Message dropped.");
+        return INVALID_INDEX;
+    }
+
+    // 6. 写入 TLS 并记录槽位索引（用于后续直接寻址）
+    auto &meta = tls.localMetas[tls.localCount++];
+    meta.typeHash = typeHash;
+    meta.senderId = senderId;
+    meta.payloadData = payloadData;
+    meta.assignedIndex = ringSlot; // ✅ 关键：存储槽位索引，而非全局ID
+
+    // 返回槽位索引（用于 BucketManager 的 Aging 机制）
+    return static_cast<MessageIndex>(ringSlot);
+}
+
+void MessageArena::FlushAllTLS() {
     uint64_t frameTimestamp = std::chrono::duration_cast<std::chrono::microseconds>(
                                   std::chrono::high_resolution_clock::now().time_since_epoch())
                                   .count();
 
-    uint32_t overflowCount = 0;
     uint32_t contextCount = m_tlsContextCount.load(std::memory_order_acquire);
+    uint32_t maxRingSlot = 0; // 追踪本帧写入的最大槽位
+    uint32_t messagesWritten = 0;
+
+    // 记录本帧开始时的全局索引
+    uint32_t thisFrameStartIndex = m_globalIndexCounter.load(std::memory_order_relaxed);
 
     for (uint32_t i = 0; i < contextCount; ++i) {
         TLSContext *tlsPtr = m_tlsContexts[i];
@@ -133,58 +177,47 @@ void MessageArena::FlushAllTLS() {
 
         TLSContext &tls = *tlsPtr;
         uint32_t count = tls.localCount;
-        uint32_t remainingCapacity = m_capacity - nextFrame.messageCount;
 
-        if (remainingCapacity == 0) {
-            overflowCount += count;
-            tls.Reset();
-            continue;
-        }
-
-        uint32_t toCopyCount = (count <= remainingCapacity) ? count : remainingCapacity;
-        if (count > remainingCapacity) {
-            overflowCount += (count - toCopyCount);
-        }
-
-        // ✅ 批量拷贝：直接赋值，无内存跳转
-        for (uint32_t j = 0; j < toCopyCount; ++j) {
+        for (uint32_t j = 0; j < count; ++j) {
             const auto &meta = tls.localMetas[j];
-            uint32_t globalIdx = nextFrame.messageCount;
+            uint32_t ringSlot = meta.assignedIndex; // ✅ 槽位索引
 
-            nextFrame.typeBuffer[globalIdx] = meta.typeHash;
-            nextFrame.senderBuffer[globalIdx] = meta.senderId;
-            nextFrame.timeBuffer[globalIdx] = frameTimestamp;
-            nextFrame.payloadBuffer[globalIdx] = meta.payloadData; // ✅ 直接存句柄
+            // 直接写入环形缓冲区的指定槽位
+            m_ring.typeBuffer[ringSlot] = meta.typeHash;
+            m_ring.senderBuffer[ringSlot] = meta.senderId;
+            m_ring.timeBuffer[ringSlot] = frameTimestamp;
+            m_ring.payloadBuffer[ringSlot] = meta.payloadData;
 
-            nextFrame.messageCount++;
+            // 追踪最大槽位
+            if (ringSlot > maxRingSlot) {
+                maxRingSlot = ringSlot;
+            }
+            messagesWritten++;
         }
 
         tls.Reset();
-
-        if (nextFrame.messageCount >= m_capacity) {
-            for (uint32_t k = i + 1; k < contextCount; ++k) {
-                if (m_tlsContexts[k])
-                    m_tlsContexts[k]->Reset();
-            }
-            break;
-        }
     }
 
-    m_lastFrameOverflowCount.store(overflowCount, std::memory_order_release);
-    if (overflowCount > 0) {
-        ARENA_DBG("Frame Overflow Detected: Dropped " << overflowCount << " messages.");
-    }
+    // 更新已刷新的最新索引（用于熔断器检测）
+    uint32_t currentIndex = m_globalIndexCounter.load(std::memory_order_relaxed);
+    m_lastFlushedIndex.store(currentIndex, std::memory_order_release);
 
-    // 切换视图
-    m_currentFrameIndex = nextFrameIndex;
-    m_currentFrameMessageCount = nextFrame.messageCount;
-    m_currentFrameTypeBuffer = nextFrame.typeBuffer;
-    m_currentFrameSenderBuffer = nextFrame.senderBuffer;
-    m_currentFrameTimeBuffer = nextFrame.timeBuffer;
-    m_currentFramePayloadBuffer = nextFrame.payloadBuffer; // ✅
+    // 设置当前帧视图 - 使用环形缓冲区的窗口
+    m_currentFrameStartIndex = thisFrameStartIndex;
+    m_currentFrameMessageCount = messagesWritten;
+
+    // 更新只读视图指针（指向环形缓冲区）
+    m_currentFrameTypeBuffer = m_ring.typeBuffer;
+    m_currentFrameSenderBuffer = m_ring.senderBuffer;
+    m_currentFrameTimeBuffer = m_ring.timeBuffer;
+    m_currentFramePayloadBuffer = m_ring.payloadBuffer;
 }
-
-void MessageArena::ResetFrame() { ARENA_DBG("Frame Reset."); }
+void MessageArena::ResetFrame() {
+    // ✅ 不再重置 m_globalIndexCounter！
+    // 环形缓冲区的优势：全局索引一直递增，取模自动映射到槽位
+    // 这样 Aging 机制使用的槽位索引始终有效
+    ARENA_DBG("Frame Reset. Ring buffer index continues from: " << m_globalIndexCounter.load());
+}
 
 } // namespace Event
 } // namespace System

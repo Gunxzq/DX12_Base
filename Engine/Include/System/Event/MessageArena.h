@@ -15,6 +15,13 @@ static constexpr size_t TLS_BUFFER_SIZE = 64 * 1024;
 static constexpr size_t ALIGNMENT_CACHE_LINE = 64;
 static constexpr uint32_t MAX_TLS_CONTEXTS = 64;
 
+/**
+ * @brief 环形缓冲区大小 (2^20 = 1,048,576)
+ * 理由：100万条消息 × 32字节 ≈ 32MB，内存可控
+ * 足以支撑即使每秒5万条消息积压时，监控系统有20秒反应时间
+ */
+static constexpr uint32_t RING_BUFFER_SIZE = 1 << 20;
+
 class MessageArena {
 public:
     static constexpr uint32_t DEFAULT_CAPACITY = 65536;
@@ -26,6 +33,7 @@ public:
         struct LocalMeta {
             EventTypeHash typeHash;
             uint32_t senderId;
+            uint32_t assignedIndex;
 
             /**
              * @brief 64位负载数据，采用联合语义存储：
@@ -84,6 +92,15 @@ public:
     }
 
     /**
+     * @brief 线程安全地写入消息并获取全局唯一索引
+     * 1. 原子分配 Index
+     * 2. 将数据写入当前线程的 TLS
+     * 3. 在 TLS Meta 中记录该 Index
+     * @return MessageIndex 分配的索引，若失败返回 INVALID_INDEX
+     */
+    MessageIndex WriteMessageAndGetIndex(EventTypeHash typeHash, uint32_t senderId, uint64_t payloadData);
+
+    /**
      * @brief 便捷重载：写入两个 32 位值（如 Width, Height）
      * @param val1 存入低 32 位
      * @param val2 存入高 32 位
@@ -100,7 +117,7 @@ public:
     // --- 访问接口 ---
 
     inline uint32_t GetCount() const { return m_currentFrameMessageCount; }
-    inline uint32_t GetOverflowCountLastFrame() const { return m_lastFrameOverflowCount; }
+    inline uint32_t GetOverflowCount() const { return m_overflowCount.load(std::memory_order_relaxed); }
 
     inline const EventTypeHash *GetTypeBuffer() const { return m_currentFrameTypeBuffer; }
     inline const uint32_t *GetSenderBuffer() const { return m_currentFrameSenderBuffer; }
@@ -112,47 +129,56 @@ public:
      */
     inline const uint64_t *GetPayloadBuffer() const { return m_currentFramePayloadBuffer; }
 
+    /**
+     * @brief 获取当前帧的起始全局索引
+     * @note 用于计算环形缓冲区中的有效范围
+     */
+    inline uint32_t GetCurrentFrameStartIndex() const { return m_currentFrameStartIndex; }
+
+    /**
+     * @brief 获取环形缓冲区大小
+     */
+    static constexpr uint32_t GetRingBufferSize() { return RING_BUFFER_SIZE; }
+
     static constexpr MessageIndex INVALID_INDEX = 0xFFFFFFFF;
 
 private:
-    uint32_t m_capacity;
-
-    // --- 帧间双缓冲结构 (纯 SoA，无 Blob) ---
-    struct FrameData {
+    // --- 环形缓冲区结构 (纯 SoA) ---
+    struct RingBuffer {
         EventTypeHash *typeBuffer;
         uint32_t *senderBuffer;
         uint64_t *timeBuffer;
-        uint64_t *payloadBuffer; // ✅ 升级为 64 位，遵循位布局约定
+        uint64_t *payloadBuffer;
 
-        uint32_t messageCount;
-
-        FrameData()
-            : typeBuffer(nullptr), senderBuffer(nullptr), timeBuffer(nullptr), payloadBuffer(nullptr), messageCount(0) {
-        }
-
-        void Reset() { messageCount = 0; }
+        RingBuffer() : typeBuffer(nullptr), senderBuffer(nullptr), timeBuffer(nullptr), payloadBuffer(nullptr) {}
     };
 
-    FrameData m_frames[2];
-    int m_currentFrameIndex;
+    RingBuffer m_ring;
 
-    // 监控数据
-    std::atomic<uint32_t> m_lastFrameOverflowCount{0};
+    // --- 熔断器机制 ---
+    // 记录已刷新到环形缓冲区的最新索引，用于检测覆盖风险
+    std::atomic<uint32_t> m_lastFlushedIndex{0};
+    // 溢出计数（用于监控）
+    std::atomic<uint32_t> m_overflowCount{0};
 
-    // 当前帧视图
-    uint32_t m_currentFrameMessageCount;
+    // --- 当前帧视图 (指向环形缓冲区的只读窗口) ---
+    uint32_t m_currentFrameStartIndex;      // 当前帧起始的全局索引
+    uint32_t m_currentFrameMessageCount;    // 当前帧消息数量
     const EventTypeHash *m_currentFrameTypeBuffer;
     const uint32_t *m_currentFrameSenderBuffer;
     const uint64_t *m_currentFrameTimeBuffer;
-    const uint64_t *m_currentFramePayloadBuffer; // ✅
+    const uint64_t *m_currentFramePayloadBuffer;
 
     // TLS 注册表
     std::atomic<uint32_t> m_tlsContextCount;
     TLSContext *m_tlsContexts[MAX_TLS_CONTEXTS];
 
     void EnsureTLSBufferInitialized(TLSContext &ctx);
-    void AllocateFrameMemory(FrameData &frame);
-    void FreeFrameMemory(FrameData &frame);
+    void AllocateRingMemory();
+    void FreeRingMemory();
+
+    // 全局递增索引（不再每帧重置）
+    std::atomic<uint32_t> m_globalIndexCounter;
 };
 
 } // namespace Event

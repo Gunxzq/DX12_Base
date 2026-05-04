@@ -89,7 +89,7 @@ public:
     uint64_t GetTotalEvictedCount() const;
 
 private:
-      // 优先级桶数组
+    // 优先级桶数组
     std::array<Bucket, MAX_PRIORITY_LEVELS> m_buckets;
 
     // 位掩码：第 i 位为 1 表示优先级 i 的桶非空（使用原子操作保证线程安全）
