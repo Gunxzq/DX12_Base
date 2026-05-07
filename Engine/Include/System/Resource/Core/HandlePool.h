@@ -37,11 +37,13 @@ public:
 
     // 显式收割当前线程的 TLS 缓存
     // 由 ResourceManager::ForceCleanupForTesting() 调用
+#ifdef _DEBUG
     void HarvestTLSCaches();
 
     // 强制重置池子状态（仅用于测试）
     // 绕过所有检查，将所有槽位标记为空闲态，强制让 GetActiveCount() 返回 0
     void ForceResetForTesting();
+#endif
 
     // 预分配到指定容量，减少扩容次数
     void Preallocate(uint32_t targetCapacity);

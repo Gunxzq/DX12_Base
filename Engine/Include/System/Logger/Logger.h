@@ -47,7 +47,9 @@ public:
      *         - 支持在测试中多次调用
      * @attention 仅供测试使用，生产代码应使用 Shutdown()
      */
+#ifdef _DEBUG
     static void TestReset();
+#endif
 
     // ========================================================================
     // 日志方法
@@ -120,7 +122,9 @@ private:
      * @brief 测试专用内部重置（需要持有锁）
      * @details 使用 spdlog::drop() 而非 spdlog::shutdown()，支持多次调用
      */
+#ifdef _DEBUG
     void TestReset_Internal();
+#endif
 
     // 底层 logger
     std::shared_ptr<spdlog::logger> m_logger;

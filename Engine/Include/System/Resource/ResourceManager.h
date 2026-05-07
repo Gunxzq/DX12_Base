@@ -40,7 +40,9 @@ public:
      * @note 绕过帧延迟机制，立即处理 m_pendingReleases 中所有条目。
      *       仅用于测试环境，生产代码不应调用此方法。
      */
+#ifdef _DEBUG
     void ForceCleanupForTesting();
+#endif
 
     // --- 被动调用接口 (由 TaskBucket 调用) ---
 

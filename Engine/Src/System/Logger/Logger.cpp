@@ -39,6 +39,7 @@ void Logger::Shutdown() {
     }
 }
 
+#ifdef _DEBUG
 void Logger::TestReset() {
     std::unique_lock<std::shared_mutex> lock(s_mutex);
     if (s_instance) {
@@ -46,6 +47,7 @@ void Logger::TestReset() {
         s_isInitialized = false;
     }
 }
+#endif
 
 Logger::~Logger() {
     // 确保在静态对象销毁时清理资源
@@ -140,6 +142,7 @@ void Logger::Shutdown_Internal() {
     s_isInitialized = false;
 }
 
+#ifdef _DEBUG
 void Logger::TestReset_Internal() {
     if (!m_logger) {
         return;
@@ -165,6 +168,7 @@ void Logger::TestReset_Internal() {
         fprintf(stderr, "[Logger] Error during test reset: %s\n", e.what());
     }
 }
+#endif
 
 } // namespace Core
 } // namespace DX12Engine

@@ -36,7 +36,9 @@ void ResourceManager::Initialize(const ResourceSystemConfig &config) {
 }
 
 void ResourceManager::Shutdown() {
+#ifdef _DEBUG
     ForceCleanupForTesting();
+#endif
 
     for (auto &pair : m_dataPools) {
         if (pair.second) {
@@ -90,6 +92,7 @@ void ResourceManager::InitializeDataPoolsFromConfig(const ResourceSystemConfig &
     }
 }
 
+#ifdef _DEBUG
 void ResourceManager::ForceCleanupForTesting() {
     // 在清理 Pending 队列之前，先强制收割 TLS 缓存
     // 这确保了测试线程缓存的索引能正确归还到全局池
@@ -122,6 +125,7 @@ void ResourceManager::ForceCleanupForTesting() {
         m_handlePool.ForceResetForTesting();
     }
 }
+#endif
 
 ResourceHandle ResourceManager::AllocateSlot(ResourceType type) {
     // 根据 ResourceType 确定池ID（简单映射）

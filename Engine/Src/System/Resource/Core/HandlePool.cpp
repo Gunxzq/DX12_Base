@@ -60,6 +60,7 @@ void HandlePool::Initialize(const InitConfig &config) {
     }
 }
 
+#ifdef _DEBUG
 void HandlePool::HarvestTLSCaches() {
     // 显式收割当前线程的 TLS 缓存中的索引
     // 由 ResourceManager::ForceCleanupForTesting() 调用，确保测试结束时回收所有借用的索引
@@ -108,6 +109,7 @@ void HandlePool::ForceResetForTesting() {
         t_tlsCache.owner = nullptr;
     }
 }
+#endif
 
 void HandlePool::Shutdown() {
     // 先收割当前线程的 TLS 缓存
