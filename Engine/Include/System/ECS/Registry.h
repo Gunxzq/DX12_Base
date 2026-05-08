@@ -66,8 +66,7 @@ public:
      * @param args 构造函数参数
      * @return 组件引用
      */
-    template <typename T, typename... Args>
-    T &AddComponent(Entity e, Args &&...args) {
+    template <typename T, typename... Args> T &AddComponent(Entity e, Args &&...args) {
         ValidateEntity(e);
         return m_registry.emplace<T>(e, std::forward<Args>(args)...);
     }
@@ -77,8 +76,7 @@ public:
      * @tparam T 组件类型
      * @param e 实体 ID
      */
-    template <typename T>
-    void RemoveComponent(Entity e) {
+    template <typename T> void RemoveComponent(Entity e) {
         ValidateEntity(e);
         m_registry.remove<T>(e);
     }
@@ -87,15 +85,13 @@ public:
      * @brief 获取组件引用（不存在则抛出异常）
      * @tparam T 组件类型
      */
-    template <typename T>
-    T &GetComponent(Entity e) {
+    template <typename T> T &GetComponent(Entity e) {
         ValidateEntity(e);
         return m_registry.get<T>(e);
     }
 
     /// Const 版本
-    template <typename T>
-    const T &GetComponent(Entity e) const {
+    template <typename T> const T &GetComponent(Entity e) const {
         ValidateEntity(e);
         return m_registry.get<T>(e);
     }
@@ -104,26 +100,21 @@ public:
      * @brief 尝试获取组件（不存在返回 nullptr）
      * @tparam T 组件类型
      */
-    template <typename T>
-    T *TryGetComponent(Entity e) {
+    template <typename T> T *TryGetComponent(Entity e) {
         if (!IsValid(e))
             return nullptr;
         return m_registry.try_get<T>(e);
     }
 
     /// Const 版本
-    template <typename T>
-    const T *TryGetComponent(Entity e) const {
+    template <typename T> const T *TryGetComponent(Entity e) const {
         if (!IsValid(e))
             return nullptr;
         return m_registry.try_get<T>(e);
     }
 
     /// 检查实体是否拥有某组件
-    template <typename T>
-    bool HasComponent(Entity e) const {
-        return IsValid(e) && m_registry.all_of<T>(e);
-    }
+    template <typename T> bool HasComponent(Entity e) const { return IsValid(e) && m_registry.all_of<T>(e); }
 
     // =======================================================================
     // 3. 视图查询 (View Query)
@@ -150,16 +141,10 @@ public:
      * @note 返回的是 EnTT 的 basic_view，我们不做二次包装以保证性能
      *       如果未来需要更换 ECS 引擎，只需修改此文件
      */
-    template <typename... Components>
-    auto view() {
-        return m_registry.view<Components...>();
-    }
+    template <typename... Components> auto view() { return m_registry.view<Components...>(); }
 
     /// Const 版本
-    template <typename... Components>
-    auto view() const {
-        return m_registry.view<Components...>();
-    }
+    template <typename... Components> auto view() const { return m_registry.view<Components...>(); }
 
     // =======================================================================
     // 4. 上下文管理 (Context / Singletons)
@@ -171,14 +156,12 @@ public:
      * @param args 构造函数参数
      * @return 引用
      */
-    template <typename T, typename... Args>
-    T &SetContext(Args &&...args) {
+    template <typename T, typename... Args> T &SetContext(Args &&...args) {
         return m_registry.ctx().emplace<T>(std::forward<Args>(args)...);
     }
 
     /// 获取全局上下文（不存在则抛出异常）
-    template <typename T>
-    T &GetContext() {
+    template <typename T> T &GetContext() {
         if (!m_registry.ctx().contains<T>()) {
             throw std::runtime_error("Context not found: " + std::string(typeid(T).name()));
         }
@@ -186,8 +169,7 @@ public:
     }
 
     /// Const 版本
-    template <typename T>
-    const T &GetContext() const {
+    template <typename T> const T &GetContext() const {
         if (!m_registry.ctx().contains<T>()) {
             throw std::runtime_error("Context not found: " + std::string(typeid(T).name()));
         }
@@ -195,28 +177,20 @@ public:
     }
 
     /// 替换上下文（如果存在则替换，不存在则创建）
-    template <typename T, typename... Args>
-    T &CtxReplace(Args &&...args) {
+    template <typename T, typename... Args> T &CtxReplace(Args &&...args) {
         return m_registry.ctx().replace<T>(std::forward<Args>(args)...);
     }
 
     /// 查找上下文（不存在返回 nullptr）
-    template <typename T>
-    T *CtxFind() {
-        return m_registry.ctx().contains<T>() ? &m_registry.ctx().get<T>() : nullptr;
-    }
+    template <typename T> T *CtxFind() { return m_registry.ctx().contains<T>() ? &m_registry.ctx().get<T>() : nullptr; }
 
     /// Const 版本
-    template <typename T>
-    const T *CtxFind() const {
+    template <typename T> const T *CtxFind() const {
         return m_registry.ctx().contains<T>() ? &m_registry.ctx().get<T>() : nullptr;
     }
 
     /// 检查上下文是否存在
-    template <typename T>
-    bool HasContext() const {
-        return m_registry.ctx().contains<T>();
-    }
+    template <typename T> bool HasContext() const { return m_registry.ctx().contains<T>(); }
 
     // =======================================================================
     // 5. 墓碑与清理

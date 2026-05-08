@@ -16,12 +16,13 @@ struct FlushBudget {
 };
 
 /**
- * @brief 消息分发器（中间层）
+ * @brief 消息分发器（Event层对外的唯一接口）
  *
  * 职责：
  * 1. 封装 MessageArena 和 BucketManager 的交互，提供统一的 Post 接口。
- * 2. 执行“双阀门”预算控制，批量获取消息供调度器使用。
- * 3. 确保“写入 Arena”与“入桶”的原子性（要么都成功，要么都失败）。
+ * 2. 执行"双阀门"预算控制，批量获取消息供调度器使用。
+ * 3. 确保"写入 Arena"与"入桶"的原子性（要么都成功，要么都失败）。
+ * 4. 为调度层提供消息收集接口，屏蔽内部实现细节。
  */
 class MessageDispatcher {
 public:
@@ -80,10 +81,20 @@ public:
      */
     void EndFrame();
 
-    // --- 供调度器使用的访问接口 ---
+    // ========================================================================
+    // 供调度层使用的接口
+    // ========================================================================
 
+    /**
+     * @brief 获取 Arena 引用
+     * @note 调度层通过此接口读取原始消息（typeHash, senderId, payload, sendTimestamp）
+     */
     inline MessageArena &GetArena() { return *m_arena; }
-    inline BucketManager &GetBucketManager() { return m_bucketManager; }
+
+    /**
+     * @brief 获取消息计数
+     */
+    inline uint32_t GetMessageCount() const { return m_arena->GetCount(); }
 
 private:
     std::unique_ptr<MessageArena> m_arena;

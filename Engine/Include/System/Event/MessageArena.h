@@ -142,6 +142,57 @@ public:
 
     static constexpr MessageIndex INVALID_INDEX = 0xFFFFFFFF;
 
+    // ========================================================================
+    // 消息完整内容访问接口
+    // ========================================================================
+
+    /**
+     * @brief 消息完整内容结构体
+     * @note 供调度层获取消息的完整数据，包含时间戳
+     */
+    struct MessageContent {
+        EventTypeHash typeHash = 0;
+        uint32_t senderId = 0;
+        uint64_t payload = 0;
+        uint64_t sendTimestamp = 0; // 发送时间（微秒）
+    };
+
+    /**
+     * @brief 获取消息的完整内容
+     * @param index 消息索引
+     * @return MessageContent 包含 typeHash, senderId, payload, sendTimestamp
+     * @note Arena 只存储数据，不解析 payload；System 层自行解析高低位
+     */
+    inline MessageContent GetMessage(MessageIndex index) const {
+        MessageContent content;
+        content.typeHash = m_currentFrameTypeBuffer[index];
+        content.senderId = m_currentFrameSenderBuffer[index];
+        content.payload = m_currentFramePayloadBuffer[index];
+        content.sendTimestamp = m_currentFrameTimeBuffer[index];
+        return content;
+    }
+
+    /**
+     * @brief 获取消息类型哈希
+     */
+    inline EventTypeHash GetType(MessageIndex index) const { return m_currentFrameTypeBuffer[index]; }
+
+    /**
+     * @brief 获取发送者 ID
+     */
+    inline uint32_t GetSender(MessageIndex index) const { return m_currentFrameSenderBuffer[index]; }
+
+    /**
+     * @brief 获取原始 Payload（64位数据）
+     * @note System 层使用辅助方法自行解析高低位
+     */
+    inline uint64_t GetPayload(MessageIndex index) const { return m_currentFramePayloadBuffer[index]; }
+
+    /**
+     * @brief 获取发送时间戳（微秒）
+     */
+    inline uint64_t GetTimestamp(MessageIndex index) const { return m_currentFrameTimeBuffer[index]; }
+
 private:
     // --- 环形缓冲区结构 (纯 SoA) ---
     struct RingBuffer {
@@ -162,8 +213,8 @@ private:
     std::atomic<uint32_t> m_overflowCount{0};
 
     // --- 当前帧视图 (指向环形缓冲区的只读窗口) ---
-    uint32_t m_currentFrameStartIndex;      // 当前帧起始的全局索引
-    uint32_t m_currentFrameMessageCount;    // 当前帧消息数量
+    uint32_t m_currentFrameStartIndex;   // 当前帧起始的全局索引
+    uint32_t m_currentFrameMessageCount; // 当前帧消息数量
     const EventTypeHash *m_currentFrameTypeBuffer;
     const uint32_t *m_currentFrameSenderBuffer;
     const uint64_t *m_currentFrameTimeBuffer;
