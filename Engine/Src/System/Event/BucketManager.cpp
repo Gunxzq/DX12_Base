@@ -1,4 +1,3 @@
-// File: d:\project\DX12_Base\Engine\Src\System\Event\BucketManager.cpp
 #include "System/Event/BucketManager.h"
 #include <cassert>
 #include <chrono>
@@ -88,13 +87,12 @@ uint64_t BucketManager::GetCurrentTimeUs() const {
 
 bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPriority) {
     // 使用循环代替递归，避免栈溢出
-    constexpr int MAX_RETRIES = 16;                          // 适当增加重试次数，配合退避策略
-    constexpr int RETRY_BACKOFF_THRESHOLD = MAX_RETRIES / 2; // 半程后开始退避
+    constexpr int MAX_RETRIES = 16;
+    constexpr int RETRY_BACKOFF_THRESHOLD = MAX_RETRIES / 2;
 
     for (int retry = 0; retry < MAX_RETRIES; ++retry) {
-        // ===== "急救手术"惊群缓解：退避策略 =====
+        // ===== 退避策略 =====
         if (retry > RETRY_BACKOFF_THRESHOLD) {
-            // 重试次数过半，使用 CPU pause 让出资源
             ARENA_CPU_PAUSE();
         }
 
@@ -114,7 +112,6 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
 
         // ===== 收集所有候选桶的 Generation =====
         uint64_t candidateGenerations[MAX_PRIORITY_LEVELS] = {0};
-        uint32_t validCandidateMask = 0;
 
         // 遍历所有非空桶，计算有效优先级
         uint32_t tempMask = currentMask;
@@ -137,7 +134,6 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
 
             // 保存 Generation 用于后续 ABA 验证
             candidateGenerations[idx] = genBefore;
-            validCandidateMask |= (1u << idx);
 
             // 计算有效优先级: Base + Aging
             uint64_t lastServeTime = bucket.GetLastServeTime();
@@ -151,19 +147,19 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
         }
 
         if (!found) {
-            // 所有桶都已变空，原子地清除掩码
-            m_activeMask.fetch_and(~currentMask, std::memory_order_release);
-            return false;
+            // tempMask 非空但所有桶在遍历时都为空，尝试清除对应位
+            uint32_t oldMask = m_activeMask.load(std::memory_order_relaxed);
+            uint32_t newMask = oldMask & ~tempMask;
+            m_activeMask.compare_exchange_weak(oldMask, newMask, std::memory_order_release, std::memory_order_relaxed);
+            continue;
         }
 
         // --- 从选定的最佳桶中弹出消息 ---
         Bucket &bestBucket = m_buckets[bestBucketIdx];
 
         // ===== ABA 问题检测 =====
-        // 在选择和 Pop 之间验证 Generation 是否变化
         uint64_t genBeforePop = bestBucket.GetGeneration();
         if (candidateGenerations[bestBucketIdx] != genBeforePop) {
-            // Generation 变了！数据被修改了，放弃本次计算并重试
             continue;
         }
 
@@ -175,9 +171,6 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
             outIndex = index;
             outPriority = static_cast<EventPriority>(bestBucketIdx);
 
-            // ===== 使用原子递增更新 LastServeTime =====
-            // 避免时间戳被覆盖导致 Aging 计算错误
-            // 使用 fetch_add(0) 实际上不改变值，但保证了原子性
             bestBucket.UpdateLastServeTime(currentTimeUs);
 
             // 检查桶是否变空，如果是，原子更新掩码
@@ -196,7 +189,6 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
             return true;
         } else {
             // ===== Pop 失败也要更新 Generation =====
-            // 表示有并发操作发生了
             bestBucket.IncrementGeneration();
 
             // 并发竞争：刚才非空，现在空了
@@ -213,8 +205,7 @@ bool BucketManager::PopNextMessage(MessageIndex &outIndex, EventPriority &outPri
         }
     }
 
-    // 达到最大重试次数，说明并发竞争激烈
-    // 使用 yield 让其他线程有机会运行
+    // 达到最大重试次数，让出时间片
     std::this_thread::yield();
     return false;
 }

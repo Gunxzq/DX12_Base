@@ -27,7 +27,12 @@ bool MessageDispatcher::PostEvent(EventTypeHash typeHash, uint32_t senderId, uin
 
 uint32_t MessageDispatcher::FlushEvents(std::vector<MessageIndex> &outIndices, const FlushBudget &budget) {
     outIndices.clear();
-    outIndices.reserve(budget.hardLimit); // 预分配内存，避免 push_back 时的重新分配
+    outIndices.reserve(budget.hardLimit);
+
+    // 关键：先刷新 TLS 缓冲区，确保消息从线程本地写入全局缓冲区
+    if (m_arena) {
+        m_arena->FlushAllTLS();
+    }
 
     uint32_t processedCount = 0;
     auto startTime = std::chrono::high_resolution_clock::now();
@@ -37,7 +42,7 @@ uint32_t MessageDispatcher::FlushEvents(std::vector<MessageIndex> &outIndices, c
         auto now = std::chrono::high_resolution_clock::now();
         uint64_t elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(now - startTime).count();
         if (elapsedUs > budget.maxTimeUs) {
-            break; // 时间耗尽，触发硬限制
+            break;
         }
 
         // 2. 从 BucketManager 获取下一个最高优先级消息
@@ -45,7 +50,7 @@ uint32_t MessageDispatcher::FlushEvents(std::vector<MessageIndex> &outIndices, c
         EventPriority priority;
 
         if (!m_bucketManager.PopNextMessage(index, priority)) {
-            break; // 桶空了，没有更多消息
+            break;
         }
 
         // 3. 软限制检查（示例：P4 背景任务每帧最多处理 5 条）

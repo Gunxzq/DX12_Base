@@ -56,6 +56,7 @@ public:
      */
     inline bool PostEvent(EventTypeHash typeHash, uint32_t senderId, uint32_t val1, uint32_t val2,
                           EventPriority priority) {
+
         uint64_t packed = (static_cast<uint64_t>(val2) << 32) | static_cast<uint64_t>(val1);
         return PostEvent(typeHash, senderId, packed, priority);
     }
