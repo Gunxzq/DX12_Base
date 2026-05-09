@@ -1,4 +1,12 @@
 #pragma once
+
+// 禁用 fmt 库的即时函数评估（C++20 consteval）
+// MSVC 2022 与 fmt 12.x 的已知兼容性问题
+// https://github.com/fmtlib/fmt/issues/3571
+#if defined(_MSC_VER)
+#define FMT_USE_CONSTEVAL 0
+#endif
+
 #include "Common/Common.h"
 #include <spdlog/logger.h>
 
@@ -52,37 +60,37 @@ public:
 #endif
 
     // ========================================================================
-    // 日志方法
+    // 日志方法 - 使用显式类型转换避免 MSVC 即时函数评估问题
     // ========================================================================
 
     template <typename... Args> void Trace(const char *fmt, Args... args) const {
         if (m_logger)
-            m_logger->trace(fmt, args...);
+            m_logger->trace(fmt, static_cast<std::decay_t<Args>>(args)...);
     }
 
     template <typename... Args> void Debug(const char *fmt, Args... args) const {
         if (m_logger)
-            m_logger->debug(fmt, args...);
+            m_logger->debug(fmt, static_cast<std::decay_t<Args>>(args)...);
     }
 
     template <typename... Args> void Info(const char *fmt, Args... args) const {
         if (m_logger)
-            m_logger->info(fmt, args...);
+            m_logger->info(fmt, static_cast<std::decay_t<Args>>(args)...);
     }
 
     template <typename... Args> void Warn(const char *fmt, Args... args) const {
         if (m_logger)
-            m_logger->warn(fmt, args...);
+            m_logger->warn(fmt, static_cast<std::decay_t<Args>>(args)...);
     }
 
     template <typename... Args> void Error(const char *fmt, Args... args) const {
         if (m_logger)
-            m_logger->error(fmt, args...);
+            m_logger->error(fmt, static_cast<std::decay_t<Args>>(args)...);
     }
 
     template <typename... Args> void Critical(const char *fmt, Args... args) const {
         if (m_logger)
-            m_logger->critical(fmt, args...);
+            m_logger->critical(fmt, static_cast<std::decay_t<Args>>(args)...);
     }
 
     /**

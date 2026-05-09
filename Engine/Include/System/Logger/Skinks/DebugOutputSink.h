@@ -20,7 +20,7 @@ protected:
     void sink_it_(const spdlog::details::log_msg &msg) override {
         // 1. 格式化消息
         spdlog::memory_buf_t formatted;
-        base_sink<Mutex>::formatter_->format(msg, formatted);
+        spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
 
         // 2. 确保以 null 结尾，因为 OutputDebugStringA 需要 C-style 字符串
         formatted.push_back('\0');

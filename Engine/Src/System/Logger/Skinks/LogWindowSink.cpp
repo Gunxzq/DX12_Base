@@ -14,7 +14,7 @@ template <typename Mutex> void log_window_sink_impl<Mutex>::sink_it_(const spdlo
 
     // 1. 格式化消息
     spdlog::memory_buf_t formatted;
-    base_sink<Mutex>::formatter_->format(msg, formatted);
+    spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
 
     // 转换为 std::string 以便传递给回调
     std::string formatted_text(formatted.begin(), formatted.end());
