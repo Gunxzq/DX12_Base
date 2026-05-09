@@ -294,13 +294,26 @@ void D3D12DeviceContext::OnResize(uint32_t width, uint32_t height) {
     dsvDesc.Texture2D.MipSlice = 0;
     md3dDevice->CreateDepthStencilView(mDepthStencilBuffer.Get(), &dsvDesc, GetDepthStencilView());
 
+    // 重置命令列表并转换深度缓冲区状态
+    ThrowIfFailed(mDirectCmdListAlloc->Reset());
+    ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    mCommandList->ResourceBarrier(1, &barrier);
+
+    ThrowIfFailed(mCommandList->Close());
+    ID3D12CommandList *cmdLists[] = {mCommandList.Get()};
+    mCommandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
+    FlushCommandQueue();
+
     UpdateViewportAndScissorRect();
 }
 
 ID3D12GraphicsCommandList *D3D12DeviceContext::BeginFrame() {
     // 等待上一帧的 GPU 命令完成后再重置命令分配器
     if (mFence->GetCompletedValue() < mCurrentFence) {
-        HANDLE eventHandle = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
+        HANDLE eventHandle = CreateEventEx(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
         ThrowIfFailed(mFence->SetEventOnCompletion(mCurrentFence, eventHandle));
         WaitForSingleObject(eventHandle, INFINITE);
         CloseHandle(eventHandle);
@@ -350,7 +363,7 @@ void D3D12DeviceContext::FlushCommandQueue() {
 
     // Wait until the GPU has completed commands up to this fence point.
     if (mFence->GetCompletedValue() < mCurrentFence) {
-        HANDLE eventHandle = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
+        HANDLE eventHandle = CreateEventEx(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
         ThrowIfFailed(mFence->SetEventOnCompletion(mCurrentFence, eventHandle));
         WaitForSingleObject(eventHandle, INFINITE);
         CloseHandle(eventHandle);
