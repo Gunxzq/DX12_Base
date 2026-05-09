@@ -2,10 +2,17 @@
 #include "Common/d3dUtil.h"
 #include "Core/Context/GameContext.h"
 #include "Renderer/Core/D3D12DeviceContext.h"
-#include "System/Logger/Logger.h"
+#include "System/ECS/Registry.h"
+#include "System/Event/MessageDispatcher.h"
+#include "System/Framework/SystemRegistry.h"
+#include "System/Scheduler/FrameDriver.h"
 #include "System/Window/Window.h"
 
-Game::Game(DX12Engine::Core::GameContext *context) : m_context(context), m_isRunning(false), m_isInitialized(false) {}
+using namespace DX12Engine;
+using namespace DX12Engine::Scheduler;
+using namespace DX12Engine::ECS;
+
+Game::Game(Core::GameContext *context) : m_context(context), m_isRunning(false), m_isInitialized(false) {}
 
 Game::~Game() {
     if (m_isRunning || m_isInitialized) {
@@ -14,7 +21,6 @@ Game::~Game() {
 }
 
 bool Game::Initialize() {
-    // 验证 Context
     if (!m_context || !m_context->IsValid()) {
         m_context->Logging->Error("[Game] Failed to initialize: %s",
                                   m_context ? m_context->GetInvalidReason() : "Context is null");
@@ -22,13 +28,10 @@ bool Game::Initialize() {
     }
 
     m_context->Logging->Info("[Game] Initializing game...");
-
-    // 初始化游戏模块
     InitializeGameModules();
 
     m_isInitialized = true;
     m_context->Logging->Info("[Game] Game initialized successfully");
-
     return true;
 }
 
@@ -38,34 +41,33 @@ int Game::Run() {
         return -1;
     }
 
-    m_context->Logging->Info("[Game] Starting game loop...");
+    if (!m_context->FrameDriver) {
+        m_context->Logging->Error("[Game] Cannot run: FrameDriver is not set");
+        return -1;
+    }
+
+    m_context->Logging->Info("[Game] Starting game loop with FrameDriver...");
     m_isRunning = true;
-
-    // 初始化主计时器
     m_context->MainTimer->Reset();
-
-    // 主循环就绪后才显示窗口
     m_context->Window->Show();
 
-    // 主循环
+    // 初始化 FrameDriver
+    m_context->FrameDriver->Initialize();
+
     while (m_isRunning && !m_context->Window->ShouldClose()) {
-        // 处理 Windows 消息
         m_context->Window->ProcessMessages();
 
-        // 更新计时器
-        m_context->MainTimer->Tick();
-        m_deltaTime = m_context->MainTimer->DeltaTime();
+        // 调用 FrameDriver::Tick() 来处理消息和执行注册的 Systems
+        m_context->FrameDriver->Tick();
 
-        // 更新逻辑
-        Update(m_deltaTime);
-
-        // 渲染画面
         Render();
     }
 
+    // 停止 FrameDriver
+    m_context->FrameDriver->Stop();
+
     m_context->Logging->Info("[Game] Game loop ended");
     Shutdown();
-
     return 0;
 }
 
@@ -75,57 +77,77 @@ void Game::Shutdown() {
     }
 
     m_context->Logging->Info("[Game] Shutting down game...");
-
-    // 清理游戏模块
     ShutdownGameModules();
 
     m_isRunning = false;
     m_isInitialized = false;
-
     m_context->Logging->Info("[Game] Game shutdown complete");
 }
 
 void Game::Update(float deltaTime) {
-    // TODO: 更新游戏逻辑模块
-    // m_inputManager->Update(deltaTime);
-    // m_playerManager->Update(deltaTime);
-    // m_levelManager->Update(deltaTime);
-    // m_audioManager->Update(deltaTime);
+    // 消息处理由 FrameDriver::Tick() 完成
+    // 此方法保留给纯逻辑更新（如物理、动画等）
 }
 
 void Game::Render() {
     auto *renderer = m_context->DeviceContext;
-
-    // 开始帧渲染，获取命令列表
     ID3D12GraphicsCommandList *cmdList = renderer->BeginFrame();
 
-    // 获取当前 Back Buffer 的 RTV 和 DSV
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = renderer->GetCurrentBackBufferView();
     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = renderer->GetDepthStencilView();
 
-    // 设置渲染目标
     cmdList->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
 
-    // 清除渲染目标为 CornflowerBlue (0.4f, 0.6f, 0.9f)
     const float clearColor[] = {0.4f, 0.6f, 0.9f, 1.0f};
     cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-
-    // 清除深度模板缓冲区
     cmdList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
-    // 结束帧并呈现
     renderer->EndFrame();
 }
 
 void Game::InitializeGameModules() {
     m_context->Logging->Info("[Game] Initializing game modules...");
 
-    // TODO: 初始化游戏逻辑模块
-    // m_inputManager = std::make_unique<InputManager>(m_context);
-    // m_playerManager = std::make_unique<PlayerManager>(m_context);
-    // m_levelManager = std::make_unique<LevelManager>(m_context);
-    // m_assetManager = std::make_unique<AssetManager>(m_context);
-    // m_audioManager = std::make_unique<AudioManager>(m_context);
+    // ─────────────────────────────────────────────────
+    // L4: 注册消息驱动的 Systems（利用调度层能力）
+    // ─────────────────────────────────────────────────
+
+    // WindowResizeSystem - 处理窗口大小变化 (主线程执行)
+    SystemRegistry::Register(
+        {.name = "WindowResizeSystem",
+         .func =
+             [this](Registry &, const MessageContext &ctx) {
+                 // 首先输出到调试器
+                 char dbgBuf[256];
+                 sprintf_s(dbgBuf, "[WindowResizeSystem] Executed! Width=%u Height=%u Payload=0x%llX\n", ctx.GetLow32(),
+                           ctx.GetHigh32(), (unsigned long long)ctx.payload);
+                 ::OutputDebugStringA(dbgBuf);
+
+                 // 尝试 spdlog 输出
+                 if (m_context && m_context->Logging) {
+                     m_context->Logging->Info("[WindowResizeSystem] spdlog: {}x{}", ctx.GetLow32(), ctx.GetHigh32());
+                 } else {
+                     ::OutputDebugStringA("[WindowResizeSystem] WARNING: m_context or Logging is null!\n");
+                 }
+
+                 // DX12 resize
+                 if (m_context && m_context->DeviceContext) {
+                     m_context->DeviceContext->OnResize(ctx.GetLow32(), ctx.GetHigh32());
+                 }
+             },
+         .phase = TaskPhase::EarlyUpdate,
+         .threadType = ThreadType::Main, // 主线程执行
+         .interestedMessages = {System::Event::WindowResizeEvent::StaticTypeHash}});
+
+    // 验证注册
+    auto allSystems = SystemRegistry::GetAllSystems();
+    wchar_t buf[128];
+    swprintf_s(buf, L"[Game] Total systems registered: %zu", allSystems.size());
+    ::OutputDebugStringW(buf);
+
+    auto interested = SystemRegistry::GetInterestedSystems(System::Event::WindowResizeEvent::StaticTypeHash);
+    swprintf_s(buf, L"[Game] Systems interested in WindowResizeEvent: %zu", interested.size());
+    ::OutputDebugStringW(buf);
 
     m_context->Logging->Info("[Game] Game modules initialized");
 }
@@ -133,12 +155,7 @@ void Game::InitializeGameModules() {
 void Game::ShutdownGameModules() {
     m_context->Logging->Info("[Game] Shutting down game modules...");
 
-    // TODO: 清理游戏逻辑模块
-    // m_audioManager.reset();
-    // m_assetManager.reset();
-    // m_levelManager.reset();
-    // m_playerManager.reset();
-    // m_inputManager.reset();
+    SystemRegistry::Clear();
 
     m_context->Logging->Info("[Game] Game modules shutdown complete");
 }

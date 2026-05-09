@@ -1,6 +1,7 @@
 #pragma once
 #include "Common/Common.h"
 #include "Resource.h"
+#include "System/Event/EventTypes.h"
 
 namespace DX12Engine {
 namespace Core {
@@ -8,9 +9,6 @@ namespace Core {
 struct WindowConfig;
 
 class Window {
-public:
-    // 配置结构体，替代硬编码的字符串
-
 public:
     Window(const WindowConfig &config);
     ~Window();
@@ -36,6 +34,9 @@ private:
     // 成员 WndProc，处理具体逻辑
     LRESULT WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+    // 发送窗口大小变化事件
+    void PostWindowResizeEvent(uint32_t width, uint32_t height);
+
 private:
     HWND m_hWnd = nullptr;
     HINSTANCE m_hInstance = nullptr;
@@ -50,6 +51,11 @@ private:
     uint32_t m_Width = 0;
     uint32_t m_Height = 0;
     bool m_ShouldClose = false;
+
+    // 是否处于模态大小调整状态（用户拖拽调整大小时为 true）
+    bool m_InSizeMove = false;
+    // 拖拽期间尺寸是否真正变化（用于减少 WM_EXITSIZEMOVE 时的不必要事件）
+    bool m_SizeChangedDuringMove = false;
 };
 
 } // namespace Core

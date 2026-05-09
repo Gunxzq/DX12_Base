@@ -19,14 +19,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 
         DX12Engine::Core::GameContext *context = bootstrap.CreateContext();
 
+        // Game 层直接使用 context->FrameDriver（由 Bootstrap 创建）
         auto game = std::make_unique<Game>(context);
 
-        // 4. 初始化游戏逻辑
+        // 初始化游戏逻辑
         if (!game->Initialize()) {
             return -1;
         }
 
-        // 5. 运行主循环 (阻塞直到退出)
+        // 运行主循环 (阻塞直到退出)
         game->Run();
 
     } catch (const std::exception &e) {
