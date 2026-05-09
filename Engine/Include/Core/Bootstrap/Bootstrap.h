@@ -3,9 +3,18 @@
 #include "Common/Common.h"
 #include "Core/Context/GameTimer.h"
 #include "Renderer/Core/D3D12DeviceContext.h"
+#include "System/ECS/Registry.h"
 #include "System/Window/Window.h"
 
 namespace DX12Engine {
+
+namespace Scheduler {
+class FrameDriver;
+}
+namespace ECS {
+class Registry;
+}
+
 namespace Core {
 
 // ========================================================================
@@ -43,6 +52,11 @@ public:
      */
     GameContext *CreateContext();
 
+    /**
+     * @brief 获取 ECS Registry 引用（用于初始化调度器）
+     */
+    DX12Engine::ECS::Registry &GetRegistry();
+
 private:
     /**
      * @brief 关闭并清理
@@ -70,6 +84,16 @@ private:
     bool InitializeD3DDeviceContext();
 
     /**
+     * @brief 初始化 ECS Registry
+     */
+    void InitializeRegistry();
+
+    /**
+     * @brief 初始化 FrameDriver (调度层核心)
+     */
+    void InitializeFrameDriver();
+
+    /**
      * @brief 初始化模块
      * @date 2026-04-21
      */
@@ -81,6 +105,8 @@ private:
     std::unique_ptr<GameContext> m_context;                                    // 游戏上下文
     std::unique_ptr<GameTimer> m_mainTimer;                                    // 主计时器
     std::unique_ptr<DX12Engine::Renderer::D3D12DeviceContext> m_deviceContext; // D3D12 设备上下文
+    std::unique_ptr<DX12Engine::ECS::Registry> m_registry;                     // ECS Registry
+    DX12Engine::Scheduler::FrameDriver *m_frameDriver = nullptr;               // FrameDriver (由基础设施层创建)
 
     // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问
 

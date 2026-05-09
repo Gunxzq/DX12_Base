@@ -1,14 +1,26 @@
 #pragma once
 
 #include "Core/Context/GameTimer.h"
-#include <memory>
-namespace DX12Engine {
-namespace Renderer {
-class D3D12DeviceContext; // 这里声明的是 DX12Engine::Renderer::D3D12DeviceContext
-}
-} // namespace DX12Engine
+#include "System/Logger/Logger.h"
 
 namespace DX12Engine {
+namespace Renderer {
+class D3D12DeviceContext;
+}
+
+namespace System {
+namespace Event {
+class MessageDispatcher;
+}
+} // namespace System
+
+namespace ECS {
+class Registry;
+}
+
+namespace Scheduler {
+class FrameDriver;
+}
 
 namespace Core {
 
@@ -39,10 +51,16 @@ public:
 
     // ── 基础设施子系统指针 ──
 
-    Window *Window = nullptr;        // 窗口管理
-    ConfigManager *Config = nullptr; // 配置管理
-    Logger *Logging = nullptr;       // 日志系统
-    GameTimer *MainTimer = nullptr;  // 主计时器
+    Window *Window = nullptr;                     // 窗口管理
+    ConfigManager *Config = nullptr;               // 配置管理
+    Logger *Logging = nullptr;                     // 日志系统
+    GameTimer *MainTimer = nullptr;                // 主计时器
+    System::Event::MessageDispatcher *Dispatcher = nullptr; // 消息分发器（单例）
+
+    // ── 调度与数据层指针 ──
+
+    Scheduler::FrameDriver *FrameDriver = nullptr; // 帧驱动器
+    ECS::Registry *Registry = nullptr;             // ECS 注册表
 
     // ── 渲染子系统指针 ──
 

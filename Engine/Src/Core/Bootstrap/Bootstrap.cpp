@@ -3,9 +3,15 @@
 #include "Core/Context/GameContext.h"
 #include "Renderer/Core/D3D12DeviceContext.h"
 #include "Runtime/Scene/Camera.h"
+#include "System/ECS/Registry.h"
+#include "System/Event/MessageDispatcher.h"
 #include "System/Logger/DebugOverlay.h"
 #include "System/Logger/Logger.h"
+#include "System/Scheduler/FrameDriver.h"
 #include "System/Window/Window.h"
+
+using DX12Engine::ECS::Registry;
+using DX12Engine::Scheduler::FrameDriver;
 
 namespace {
 void EarlyLog(const std::string &msg) {
@@ -21,16 +27,30 @@ namespace Core {
 Bootstrap::~Bootstrap() { Shutdown(); }
 
 void Bootstrap::Shutdown() {
-    // 1. 销毁 GameContext
+    // 1. 关闭调度器上下文 (FrameDriver)
+    DX12Engine::Scheduler::ShutdownSchedulerContext();
+    m_frameDriver = nullptr;
+
+    // 2. 销毁 GameContext
     m_context.reset();
 
-    // 2. 销毁 D3D12 设备上下文
+    // 3. 销毁 D3D12 设备上下文
     m_deviceContext.reset();
 
-    // 3. 销毁 Window
+    // 4. 销毁 Window
     m_window.reset();
 
-    // 4. 关闭 Logger (如果已初始化)
+    // 5. 销毁 ECS Registry
+    m_registry.reset();
+
+    // 6. 关闭 MessageDispatcher 单例
+    try {
+        System::Event::MessageDispatcher::Shutdown();
+    } catch (...) {
+        // 忽略
+    }
+
+    // 7. 关闭 Logger (如果已初始化)
     // 注意：Logger::Shutdown 是静态方法，内部会处理单例清理
     try {
         Logger::Shutdown();
@@ -38,7 +58,7 @@ void Bootstrap::Shutdown() {
         // 忽略析构期间的异常
     }
 
-    // 5. 关闭 ConfigManager
+    // 8. 关闭 ConfigManager
     try {
         ConfigManager::GetInstance().Shutdown();
     } catch (...) {
@@ -129,6 +149,34 @@ bool Bootstrap::InitializeD3DDeviceContext() {
     return true;
 }
 
+void Bootstrap::InitializeRegistry() {
+    Logger::GetInstance()->Info("[Bootstrap] Initializing ECS Registry...");
+
+    m_registry = std::make_unique<Registry>();
+
+    Logger::GetInstance()->Info("[Bootstrap] ECS Registry initialized successfully");
+}
+
+void Bootstrap::InitializeFrameDriver() {
+    Logger::GetInstance()->Info("[Bootstrap] Initializing FrameDriver...");
+
+    if (!m_registry) {
+        throw std::runtime_error("[Bootstrap] Registry must be initialized before FrameDriver");
+    }
+
+    // 创建全局调度器上下文
+    ::DX12Engine::Scheduler::InitializeSchedulerContext(*m_registry);
+
+    // 获取 FrameDriver 指针并保存
+    auto &schedulerCtx = ::DX12Engine::Scheduler::GetSchedulerContext();
+    if (!schedulerCtx.frameDriver) {
+        throw std::runtime_error("[Bootstrap] Failed to create FrameDriver");
+    }
+    m_frameDriver = schedulerCtx.frameDriver;
+
+    Logger::GetInstance()->Info("[Bootstrap] FrameDriver initialized successfully");
+}
+
 void Bootstrap::InitializeModules() {
     try {
         // 1. 配置 (基础)
@@ -146,6 +194,17 @@ void Bootstrap::InitializeModules() {
         if (!InitializeD3DDeviceContext()) {
             throw std::runtime_error("[Bootstrap] InitializeD3DDeviceContext returned false.");
         }
+
+        // 5. MessageDispatcher 单例 (Event 层，调度系统需要)
+        Logger::GetInstance()->Info("[Bootstrap] Initializing MessageDispatcher...");
+        System::Event::MessageDispatcher::Init();
+        Logger::GetInstance()->Info("[Bootstrap] MessageDispatcher initialized.");
+
+        // 6. ECS Registry (调度系统需要)
+        InitializeRegistry();
+
+        // 7. FrameDriver (调度层核心，由基础设施层创建)
+        InitializeFrameDriver();
 
     } catch (const std::exception &e) {
         // 如果任何一步失败，记录错误并重新抛出
@@ -184,9 +243,19 @@ GameContext *Bootstrap::CreateContext() {
     m_context->Logging = Logger::GetInstance();
     m_context->Window = m_window.get();
     m_context->MainTimer = m_mainTimer.get();
+    m_context->Dispatcher = System::Event::MessageDispatcher::GetInstance();
+    m_context->Registry = m_registry.get();
+    m_context->FrameDriver = m_frameDriver;
     m_context->DeviceContext = m_deviceContext.get();
 
     return m_context.get();
+}
+
+DX12Engine::ECS::Registry &Bootstrap::GetRegistry() {
+    if (!m_registry) {
+        throw std::runtime_error("[Bootstrap] Registry not initialized");
+    }
+    return *m_registry;
 }
 
 void Bootstrap::Run() {

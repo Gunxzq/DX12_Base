@@ -1,5 +1,7 @@
 #include "System/Window/Window.h"
 #include "Core/Config/WindowConfig.h"
+#include "System/Event/MessageDispatcher.h"
+#include <Windows.h>
 
 namespace DX12Engine {
 namespace Core {
@@ -111,31 +113,69 @@ LRESULT CALLBACK Window::WndProcStatic(HWND hWnd, UINT msg, WPARAM wParam, LPARA
 
 LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
-    case WM_SIZE:
+    case WM_ENTERSIZEMOVE:
+        // 用户开始拖拽窗口，进入模态大小调整
+        m_InSizeMove = true;
+        m_SizeChangedDuringMove = false;
+        return 0;
 
-        if (wParam != SIZE_MINIMIZED) {
-            m_Width = LOWORD(lParam);
-            m_Height = HIWORD(lParam);
+    case WM_SIZE:
+        if (wParam == SIZE_MINIMIZED) {
+            return 0;
+        }
+
+        {
+            uint32_t newWidth = LOWORD(lParam);
+            uint32_t newHeight = HIWORD(lParam);
+
+            // 仅当尺寸真正变化时处理
+            if (newWidth != m_Width || newHeight != m_Height) {
+                m_Width = newWidth;
+                m_Height = newHeight;
+
+                if (!m_InSizeMove) {
+                    // 非模态大小调整（全屏、最大化等）：立即发送事件
+                    PostWindowResizeEvent(m_Width, m_Height);
+                } else {
+                    // 拖拽期间尺寸变化，记录标志
+                    m_SizeChangedDuringMove = true;
+                }
+            }
         }
         return 0;
 
     case WM_CLOSE:
         m_ShouldClose = true;
-        DestroyWindow(hWnd); // 显式销毁窗口，触发 WM_DESTROY → PostQuitMessage
+        DestroyWindow(hWnd);
         return 0;
 
     case WM_DESTROY:
-
-        // 发生一个终止消息循环的消息
         PostQuitMessage(0);
         return 0;
 
-    case WM_COMMAND:
+    case WM_EXITSIZEMOVE:
+        // 用户拖拽结束，仅当尺寸实际变化时发送事件
+        if (m_SizeChangedDuringMove) {
+            PostWindowResizeEvent(m_Width, m_Height);
+        }
+        m_InSizeMove = false;
+        return 0;
 
+    case WM_COMMAND:
         return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
 
     return DefWindowProcW(hWnd, msg, wParam, lParam);
+}
+
+void Window::PostWindowResizeEvent(uint32_t width, uint32_t height) {
+    auto *dispatcher = System::Event::MessageDispatcher::GetInstance();
+    if (!dispatcher) {
+        return;
+    }
+
+    dispatcher->PostEvent(System::Event::WindowResizeEvent::StaticTypeHash, 0, width, height,
+                          System::Event::EventPriority::P1_High);
 }
 
 } // namespace Core
