@@ -1,8 +1,9 @@
 #include "System/Scheduler/FrameDriver.h"
+#include "System/Event/MessageDispatcher.h"
 #include "System/Scheduler/TaskGraphBuilder.h"
 #include <thread>
 
-namespace DX12::Scheduler {
+namespace DX12Engine::Scheduler {
 
 using namespace DX12Engine::System::Event;
 
@@ -36,13 +37,6 @@ FrameDriver::FrameDriver(ECS::Registry &registry)
     : m_registry(registry), m_executor(std::thread::hardware_concurrency() - 1) // 留一个给主线程
 {
     m_lastFrameTime = std::chrono::steady_clock::now();
-
-    // ========================================================================
-    // 初始化 L1 通信层
-    // ========================================================================
-    m_messageArena = std::make_unique<MessageArena>();
-    m_bucketManager = std::make_unique<BucketManager>();
-    m_bucketManager->Initialize(*m_messageArena, 2048); // 每个桶2K容量
 }
 
 FrameDriver::~FrameDriver() { Stop(); }
@@ -83,8 +77,11 @@ bool FrameDriver::Tick() {
     // 1. 清空上一帧的图（或使用双缓冲交换）
     m_taskGraph.Clear();
 
-    // 2. 从通信层收集消息，构建本帧的任务图
-    TaskGraphBuilder::BuildFromBuckets(m_taskGraph, *m_bucketManager, *m_messageArena, m_registry, m_stats);
+    // 2. 从通信层收集消息，构建本帧的任务图（通过 Dispatcher 单例）
+    auto *dispatcher = MessageDispatcher::GetInstance();
+    if (dispatcher) {
+        TaskGraphBuilder::BuildFromBuckets(m_taskGraph, *dispatcher, m_registry, m_stats);
+    }
 
     // 3. 如果图非空，验证合法性
     if (m_taskGraph.GetTaskCount() > 0) {
@@ -97,9 +94,10 @@ bool FrameDriver::Tick() {
         }
     }
 
-    // 4. 重置消息桶（准备接收下一帧消息）
-    m_bucketManager->ResetFrame();
-    m_messageArena->ResetFrame();
+    // 4. 帧结束清理（通过 Dispatcher 单例统一清理 Arena 和 BucketManager）
+    if (dispatcher) {
+        dispatcher->EndFrame();
+    }
 
     // ========================================================================
     // 阶段 1: EarlyUpdate - 输入、网络
@@ -223,4 +221,4 @@ void FrameDriver::UpdateStats() {
     // m_stats.activeEntities = m_registry.Alive();  // 需要 Registry 提供接口
 }
 
-} // namespace DX12::Scheduler
+} // namespace DX12Engine::Scheduler

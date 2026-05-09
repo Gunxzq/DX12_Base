@@ -43,7 +43,7 @@
 // L4 层便捷 API
 // ========================================================================
 
-namespace DX12::Scheduler {
+namespace DX12Engine::Scheduler {
 
 /**
  * @brief 注册一个 System 到调度器
@@ -162,55 +162,35 @@ inline bool
 PostEvent(const EventType &event,
           DX12Engine::System::Event::EventPriority priority = DX12Engine::System::Event::EventPriority::P2_Normal,
           uint32_t senderId = 0) {
-    auto &ctx = GetSchedulerContext();
-    if (!ctx.frameDriver) {
+    auto *dispatcher = DX12Engine::System::Event::MessageDispatcher::GetInstance();
+    if (!dispatcher) {
         return false;
     }
 
-    auto &arena = ctx.frameDriver->GetMessageArena();
-    auto &bucketManager = ctx.frameDriver->GetBucketManager();
+    // 获取事件类型哈希
+    using EventTag = DX12Engine::System::Event::EventTag<EventType>;
+    auto typeHash = EventTag::Hash();
 
-    // 分配槽位
-    auto index = arena.AllocateSlot();
-    if (index == DX12Engine::System::Event::MessageArena::INVALID_INDEX) {
-        return false; // Arena满
-    }
+    // 打包 payload（这里简化处理，实际可能需要更复杂的序列化）
+    uint64_t payloadData = 0;
 
-    // 写入消息（存储指针，调用方必须确保事件生命周期！）
-    // 关键：Arena只存指针，不复制数据。事件必须在帧末之前保持有效。
-    arena.WriteMessage<EventType>(index, senderId, const_cast<EventType *>(&event));
-
-    // 入桶
-    return bucketManager.PushMessage(index, priority);
+    return dispatcher->PostEvent(typeHash, senderId, payloadData, priority);
 }
 
-/**
- * @brief 注册System（流式API）
- *
- * 使用示例：
- * @code
- * REGISTER_SYSTEM(PlayerMoveSystem, Update, Any)
- *     .WithMessage<PlayerInputEvent>()
- *     .DependsOn("PhysicsSystem")
- *     .Func([](Registry& r, const MessageContext& ctx) {
- *         // 处理逻辑
- *     });
- * @endcode
- */
-#define REGISTER_SYSTEM(Name, Phase, Thread) DX12::Scheduler::SystemBuilder(#Name, TaskPhase::Phase, ThreadType::Thread)
+// REGISTER_SYSTEM 宏已移至 System/Framework/SystemRegistry.h
 
 /**
  * @brief 获取System注册表（用于查询已注册的System）
  */
 inline const std::unordered_map<SystemId, SystemInfo> &GetSystemRegistry() { return SystemRegistry::GetAllSystems(); }
 
-} // namespace DX12::Scheduler
+} // namespace DX12Engine::Scheduler
 
 // ========================================================================
 // 静态分片 (Sharding) - 利用多核并行处理 Entity
 // ========================================================================
 
-namespace DX12::Scheduler {
+namespace DX12Engine::Scheduler {
 
 /**
  * @brief 分片执行函数模板
@@ -282,7 +262,7 @@ template <typename Index, typename Func> void RangeShard(Index begin, Index end,
     }
 }
 
-} // namespace DX12::Scheduler
+} // namespace DX12Engine::Scheduler
 
 // ========================================================================
 // 便捷宏（可选）
@@ -295,7 +275,7 @@ template <typename Index, typename Func> void RangeShard(Index begin, Index end,
  * @code
  * DEFINE_SYSTEM(PlayerController, Update) {
  *     // 每帧执行的逻辑
- *     auto& registry = DX12::Scheduler::Registry();
+ *     auto& registry = DX12Engine::Scheduler::Registry();
  *     for (auto [entity, input, transform] : registry.view<Input, Transform>()) {
  *         // 处理输入...
  *     }
@@ -305,7 +285,8 @@ template <typename Index, typename Func> void RangeShard(Index begin, Index end,
 #define DEFINE_SYSTEM(Name, Phase)                                                                                     \
     static struct Name##SystemRegistrar {                                                                              \
         Name##SystemRegistrar() {                                                                                      \
-            DX12::Scheduler::RegisterSystem(#Name, DX12::Scheduler::TaskPhase::Phase, Name##System::Execute);          \
+            DX12Engine::Scheduler::RegisterSystem(#Name, DX12Engine::Scheduler::TaskPhase::Phase,                      \
+                                                  Name##System::Execute);                                              \
         }                                                                                                              \
     } g_##Name##SystemRegistrar;                                                                                       \
     struct Name##System {                                                                                              \
@@ -323,7 +304,7 @@ template <typename Index, typename Func> void RangeShard(Index begin, Index end,
  */
 #define SYSTEM_DEPENDS_ON(Task, Dependency)                                                                            \
     static struct Task##DependsOn##Dependency {                                                                        \
-        Task##DependsOn##Dependency() { DX12::Scheduler::DependsOn(Task, Dependency); }                                \
+        Task##DependsOn##Dependency() { DX12Engine::Scheduler::DependsOn(Task, Dependency); }                          \
     } g_##Task##DependsOn##Dependency
 
 /**
@@ -335,7 +316,7 @@ template <typename Index, typename Func> void RangeShard(Index begin, Index end,
  *     // 这个函数会被调用 8 次，每次处理 1/8 的 Entity
  *     // shardIdx: 当前分片索引 (0-7)
  *     // shardCount: 总分片数 (8)
- *     auto& registry = DX12::Scheduler::Registry();
+ *     auto& registry = DX12Engine::Scheduler::Registry();
  *     for (auto [e, particle] : registry.view<Particle>()) {
  *         if (std::hash<entt::entity>{}(e) % shardCount == shardIdx) {
  *             // 更新粒子
@@ -347,7 +328,8 @@ template <typename Index, typename Func> void RangeShard(Index begin, Index end,
 #define DEFINE_SHARDED_SYSTEM(Name, Phase, ShardCount)                                                                 \
     static struct Name##SystemRegistrar {                                                                              \
         Name##SystemRegistrar() {                                                                                      \
-            DX12::Scheduler::RegisterSystem(#Name, DX12::Scheduler::TaskPhase::Phase, Name##System::Execute);          \
+            DX12Engine::Scheduler::RegisterSystem(#Name, DX12Engine::Scheduler::TaskPhase::Phase,                      \
+                                                  Name##System::Execute);                                              \
         }                                                                                                              \
     } g_##Name##SystemRegistrar;                                                                                       \
     struct Name##System {                                                                                              \

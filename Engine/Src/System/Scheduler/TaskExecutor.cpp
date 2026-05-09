@@ -1,18 +1,16 @@
 #include "System/Scheduler/TaskExecutor.h"
 #include <cassert>
 
-namespace DX12::Scheduler {
+namespace DX12Engine::Scheduler {
 
 // ========================================================================
 // TaskExecutor Implementation (TaskFlow Version)
 // ========================================================================
 
 TaskExecutor::TaskExecutor(size_t workerCount)
-    : m_executor(workerCount == 0 ? std::thread::hardware_concurrency() : workerCount)
-{
-}
+    : m_executor(workerCount == 0 ? std::thread::hardware_concurrency() : workerCount) {}
 
-void TaskExecutor::Execute(const TaskGraph& graph) {
+void TaskExecutor::Execute(const TaskGraph &graph) {
     // 清空上一帧的任务流
     m_taskflow.clear();
 
@@ -26,14 +24,16 @@ void TaskExecutor::Execute(const TaskGraph& graph) {
     for (int phaseIdx = 0; phaseIdx < static_cast<int>(TaskPhase::Count); ++phaseIdx) {
         TaskPhase phase = static_cast<TaskPhase>(phaseIdx);
         auto it = phaseGroups.find(phase);
-        if (it == phaseGroups.end()) continue;
+        if (it == phaseGroups.end())
+            continue;
 
-        const auto& taskIds = it->second;
+        const auto &taskIds = it->second;
 
         // 创建 tf::Task
         for (TaskId id : taskIds) {
-            const Task* task = graph.GetTask(id);
-            if (!task) continue;
+            const Task *task = graph.GetTask(id);
+            if (!task)
+                continue;
 
             // Main/Render 线程任务：分发到专用队列
             if (task->thread == ThreadType::Main || task->thread == ThreadType::Render) {
@@ -42,20 +42,20 @@ void TaskExecutor::Execute(const TaskGraph& graph) {
             }
 
             // Any/Worker 任务：创建 tf::Task
-            tf::Task flowTask = m_taskflow.emplace([func = task->execute]() {
-                func();
-            });
+            tf::Task flowTask = m_taskflow.emplace([func = task->execute]() { func(); });
             flowTask.name(task->name.c_str());
             flowTasks[id] = flowTask;
         }
 
         // 建立依赖关系
         for (TaskId id : taskIds) {
-            const Task* task = graph.GetTask(id);
-            if (!task || task->thread != ThreadType::Any) continue;
+            const Task *task = graph.GetTask(id);
+            if (!task || task->thread != ThreadType::Any)
+                continue;
 
             auto flowTaskIt = flowTasks.find(id);
-            if (flowTaskIt == flowTasks.end()) continue;
+            if (flowTaskIt == flowTasks.end())
+                continue;
 
             for (TaskId depId : task->dependencies) {
                 auto depIt = flowTasks.find(depId);
@@ -79,22 +79,24 @@ void TaskExecutor::Execute(const TaskGraph& graph) {
     }
 }
 
-void TaskExecutor::ExecutePhase(const TaskGraph& graph, TaskPhase phase) {
+void TaskExecutor::ExecutePhase(const TaskGraph &graph, TaskPhase phase) {
     // 清空任务流
     m_taskflow.clear();
 
     // 获取指定阶段的任务
     auto phaseGroups = graph.SortByPhase();
     auto it = phaseGroups.find(phase);
-    if (it == phaseGroups.end()) return;
+    if (it == phaseGroups.end())
+        return;
 
-    const auto& taskIds = it->second;
+    const auto &taskIds = it->second;
     std::unordered_map<TaskId, tf::Task> flowTasks;
 
     // 创建 tf::Task
     for (TaskId id : taskIds) {
-        const Task* task = graph.GetTask(id);
-        if (!task) continue;
+        const Task *task = graph.GetTask(id);
+        if (!task)
+            continue;
 
         // Main/Render 线程任务：分发到专用队列
         if (task->thread == ThreadType::Main || task->thread == ThreadType::Render) {
@@ -103,25 +105,26 @@ void TaskExecutor::ExecutePhase(const TaskGraph& graph, TaskPhase phase) {
         }
 
         // Any/Worker 任务
-        tf::Task flowTask = m_taskflow.emplace([func = task->execute]() {
-            func();
-        });
+        tf::Task flowTask = m_taskflow.emplace([func = task->execute]() { func(); });
         flowTask.name(task->name.c_str());
         flowTasks[id] = flowTask;
     }
 
     // 建立阶段内依赖
     for (TaskId id : taskIds) {
-        const Task* task = graph.GetTask(id);
-        if (!task || task->thread != ThreadType::Any) continue;
+        const Task *task = graph.GetTask(id);
+        if (!task || task->thread != ThreadType::Any)
+            continue;
 
         auto flowTaskIt = flowTasks.find(id);
-        if (flowTaskIt == flowTasks.end()) continue;
+        if (flowTaskIt == flowTasks.end())
+            continue;
 
         for (TaskId depId : task->dependencies) {
             // 只建立同阶段内的依赖
-            const Task* depTask = graph.GetTask(depId);
-            if (!depTask || depTask->phase != phase) continue;
+            const Task *depTask = graph.GetTask(depId);
+            if (!depTask || depTask->phase != phase)
+                continue;
 
             auto depIt = flowTasks.find(depId);
             if (depIt != flowTasks.end()) {
@@ -154,24 +157,24 @@ std::vector<std::function<void()>> TaskExecutor::StealRenderThreadTasks() {
 size_t TaskExecutor::GetDynamicTaskCap() const {
     // 【预留插口】Frame Slicing 实现
     // 目前无限制，未来可根据帧率动态调整
-    return 0;  // 0 = 无限制
+    return 0; // 0 = 无限制
 }
 
-void TaskExecutor::DispatchToThreadQueue(const Task& task) {
+void TaskExecutor::DispatchToThreadQueue(const Task &task) {
     switch (task.thread) {
-        case ThreadType::Main: {
-            std::lock_guard<std::mutex> lock(m_mainThreadMutex);
-            m_mainThreadQueue.push_back(task.execute);
-            break;
-        }
-        case ThreadType::Render: {
-            std::lock_guard<std::mutex> lock(m_renderThreadMutex);
-            m_renderThreadQueue.push_back(task.execute);
-            break;
-        }
-        default:
-            assert(false && "Invalid thread type for DispatchToThreadQueue");
+    case ThreadType::Main: {
+        std::lock_guard<std::mutex> lock(m_mainThreadMutex);
+        m_mainThreadQueue.push_back(task.execute);
+        break;
+    }
+    case ThreadType::Render: {
+        std::lock_guard<std::mutex> lock(m_renderThreadMutex);
+        m_renderThreadQueue.push_back(task.execute);
+        break;
+    }
+    default:
+        assert(false && "Invalid thread type for DispatchToThreadQueue");
     }
 }
 
-} // namespace DX12::Scheduler
+} // namespace DX12Engine::Scheduler

@@ -1,7 +1,5 @@
 #pragma once
 #include "System/ECS/Registry.h"
-#include "System/Event/BucketManager.h"
-#include "System/Event/MessageArena.h"
 #include "TaskExecutor.h"
 #include "TaskGraphBuilder.h"
 #include <atomic>
@@ -10,7 +8,7 @@
 #include <memory>
 #include <vector>
 
-namespace DX12::Scheduler {
+namespace DX12Engine::Scheduler {
 
 // ========================================================================
 // 帧统计信息
@@ -122,12 +120,6 @@ public:
     /// 获取任务图（供 L4 层注册 System）
     TaskGraph &GetTaskGraph() { return m_taskGraph; }
 
-    /// 获取消息Arena（供生产者发送消息）
-    DX12Engine::System::Event::MessageArena &GetMessageArena() { return *m_messageArena; }
-
-    /// 获取桶管理器（供调度器消费消息）
-    DX12Engine::System::Event::BucketManager &GetBucketManager() { return *m_bucketManager; }
-
     // ========================================================================
     // L4 层回调注册（多缓冲交换钩子）
     // ========================================================================
@@ -172,10 +164,6 @@ private:
     FrameStats m_stats;
     std::atomic<bool> m_running{false};
     uint32_t m_targetFPS = 0;
-
-    // L1 通信层组件
-    std::unique_ptr<DX12Engine::System::Event::MessageArena> m_messageArena;
-    std::unique_ptr<DX12Engine::System::Event::BucketManager> m_bucketManager;
 
     // 双缓冲TaskGraph（避免每帧分配）
     TaskGraph m_backGraph; // 后台构建的图
@@ -227,4 +215,4 @@ void InitializeSchedulerContext(ECS::Registry &registry);
 /// 关闭调度器上下文
 void ShutdownSchedulerContext();
 
-} // namespace DX12::Scheduler
+} // namespace DX12Engine::Scheduler

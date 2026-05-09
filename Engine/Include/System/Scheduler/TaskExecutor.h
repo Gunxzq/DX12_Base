@@ -5,7 +5,7 @@
 #include <taskflow/taskflow.hpp>
 #include <vector>
 
-namespace DX12::Scheduler {
+namespace DX12Engine::Scheduler {
 
 // ========================================================================
 // TaskFlow 执行器
@@ -92,4 +92,4 @@ private:
     void DispatchToThreadQueue(const Task &task);
 };
 
-} // namespace DX12::Scheduler
+} // namespace DX12Engine::Scheduler

@@ -1,109 +1,81 @@
 #include "System/Scheduler/TaskGraphBuilder.h"
-#include "System/Scheduler/FrameDriver.h"
 #include <algorithm>
+#include <chrono>
 
-namespace DX12::Scheduler {
-
-// ========================================================================
-// SystemRegistry 实现
-// ========================================================================
-
-SystemId SystemRegistry::s_nextId = 1;
-std::unordered_map<SystemId, SystemInfo> SystemRegistry::s_systems;
-std::unordered_map<std::string, SystemId> SystemRegistry::s_nameToId;
-std::unordered_map<MessageTypeHash, std::vector<SystemId>> SystemRegistry::s_messageToSystems;
-
-SystemId SystemRegistry::Register(SystemInfo info) {
-    SystemId id = s_nextId++;
-    info.id = id;
-
-    s_systems[id] = std::move(info);
-    s_nameToId[s_systems[id].name] = id;
-
-    // 建立消息到System的映射
-    for (auto msgType : s_systems[id].interestedMessages) {
-        s_messageToSystems[msgType].push_back(id);
-    }
-
-    return id;
-}
-
-const SystemInfo *SystemRegistry::GetSystem(SystemId id) {
-    auto it = s_systems.find(id);
-    return (it != s_systems.end()) ? &it->second : nullptr;
-}
-
-const SystemInfo *SystemRegistry::GetSystemByName(const std::string &name) {
-    auto it = s_nameToId.find(name);
-    if (it != s_nameToId.end()) {
-        return GetSystem(it->second);
-    }
-    return nullptr;
-}
-
-std::vector<SystemId> SystemRegistry::GetInterestedSystems(MessageTypeHash messageType) {
-    auto it = s_messageToSystems.find(messageType);
-    if (it != s_messageToSystems.end()) {
-        return it->second;
-    }
-    return {};
-}
-
-const std::unordered_map<SystemId, SystemInfo> &SystemRegistry::GetAllSystems() { return s_systems; }
-
-void SystemRegistry::Clear() {
-    s_systems.clear();
-    s_nameToId.clear();
-    s_messageToSystems.clear();
-    s_nextId = 1;
-}
+namespace DX12Engine::Scheduler {
 
 // ========================================================================
-// SystemBuilder 实现
+// 辅助函数
 // ========================================================================
 
-SystemBuilder::SystemBuilder(const std::string &name, TaskPhase phase, ThreadType thread) {
-    m_info.name = name;
-    m_info.phase = phase;
-    m_info.threadType = thread;
+/**
+ * @brief 获取当前时间戳（微秒）
+ */
+inline uint64_t GetCurrentTimeUs() {
+    auto now = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
 }
 
-SystemBuilder &SystemBuilder::Func(SystemFunc func) {
-    m_info.func = std::move(func);
-    return *this;
-}
+/**
+ * @brief 从 Dispatcher 收集消息并构建 MessageContext
+ *
+ * 通信层只提供原始 MessageIndex，调度层负责：
+ * 1. 调用 FlushEvents 获取索引
+ * 2. 通过 GetArena 读取原始消息
+ * 3. 构建完整的 MessageContext（填充 receiveTimestamp）
+ */
+std::vector<MessageContext> CollectMessages(DX12Engine::System::Event::MessageDispatcher &dispatcher,
+                                            const FrameStats &frameStats) {
+    std::vector<MessageContext> messages;
 
-SystemBuilder &SystemBuilder::DependsOn(const std::string &systemName) {
-    const auto *depSystem = SystemRegistry::GetSystemByName(systemName);
-    if (depSystem) {
-        m_info.dependencies.push_back(depSystem->id);
+    // 预算：每帧最多处理 1024 条消息，时间预算 1ms
+    DX12Engine::System::Event::FlushBudget budget;
+    budget.hardLimit = 1024;
+    budget.maxTimeUs = 1000; // 1ms
+
+    std::vector<DX12Engine::System::Event::MessageIndex> indices;
+    uint32_t count = dispatcher.FlushEvents(indices, budget);
+
+    if (count == 0) {
+        return messages;
     }
-    return *this;
-}
 
-SystemBuilder &SystemBuilder::Priority(TaskPriority priority) {
-    m_info.priority = priority;
-    return *this;
-}
+    messages.reserve(count);
 
-SystemId SystemBuilder::Build() { return SystemRegistry::Register(std::move(m_info)); }
+    auto &arena = dispatcher.GetArena();
+    uint64_t receiveTime = GetCurrentTimeUs();
+
+    for (auto idx : indices) {
+        auto content = arena.GetMessage(idx);
+
+        MessageContext ctx;
+        ctx.messageType = content.typeHash;
+        ctx.senderId = content.senderId;
+        ctx.payload = content.payload;
+        ctx.sendTimestamp = content.sendTimestamp;
+        ctx.receiveTimestamp = receiveTime;
+
+        messages.push_back(ctx);
+    }
+
+    return messages;
+}
 
 // ========================================================================
 // TaskGraphBuilder 实现
 // ========================================================================
 
-void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, DX12Engine::System::Event::BucketManager &bucketManager,
-                                        DX12Engine::System::Event::MessageArena &arena, ECS::Registry &registry,
-                                        const FrameStats &frameStats) {
+void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, DX12Engine::System::Event::MessageDispatcher &dispatcher,
+                                        ECS::Registry &registry, const FrameStats &frameStats) {
     // ========================================================================
     // 阶段 0: 清空上一帧的图
     // ========================================================================
     graph.Clear();
 
     // ========================================================================
-    // 阶段 1: 收集所有消息
+    // 阶段 1: 收集所有消息（调度层自己构建 MessageContext）
     // ========================================================================
-    auto messages = CollectMessages(bucketManager, arena);
+    auto messages = CollectMessages(dispatcher, frameStats);
 
     // 如果没有消息，且没有常驻System，图保持为空
     // 空的图在执行阶段会直接跳过，实现"极致节能"
@@ -112,22 +84,21 @@ void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, DX12Engine::System::Ev
     }
 
     // ========================================================================
-    // 阶段 2: 根据消息激活对应的System
+    // 阶段 2: 将消息和System转化为Task
     // ========================================================================
-    auto activatedSystems = ActivateSystems(messages);
+    // BuildTasks 会：
+    // 1. 遍历每条消息
+    // 2. 找到对该消息感兴趣的 System
+    // 3. 为每个 System 创建 Task（通过线程局部上下文传递消息）
+    auto systemToTask = BuildTasks(graph, {}, messages, registry, frameStats);
 
     // ========================================================================
-    // 阶段 3: 将激活的System转化为Task
+    // 阶段 3: 建立依赖关系（暂时为空，为未来扩展预留）
     // ========================================================================
-    auto systemToTask = BuildTasks(graph, activatedSystems, frameStats);
+    // BuildDependencies(graph, {}, systemToTask);
 
     // ========================================================================
-    // 阶段 4: 建立依赖关系
-    // ========================================================================
-    BuildDependencies(graph, activatedSystems, systemToTask);
-
-    // ========================================================================
-    // 阶段 5: 验证图的合法性
+    // 阶段 4: 验证图的合法性
     // ========================================================================
     try {
         graph.Validate();
@@ -137,39 +108,6 @@ void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, DX12Engine::System::Ev
         graph.Clear();
         throw;
     }
-}
-
-std::vector<MessageContext> TaskGraphBuilder::CollectMessages(DX12Engine::System::Event::BucketManager &bucketManager,
-                                                              DX12Engine::System::Event::MessageArena &arena) {
-    std::vector<MessageContext> messages;
-
-    // 预分配空间（优化：避免多次扩容）
-    messages.reserve(256);
-
-    DX12Engine::System::Event::MessageIndex index;
-    DX12Engine::System::Event::EventPriority priority;
-
-    // 从所有优先级桶中窃取消息
-    // BucketManager会自动处理优先级和Aging
-    while (bucketManager.PopNextMessage(index, priority)) {
-        // 关键：先检查消息是否已提交（payload 非空）
-        // GetPayload 使用 acquire 语义，确保看到完整的写入数据
-        void* payload = arena.GetPayload(index);
-        if (payload == nullptr) {
-            // 消息尚未提交（极罕见情况：生产者正在写入）
-            // 跳过此消息，它将在下一帧被处理
-            continue;
-        }
-
-        MessageContext ctx;
-        ctx.messageType = arena.GetType(index);
-        ctx.senderId = arena.GetSender(index);
-        ctx.payload = payload;
-
-        messages.push_back(ctx);
-    }
-
-    return messages;
 }
 
 std::unordered_set<SystemId> TaskGraphBuilder::ActivateSystems(const std::vector<MessageContext> &messages) {
@@ -195,39 +133,61 @@ std::unordered_set<SystemId> TaskGraphBuilder::ActivateSystems(const std::vector
     return activated;
 }
 
+// 线程局部消息上下文（Task执行时通过 GetCurrentMessageContext() 访问）
+thread_local const MessageContext *g_currentMessageContext = nullptr;
+thread_local std::vector<MessageContext> g_currentMessages;
+
+// 获取当前消息上下文
+const MessageContext *GetCurrentMessageContext() { return g_currentMessageContext; }
+
 std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &graph,
                                                                   const std::unordered_set<SystemId> &activatedSystems,
+                                                                  const std::vector<MessageContext> &messages,
+                                                                  ECS::Registry &registry,
                                                                   const FrameStats &frameStats) {
     std::unordered_map<SystemId, TaskId> systemToTask;
 
-    for (SystemId sysId : activatedSystems) {
-        const auto *info = SystemRegistry::GetSystem(sysId);
-        if (!info)
-            continue;
+    // 保存到线程局部变量，供 GetCurrentMessageContext() 使用
+    g_currentMessages = messages;
 
-        // 创建Task
-        Task task;
-        task.name = info->name;
-        task.phase = info->phase;
-        task.thread = info->threadType;
-        task.priority = static_cast<uint32_t>(info->priority);
+    // 遍历每条消息，为处理该消息的每个 System 创建 Task
+    for (const auto &msgCtx : messages) {
+        // 设置当前消息上下文
+        g_currentMessageContext = &msgCtx;
 
-        // 包装System函数，注入上下文
-        // 注意：这里使用lambda捕获info指针，需要确保info生命周期
-        task.execute = [info]() {
-            MessageContext msgCtx;
-            msgCtx.deltaTime = 0.016f; // 默认值
-            msgCtx.frameNumber = 0;
-
-            if (info->func) {
-                // TODO: 需要传入registry和msgCtx
-                // info->func(registry, msgCtx);
+        // 找到对该消息感兴趣的 System
+        auto systems = SystemRegistry::GetInterestedSystems(msgCtx.messageType);
+        for (SystemId sysId : systems) {
+            // 避免重复创建 Task
+            if (systemToTask.find(sysId) != systemToTask.end()) {
+                continue;
             }
-        };
 
-        TaskId tid = graph.AddTask(std::move(task));
-        systemToTask[sysId] = tid;
+            const auto *info = SystemRegistry::GetSystem(sysId);
+            if (!info)
+                continue;
+
+            // 创建Task
+            Task task;
+            task.name = info->name;
+            task.phase = info->phase;
+            task.thread = info->threadType;
+            task.priority = static_cast<uint32_t>(info->priority);
+
+            // 包装System函数，直接捕获 msgCtx（不依赖 thread-local，避免悬空指针）
+            task.execute = [info, &registry, msgCtx]() {
+                if (info->func) {
+                    info->func(registry, msgCtx);
+                }
+            };
+
+            TaskId tid = graph.AddTask(std::move(task));
+            systemToTask[sysId] = tid;
+        }
     }
+
+    // 清理
+    g_currentMessageContext = nullptr;
 
     return systemToTask;
 }
@@ -258,4 +218,4 @@ void TaskGraphBuilder::BuildDependencies(TaskGraph &graph, const std::unordered_
     }
 }
 
-} // namespace DX12::Scheduler
+} // namespace DX12Engine::Scheduler

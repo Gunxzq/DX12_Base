@@ -1,8 +1,8 @@
 #include "System/Scheduler/TaskGraph.h"
-#include <stdexcept>
 #include <algorithm>
+#include <stdexcept>
 
-namespace DX12::Scheduler {
+namespace DX12Engine::Scheduler {
 
 TaskId TaskGraph::AddTask(Task task) {
     TaskId id = m_nextId++;
@@ -23,7 +23,7 @@ void TaskGraph::AddDependency(TaskId task, TaskId dependency) {
     m_tasks[dependency].dependents.insert(task);
 }
 
-void TaskGraph::AddDependencies(TaskId task, const std::vector<TaskId>& dependencies) {
+void TaskGraph::AddDependencies(TaskId task, const std::vector<TaskId> &dependencies) {
     for (TaskId dep : dependencies) {
         AddDependency(task, dep);
     }
@@ -37,7 +37,7 @@ std::vector<TaskId> TaskGraph::TopologicalSort() const {
     std::queue<TaskId> queue;
 
     // 找到所有入度为 0 的节点
-    for (const auto& [id, node] : m_tasks) {
+    for (const auto &[id, node] : m_tasks) {
         if (inDegree[id] == 0) {
             queue.push(id);
         }
@@ -49,7 +49,7 @@ std::vector<TaskId> TaskGraph::TopologicalSort() const {
         queue.pop();
         result.push_back(current);
 
-        const auto& node = m_tasks.at(current);
+        const auto &node = m_tasks.at(current);
         for (TaskId dependent : node.dependents) {
             if (--inDegree[dependent] == 0) {
                 queue.push(dependent);
@@ -73,15 +73,14 @@ std::unordered_map<TaskPhase, std::vector<TaskId>> TaskGraph::SortByPhase() cons
 
     // 按阶段分组
     for (TaskId id : sorted) {
-        const auto& task = m_tasks.at(id).task;
+        const auto &task = m_tasks.at(id).task;
         result[task.phase].push_back(id);
     }
 
     // 每个阶段内按优先级排序
-    for (auto& [phase, ids] : result) {
-        std::sort(ids.begin(), ids.end(), [this](TaskId a, TaskId b) {
-            return m_tasks.at(a).task.priority < m_tasks.at(b).task.priority;
-        });
+    for (auto &[phase, ids] : result) {
+        std::sort(ids.begin(), ids.end(),
+                  [this](TaskId a, TaskId b) { return m_tasks.at(a).task.priority < m_tasks.at(b).task.priority; });
     }
 
     return result;
@@ -92,19 +91,17 @@ void TaskGraph::Clear() {
     m_nextId = 1;
 }
 
-const Task* TaskGraph::GetTask(TaskId id) const {
+const Task *TaskGraph::GetTask(TaskId id) const {
     auto it = m_tasks.find(id);
     return (it != m_tasks.end()) ? &it->second.task : nullptr;
 }
 
-Task* TaskGraph::GetTask(TaskId id) {
+Task *TaskGraph::GetTask(TaskId id) {
     auto it = m_tasks.find(id);
     return (it != m_tasks.end()) ? &it->second.task : nullptr;
 }
 
-bool TaskGraph::HasCycle() const {
-    return !GetCyclePath().empty();
-}
+bool TaskGraph::HasCycle() const { return !GetCyclePath().empty(); }
 
 std::vector<TaskId> TaskGraph::GetCyclePath() const {
     // DFS 检测环并记录路径
@@ -114,15 +111,15 @@ std::vector<TaskId> TaskGraph::GetCyclePath() const {
     std::vector<TaskId> path;
 
     // 初始化颜色
-    for (const auto& [id, _] : m_tasks) {
+    for (const auto &[id, _] : m_tasks) {
         color[id] = Color::White;
     }
 
     std::function<bool(TaskId)> dfs = [&](TaskId u) -> bool {
         color[u] = Color::Gray;
 
-        const auto& node = m_tasks.at(u);
-        for (TaskId v : node.dependents) {  // 检查所有依赖 u 的节点
+        const auto &node = m_tasks.at(u);
+        for (TaskId v : node.dependents) { // 检查所有依赖 u 的节点
             if (color[v] == Color::Gray) {
                 // 发现回边，存在环
                 // 重建路径
@@ -138,7 +135,8 @@ std::vector<TaskId> TaskGraph::GetCyclePath() const {
             }
             if (color[v] == Color::White) {
                 parent[v] = u;
-                if (dfs(v)) return true;
+                if (dfs(v))
+                    return true;
             }
         }
 
@@ -146,13 +144,14 @@ std::vector<TaskId> TaskGraph::GetCyclePath() const {
         return false;
     };
 
-    for (const auto& [id, _] : m_tasks) {
+    for (const auto &[id, _] : m_tasks) {
         if (color[id] == Color::White) {
-            if (dfs(id)) return path;
+            if (dfs(id))
+                return path;
         }
     }
 
-    return path;  // 空路径表示无环
+    return path; // 空路径表示无环
 }
 
 void TaskGraph::Validate() const {
@@ -161,22 +160,21 @@ void TaskGraph::Validate() const {
     if (!cycle.empty()) {
         std::string msg = "Cycle detected in task graph: ";
         for (size_t i = 0; i < cycle.size(); ++i) {
-            if (i > 0) msg += " -> ";
-            const Task* task = GetTask(cycle[i]);
+            if (i > 0)
+                msg += " -> ";
+            const Task *task = GetTask(cycle[i]);
             msg += task ? task->name : std::to_string(cycle[i]);
         }
         throw std::runtime_error(msg);
     }
 
     // 2. 检查依赖是否存在
-    for (const auto& [id, node] : m_tasks) {
+    for (const auto &[id, node] : m_tasks) {
         for (TaskId depId : node.dependencies) {
             if (m_tasks.find(depId) == m_tasks.end()) {
-                const Task* task = GetTask(id);
-                throw std::runtime_error(
-                    "Task '" + (task ? task->name : std::to_string(id)) +
-                    "' depends on non-existent task: " + std::to_string(depId)
-                );
+                const Task *task = GetTask(id);
+                throw std::runtime_error("Task '" + (task ? task->name : std::to_string(id)) +
+                                         "' depends on non-existent task: " + std::to_string(depId));
             }
         }
     }
@@ -184,10 +182,10 @@ void TaskGraph::Validate() const {
 
 std::unordered_map<TaskId, int> TaskGraph::CalculateInDegree() const {
     std::unordered_map<TaskId, int> inDegree;
-    for (const auto& [id, node] : m_tasks) {
+    for (const auto &[id, node] : m_tasks) {
         inDegree[id] = static_cast<int>(node.dependencies.size());
     }
     return inDegree;
 }
 
-} // namespace DX12::Scheduler
+} // namespace DX12Engine::Scheduler
