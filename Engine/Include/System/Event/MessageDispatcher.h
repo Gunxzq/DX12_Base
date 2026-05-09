@@ -4,6 +4,7 @@
 #include "System/Event/Event.h"
 #include "System/Event/MessageArena.h"
 #include <cstdint>
+#include <shared_mutex>
 #include <vector>
 
 namespace DX12Engine {
@@ -18,6 +19,8 @@ struct FlushBudget {
 /**
  * @brief 消息分发器（Event层对外的唯一接口）
  *
+ * 单例模式：全局唯一实例，通过 GameContext 初始化
+ *
  * 职责：
  * 1. 封装 MessageArena 和 BucketManager 的交互，提供统一的 Post 接口。
  * 2. 执行"双阀门"预算控制，批量获取消息供调度器使用。
@@ -26,15 +29,30 @@ struct FlushBudget {
  */
 class MessageDispatcher {
 public:
-    MessageDispatcher();
-    ~MessageDispatcher() = default;
+    // ========================================================================
+    // 单例访问
+    // ========================================================================
+
+    /**
+     * @brief 获取 MessageDispatcher 单例实例
+     */
+    static MessageDispatcher *GetInstance();
 
     /**
      * @brief 初始化分发器
      * @param arenaCapacity Arena 容量
      * @param bucketCapacity 每个桶的容量
      */
-    void Initialize(uint32_t arenaCapacity = 65536, uint32_t bucketCapacity = 2048);
+    static void Init(uint32_t arenaCapacity = 65536, uint32_t bucketCapacity = 2048);
+
+    /**
+     * @brief 关闭分发器
+     */
+    static void Shutdown();
+
+    // ========================================================================
+    // 事件接口
+    // ========================================================================
 
     /**
      * @brief 【核心接口】发布事件
@@ -98,8 +116,26 @@ public:
     inline uint32_t GetMessageCount() const { return m_arena->GetCount(); }
 
 private:
+    MessageDispatcher() = default;
+    ~MessageDispatcher() = default;
+
+    // 禁止拷贝和移动
+    MessageDispatcher(const MessageDispatcher &) = delete;
+    MessageDispatcher &operator=(const MessageDispatcher &) = delete;
+    MessageDispatcher(MessageDispatcher &&) = delete;
+    MessageDispatcher &operator=(MessageDispatcher &&) = delete;
+
     std::unique_ptr<MessageArena> m_arena;
     BucketManager m_bucketManager;
+
+    // 线程安全锁
+    inline static std::shared_mutex s_mutex;
+
+    // 单例实例
+    inline static MessageDispatcher *s_instance = nullptr;
+
+    // 标记是否已初始化
+    inline static bool s_isInitialized = false;
 };
 
 } // namespace Event
