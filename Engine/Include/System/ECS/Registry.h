@@ -3,7 +3,7 @@
 #include <entt/entt.hpp>
 #include <stdexcept>
 
-namespace DX12::ECS {
+namespace DX12Engine::ECS {
 
 /**
  * @brief ECS 注册表封装 (Facade Pattern)
@@ -209,4 +209,4 @@ private:
     entt::registry m_registry;
 };
 
-} // namespace DX12::ECS
+} // namespace DX12Engine::ECS
