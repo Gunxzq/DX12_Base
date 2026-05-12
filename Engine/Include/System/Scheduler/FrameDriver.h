@@ -8,6 +8,14 @@
 #include <memory>
 #include <vector>
 
+namespace DX12Engine {
+namespace Renderer {
+class D3D12DeviceContext;
+class CommandManager;
+} // namespace Renderer
+
+} // namespace DX12Engine
+
 namespace DX12Engine::Scheduler {
 
 // ========================================================================
@@ -114,6 +122,12 @@ public:
     /// 设置目标帧率（0 = 不限制）
     void SetTargetFPS(uint32_t fps) { m_targetFPS = fps; }
 
+    /// 设置命令管理器（由 Bootstrap 在初始化时注入）
+    void SetCommandManager(DX12Engine::Renderer::CommandManager *cmdManager) { m_commandManager = cmdManager; }
+
+    /// 获取命令管理器
+    DX12Engine::Renderer::CommandManager *GetCommandManager() const { return m_commandManager; }
+
     /// 获取任务执行器（供 L4 层提交任务）
     TaskExecutor &GetExecutor() { return m_executor; }
 
@@ -165,6 +179,9 @@ private:
     std::atomic<bool> m_running{false};
     uint32_t m_targetFPS = 0;
 
+    // 命令管理器（由 Bootstrap 注入，渲染子系统通过 GameContext 访问）
+    DX12Engine::Renderer::CommandManager *m_commandManager = nullptr;
+
     // 双缓冲TaskGraph（避免每帧分配）
     TaskGraph m_backGraph; // 后台构建的图
 
@@ -197,6 +214,8 @@ private:
  *
  * L4 层通过此上下文访问 L3 调度功能。
  * 避免直接使用全局变量，便于测试和替换实现。
+ *
+ * @note CommandManager 通过 GameContext::DeviceContext->GetCommandManager() 访问
  */
 struct SchedulerContext {
     FrameDriver *frameDriver = nullptr;
@@ -204,13 +223,14 @@ struct SchedulerContext {
     TaskGraph *taskGraph = nullptr;
     ECS::Registry *registry = nullptr;
     const FrameStats *stats = nullptr;
+    DX12Engine::Renderer::CommandManager *commandManager = nullptr; // 渲染命令管理
 };
 
 /// 获取当前调度器上下文（线程局部）
 SchedulerContext &GetSchedulerContext();
 
 /// 初始化全局调度器上下文
-void InitializeSchedulerContext(ECS::Registry &registry);
+void InitializeSchedulerContext(ECS::Registry &registry, DX12Engine::Renderer::CommandManager *cmdManager = nullptr);
 
 /// 关闭调度器上下文
 void ShutdownSchedulerContext();

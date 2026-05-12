@@ -1,6 +1,7 @@
 #include "System/Scheduler/FrameDriver.h"
 #include "System/Event/MessageDispatcher.h"
 #include "System/Scheduler/TaskGraphBuilder.h"
+#include "Renderer/Core/D3D12DeviceContext.h"
 #include <thread>
 
 namespace DX12Engine::Scheduler {
@@ -15,16 +16,20 @@ static thread_local SchedulerContext g_schedulerContext;
 
 SchedulerContext &GetSchedulerContext() { return g_schedulerContext; }
 
-void InitializeSchedulerContext(ECS::Registry &registry) {
+void InitializeSchedulerContext(ECS::Registry &registry, DX12Engine::Renderer::CommandManager *cmdManager) {
     static std::unique_ptr<FrameDriver> s_frameDriver;
     s_frameDriver = std::make_unique<FrameDriver>(registry);
     s_frameDriver->Initialize();
+
+    // 注入命令管理器
+    s_frameDriver->SetCommandManager(cmdManager);
 
     g_schedulerContext.frameDriver = s_frameDriver.get();
     g_schedulerContext.executor = &s_frameDriver->GetExecutor();
     g_schedulerContext.taskGraph = &s_frameDriver->GetTaskGraph();
     g_schedulerContext.registry = &registry;
     g_schedulerContext.stats = &s_frameDriver->GetFrameStats();
+    g_schedulerContext.commandManager = cmdManager;
 }
 
 void ShutdownSchedulerContext() { g_schedulerContext = SchedulerContext{}; }
@@ -62,6 +67,17 @@ void FrameDriver::Initialize(uint32_t workerThreadCount) {
 bool FrameDriver::Tick() {
     if (!m_running)
         return false;
+
+    // ========================================================================
+    // 帧开始：主线程批量回收上一帧可用的分配器
+    // ========================================================================
+    if (m_commandManager) {
+        // 1. 帧开始：切换缓冲索引，回收可用分配器
+        m_commandManager->BeginFrame();
+
+        // 2. 等待上一帧完成（三缓冲）
+        m_commandManager->WaitForFrame(m_commandManager->GetCurrentFrame());
+    }
 
     m_frameStartTime = std::chrono::steady_clock::now();
 
@@ -136,6 +152,13 @@ bool FrameDriver::Tick() {
 
     // 更新统计信息
     UpdateStats();
+
+    // ========================================================================
+    // 帧结束：推进到下一帧
+    // ========================================================================
+    if (m_commandManager) {
+        m_commandManager->EndFrame();
+    }
 
     // 等待目标帧率
     WaitForTargetFPS();
