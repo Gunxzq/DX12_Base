@@ -128,6 +128,25 @@ private:
             m_pool[i].inUse.store(false, std::memory_order_relaxed);
         }
     }
+
+public:
+    // 统计信息
+    struct Stats {
+        size_t totalCount = 0;
+        size_t inUseCount = 0;
+    };
+
+    /// 获取池的统计信息
+    Stats GetStats() const {
+        Stats stats;
+        stats.totalCount = m_pool.size();
+        for (const auto &entry : m_pool) {
+            if (entry.inUse.load(std::memory_order_relaxed)) {
+                ++stats.inUseCount;
+            }
+        }
+        return stats;
+    }
 };
 
 } // namespace DX12Engine::Renderer
