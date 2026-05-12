@@ -21,6 +21,20 @@ public:
     CommandAllocator(const CommandAllocator &) = delete;
     CommandAllocator &operator=(const CommandAllocator &) = delete;
 
+    CommandAllocator(CommandAllocator &&other) noexcept
+        : m_allocator(std::move(other.m_allocator)), m_lastUsedFenceValue(other.m_lastUsedFenceValue) {
+        other.m_lastUsedFenceValue = 0;
+    }
+
+    CommandAllocator &operator=(CommandAllocator &&other) noexcept {
+        if (this != &other) {
+            m_allocator = std::move(other.m_allocator);
+            m_lastUsedFenceValue = other.m_lastUsedFenceValue;
+            other.m_lastUsedFenceValue = 0;
+        }
+        return *this;
+    }
+
     ID3D12CommandAllocator *Get() const { return m_allocator.Get(); }
 
     void Reset() {
