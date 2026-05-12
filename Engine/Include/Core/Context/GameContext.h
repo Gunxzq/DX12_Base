@@ -6,7 +6,8 @@
 namespace DX12Engine {
 namespace Renderer {
 class D3D12DeviceContext;
-}
+class CommandManager;
+} // namespace Renderer
 
 namespace System {
 namespace Event {
@@ -51,10 +52,10 @@ public:
 
     // ── 基础设施子系统指针 ──
 
-    Window *Window = nullptr;                     // 窗口管理
-    ConfigManager *Config = nullptr;               // 配置管理
-    Logger *Logging = nullptr;                     // 日志系统
-    GameTimer *MainTimer = nullptr;                // 主计时器
+    Window *Window = nullptr;                               // 窗口管理
+    ConfigManager *Config = nullptr;                        // 配置管理
+    Logger *Logging = nullptr;                              // 日志系统
+    GameTimer *MainTimer = nullptr;                         // 主计时器
     System::Event::MessageDispatcher *Dispatcher = nullptr; // 消息分发器（单例）
 
     // ── 调度与数据层指针 ──
@@ -65,6 +66,7 @@ public:
     // ── 渲染子系统指针 ──
 
     Renderer::D3D12DeviceContext *DeviceContext = nullptr; // D3D12 设备上下文
+    Renderer::CommandManager *CommandManager = nullptr;    // 命令管理器（由 DeviceContext 管理）
 
     // ── 便捷访问方法 ──
 

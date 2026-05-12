@@ -164,8 +164,12 @@ void Bootstrap::InitializeFrameDriver() {
         throw std::runtime_error("[Bootstrap] Registry must be initialized before FrameDriver");
     }
 
-    // 创建全局调度器上下文
-    ::DX12Engine::Scheduler::InitializeSchedulerContext(*m_registry);
+    if (!m_deviceContext) {
+        throw std::runtime_error("[Bootstrap] D3D12DeviceContext must be initialized before FrameDriver");
+    }
+
+    // 创建全局调度器上下文，同时注入命令管理器
+    ::DX12Engine::Scheduler::InitializeSchedulerContext(*m_registry, &m_deviceContext->GetCommandManager());
 
     // 获取 FrameDriver 指针并保存
     auto &schedulerCtx = ::DX12Engine::Scheduler::GetSchedulerContext();
@@ -247,6 +251,7 @@ GameContext *Bootstrap::CreateContext() {
     m_context->Registry = m_registry.get();
     m_context->FrameDriver = m_frameDriver;
     m_context->DeviceContext = m_deviceContext.get();
+    m_context->CommandManager = &m_deviceContext->GetCommandManager();
 
     return m_context.get();
 }

@@ -7,6 +7,9 @@ using Microsoft::WRL::ComPtr;
 D3D12DeviceContext::~D3D12DeviceContext() { Shutdown(); }
 
 void D3D12DeviceContext::Shutdown() {
+    // 先关闭命令管理器
+    m_commandManager.Shutdown();
+
     FlushCommandQueue();
 
     mSwapChainBuffer[0].Reset();
@@ -43,6 +46,9 @@ bool D3D12DeviceContext::Initialize(const InitParams &params) {
     CreateSwapChain();
     CreateDescriptorHeaps();
     CreateDepthStencilBuffer();
+
+    // 初始化命令管理器（在所有基础资源创建后）
+    m_commandManager.Initialize(md3dDevice.Get(), CommandManager::DEFAULT_FRAME_COUNT);
 
     // 获取 Back Buffer 并创建 RTV (原 OnResize 的初始化逻辑)
     mCurrBackBuffer = 0;

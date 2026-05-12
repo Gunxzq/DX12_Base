@@ -2,6 +2,7 @@
 
 #include "Common/Common.h"
 #include "Common/d3dUtil.h"
+#include "Command/CommandManager.h"
 #include <cstdint>
 #include <wrl/client.h>
 
@@ -119,6 +120,16 @@ public:
     bool Is4xMsaaEnabled() const { return m4xMsaaState; }
     UINT Get4xMsaaQuality() const { return m4xMsaaQuality; }
 
+    // ── 命令管理器 ──
+
+    /**
+     * @brief 获取命令管理器
+     * @return CommandManager& 命令管理器引用
+     * @note 用于工作线程提交命令，主线程控制帧同步
+     */
+    CommandManager &GetCommandManager() { return m_commandManager; }
+    const CommandManager &GetCommandManager() const { return m_commandManager; }
+
 private:
     // ── 内部初始化 ──
 
@@ -173,6 +184,9 @@ private:
     UINT mClientHeight = 0;
     DXGI_FORMAT mBackBufferFormat = DXGI_FORMAT_UNKNOWN;
     DXGI_FORMAT mDepthStencilFormat = DXGI_FORMAT_UNKNOWN;
+
+    // ── 命令管理器 ──
+    CommandManager m_commandManager;
 };
 
 } // namespace Renderer
