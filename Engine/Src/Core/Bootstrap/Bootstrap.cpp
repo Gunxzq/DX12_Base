@@ -169,7 +169,7 @@ void Bootstrap::InitializeFrameDriver() {
     }
 
     // 创建全局调度器上下文，同时注入命令管理器
-    ::DX12Engine::Scheduler::InitializeSchedulerContext(*m_registry, &m_deviceContext->GetCommandManager());
+    ::DX12Engine::Scheduler::InitializeSchedulerContext(*m_registry, m_deviceContext.get());
 
     // 获取 FrameDriver 指针并保存
     auto &schedulerCtx = ::DX12Engine::Scheduler::GetSchedulerContext();

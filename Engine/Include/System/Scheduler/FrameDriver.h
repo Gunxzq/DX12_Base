@@ -1,4 +1,6 @@
 #pragma once
+#include "RenderPhase.h"
+#include "Renderer/Core/Command/CommandList/CommandListPool.h"
 #include "System/ECS/Registry.h"
 #include "TaskExecutor.h"
 #include "TaskGraphBuilder.h"
@@ -12,6 +14,7 @@ namespace DX12Engine {
 namespace Renderer {
 class D3D12DeviceContext;
 class CommandManager;
+class CommandList;
 } // namespace Renderer
 
 } // namespace DX12Engine
@@ -122,17 +125,31 @@ public:
     /// 设置目标帧率（0 = 不限制）
     void SetTargetFPS(uint32_t fps) { m_targetFPS = fps; }
 
-    /// 设置命令管理器（由 Bootstrap 在初始化时注入）
-    void SetCommandManager(DX12Engine::Renderer::CommandManager *cmdManager) { m_commandManager = cmdManager; }
+    /// 设置 D3D12 设备上下文（由 Bootstrap 在初始化时注入）
+    void SetDeviceContext(DX12Engine::Renderer::D3D12DeviceContext *deviceContext) { m_deviceContext = deviceContext; }
 
-    /// 获取命令管理器
-    DX12Engine::Renderer::CommandManager *GetCommandManager() const { return m_commandManager; }
+    /// 获取 D3D12 设备上下文
+    DX12Engine::Renderer::D3D12DeviceContext *GetDeviceContext() const { return m_deviceContext; }
+
+    /// 获取命令管理器（通过 DeviceContext 访问）
+    DX12Engine::Renderer::CommandManager *GetCommandManager() const;
 
     /// 获取任务执行器（供 L4 层提交任务）
     TaskExecutor &GetExecutor() { return m_executor; }
 
     /// 获取任务图（供 L4 层注册 System）
     TaskGraph &GetTaskGraph() { return m_taskGraph; }
+
+    // ========================================================================
+    // 渲染阶段管理（新增）
+    // ========================================================================
+
+    /**
+     * @brief 提交一个已录制的命令列表句柄到指定渲染阶段
+     */
+    void SubmitRenderCommand(
+        RenderPhase phase,
+        const typename DX12Engine::Renderer::CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle &handle);
 
     // ========================================================================
     // L4 层回调注册（多缓冲交换钩子）
@@ -179,11 +196,15 @@ private:
     std::atomic<bool> m_running{false};
     uint32_t m_targetFPS = 0;
 
-    // 命令管理器（由 Bootstrap 注入，渲染子系统通过 GameContext 访问）
-    DX12Engine::Renderer::CommandManager *m_commandManager = nullptr;
+    // D3D设备上下文
+    DX12Engine::Renderer::D3D12DeviceContext *m_deviceContext = nullptr;
 
     // 双缓冲TaskGraph（避免每帧分配）
     TaskGraph m_backGraph; // 后台构建的图
+
+    // 渲染阶段命令列表收集器（使用 Handle 避免生命周期问题）
+    using CmdListHandle = typename DX12Engine::Renderer::CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle;
+    std::array<std::vector<CmdListHandle>, static_cast<size_t>(RenderPhase::Count)> m_renderBuckets;
 
     // 帧同步回调
     struct CallbackEntry {
@@ -200,7 +221,9 @@ private:
 
     // 阶段执行
     void ExecutePhase(TaskPhase phase);
-    void FrameSync(); // 调用 L4 回调
+    void ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence); // 批量执行某阶段的命令
+    uint64_t SubmitBarrier(RenderPhase phase);                         // 提交资源屏障
+    void FrameSync();                                                  // 调用 L4 回调
     void WaitForTargetFPS();
     void UpdateStats();
 };
@@ -223,14 +246,15 @@ struct SchedulerContext {
     TaskGraph *taskGraph = nullptr;
     ECS::Registry *registry = nullptr;
     const FrameStats *stats = nullptr;
-    DX12Engine::Renderer::CommandManager *commandManager = nullptr; // 渲染命令管理
+    DX12Engine::Renderer::D3D12DeviceContext *deviceContext = nullptr; // D3D12 设备上下文
 };
 
 /// 获取当前调度器上下文（线程局部）
 SchedulerContext &GetSchedulerContext();
 
 /// 初始化全局调度器上下文
-void InitializeSchedulerContext(ECS::Registry &registry, DX12Engine::Renderer::CommandManager *cmdManager = nullptr);
+void InitializeSchedulerContext(ECS::Registry &registry,
+                                DX12Engine::Renderer::D3D12DeviceContext *deviceContext = nullptr);
 
 /// 关闭调度器上下文
 void ShutdownSchedulerContext();

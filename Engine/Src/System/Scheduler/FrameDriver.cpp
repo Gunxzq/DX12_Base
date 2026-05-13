@@ -1,12 +1,17 @@
 #include "System/Scheduler/FrameDriver.h"
+#include "Renderer/Core/Command/CommandList/CommandList.h"
+#include "Renderer/Core/Command/CommandManager.h"
+#include "Renderer/Core/D3D12DeviceContext.h"
 #include "System/Event/MessageDispatcher.h"
 #include "System/Scheduler/TaskGraphBuilder.h"
-#include "Renderer/Core/D3D12DeviceContext.h"
+#include <Common/Common.h>
+#include <Common/d3dx12.h>
 #include <thread>
 
 namespace DX12Engine::Scheduler {
 
 using namespace DX12Engine::System::Event;
+using namespace DX12Engine::Renderer;
 
 // ========================================================================
 // Thread-local Scheduler Context
@@ -16,20 +21,20 @@ static thread_local SchedulerContext g_schedulerContext;
 
 SchedulerContext &GetSchedulerContext() { return g_schedulerContext; }
 
-void InitializeSchedulerContext(ECS::Registry &registry, DX12Engine::Renderer::CommandManager *cmdManager) {
+void InitializeSchedulerContext(ECS::Registry &registry, DX12Engine::Renderer::D3D12DeviceContext *deviceContext) {
     static std::unique_ptr<FrameDriver> s_frameDriver;
     s_frameDriver = std::make_unique<FrameDriver>(registry);
     s_frameDriver->Initialize();
 
     // 注入命令管理器
-    s_frameDriver->SetCommandManager(cmdManager);
+    s_frameDriver->SetDeviceContext(deviceContext);
 
     g_schedulerContext.frameDriver = s_frameDriver.get();
     g_schedulerContext.executor = &s_frameDriver->GetExecutor();
     g_schedulerContext.taskGraph = &s_frameDriver->GetTaskGraph();
     g_schedulerContext.registry = &registry;
     g_schedulerContext.stats = &s_frameDriver->GetFrameStats();
-    g_schedulerContext.commandManager = cmdManager;
+    g_schedulerContext.deviceContext = deviceContext;
 }
 
 void ShutdownSchedulerContext() { g_schedulerContext = SchedulerContext{}; }
@@ -45,6 +50,10 @@ FrameDriver::FrameDriver(ECS::Registry &registry)
 }
 
 FrameDriver::~FrameDriver() { Stop(); }
+
+DX12Engine::Renderer::CommandManager *FrameDriver::GetCommandManager() const {
+    return m_deviceContext ? &m_deviceContext->GetCommandManager() : nullptr;
+}
 
 void FrameDriver::Initialize(uint32_t workerThreadCount) {
     if (workerThreadCount > 0) {
@@ -64,20 +73,97 @@ void FrameDriver::Initialize(uint32_t workerThreadCount) {
     m_frameStartTime = std::chrono::steady_clock::now();
 }
 
+void FrameDriver::SubmitRenderCommand(RenderPhase phase, const CmdListHandle &handle) {
+    if (handle.IsValid()) {
+        m_renderBuckets[static_cast<size_t>(phase)].push_back(handle);
+    }
+}
+
+void FrameDriver::ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence) {
+    auto &handles = m_renderBuckets[static_cast<size_t>(phase)];
+    if (!handles.empty()) {
+        // 在批量执行前，让队列等待 BeginBarrier 完成
+        if (waitSequence > 0) {
+            auto *queue = m_deviceContext->GetCommandQueue();
+            auto *fence = GetCommandManager()->GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
+            queue->Wait(fence, waitSequence);
+        }
+        m_deviceContext->GetCommandManager().ExecuteBatchAndClose(D3D12_COMMAND_LIST_TYPE_DIRECT, handles);
+        handles.clear();
+    }
+}
+
+uint64_t FrameDriver::SubmitBarrier(RenderPhase phase) {
+    if (!m_deviceContext)
+        return 0;
+
+    auto &cmdMgr = m_deviceContext->GetCommandManager();
+    uint64_t completed = cmdMgr.GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+    auto allocHandle = cmdMgr.AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(completed);
+    ID3D12CommandAllocator *allocator = cmdMgr.GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
+
+    auto cmdListHandle = cmdMgr.AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+    CommandList cmdList = cmdMgr.GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+    cmdList.Reset(allocator, nullptr);
+
+    ID3D12Resource *backBuffer = m_deviceContext->GetCurrentBackBuffer();
+
+    D3D12_RESOURCE_STATES stateBefore =
+        (phase == RenderPhase::BeginBarrier) ? D3D12_RESOURCE_STATE_PRESENT : D3D12_RESOURCE_STATE_RENDER_TARGET;
+    D3D12_RESOURCE_STATES stateAfter =
+        (phase == RenderPhase::BeginBarrier) ? D3D12_RESOURCE_STATE_RENDER_TARGET : D3D12_RESOURCE_STATE_PRESENT;
+
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, stateBefore, stateAfter);
+    cmdList.Get()->ResourceBarrier(1, &barrier);
+
+    if (phase == RenderPhase::BeginBarrier) {
+        D3D12_VIEWPORT viewport = m_deviceContext->GetViewport();
+        D3D12_RECT scissorRect = m_deviceContext->GetScissorRect();
+        cmdList.Get()->RSSetViewports(1, &viewport);
+        cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+
+        auto rtvHandle = m_deviceContext->GetCurrentBackBufferView();
+        auto dsvHandle = m_deviceContext->GetDepthStencilView();
+        cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
+
+        // 根据时间计算颜色
+        float time = static_cast<float>(m_stats.totalTime);
+        float r = (sin(time * 0.5f) + 1.0f) / 2.0f;
+        float g = (sin(time * 0.7f + 2.0f) + 1.0f) / 2.0f;
+        float b = (sin(time * 0.9f + 4.0f) + 1.0f) / 2.0f;
+        const float clearColor[] = {r, g, b, 1.0f};
+
+        cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+        cmdList.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0,
+                                             nullptr);
+    }
+
+    uint64_t sequence = cmdMgr.GetNextSequence();
+
+    cmdList.Close();
+
+    cmdMgr.SubmitAndSignal(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList, sequence);
+
+    // 屏障列表提交后立即释放资源
+    cmdMgr.ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+    cmdMgr.ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, sequence);
+
+    // 关键：在 GPU 端插入等待，确保后续命令在屏障完成后才执行
+    if (phase == RenderPhase::BeginBarrier) {
+        auto *queue = m_deviceContext->GetCommandQueue();
+        auto *fence = cmdMgr.GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
+
+        queue->Wait(fence, sequence);
+    }
+
+    return sequence;
+}
+
 bool FrameDriver::Tick() {
     if (!m_running)
         return false;
-
-    // ========================================================================
-    // 帧开始：主线程批量回收上一帧可用的分配器
-    // ========================================================================
-    if (m_commandManager) {
-        // 1. 帧开始：切换缓冲索引，回收可用分配器
-        m_commandManager->BeginFrame();
-
-        // 2. 等待上一帧完成（三缓冲）
-        m_commandManager->WaitForFrame(m_commandManager->GetCurrentFrame());
-    }
 
     m_frameStartTime = std::chrono::steady_clock::now();
 
@@ -116,49 +202,55 @@ bool FrameDriver::Tick() {
     }
 
     // ========================================================================
-    // 阶段 1: EarlyUpdate - 输入、网络
+    // 帧开始：调用 DeviceContext 处理三帧同步
+    // ========================================================================
+    if (m_deviceContext) {
+
+        m_deviceContext->BeginFrame();
+    }
+
+    // ========================================================================
+    // 逻辑更新阶段
     // ========================================================================
     ExecutePhase(TaskPhase::EarlyUpdate);
-
-    // ========================================================================
-    // 阶段 2: Update - 主逻辑、Physics
-    // ========================================================================
     ExecutePhase(TaskPhase::Update);
-
-    // ========================================================================
-    // 阶段 3: LateUpdate - 动画、Transform
-    // ========================================================================
     ExecutePhase(TaskPhase::LateUpdate);
-
-    // ========================================================================
-    // 阶段 4: PreRender - 视锥剔除、LOD
-    // ========================================================================
     ExecutePhase(TaskPhase::PreRender);
 
-    // ========================================================================
-    // 关键点：帧同步 - 调用 L4 层回调
-    // ========================================================================
+    // 4. 帧同步回调
     FrameSync();
 
     // ========================================================================
-    // 阶段 5: Render - 渲染提交
+    // 渲染流程开始
     // ========================================================================
+
+    // 1. 提交帧开始屏障 (Present -> RenderTarget)
+    uint64_t barrierSeq = SubmitBarrier(RenderPhase::BeginBarrier);
+
+    // 2. 执行用户注册的渲染 System
     ExecutePhase(TaskPhase::Render);
+    ExecutePhase(TaskPhase::PostRender);
+
+    // 3. 按顺序批量执行各个渲染阶段的命令列表
+    ExecuteRenderPhase(RenderPhase::PrePass, barrierSeq);
+    ExecuteRenderPhase(RenderPhase::Opaque, barrierSeq);
+    ExecuteRenderPhase(RenderPhase::Transparent, barrierSeq);
+    ExecuteRenderPhase(RenderPhase::PostProcess, barrierSeq);
+    ExecuteRenderPhase(RenderPhase::UI, barrierSeq);
+
+    // 5. 提交帧结束屏障 (RenderTarget -> Present) 并 Present
+    SubmitBarrier(RenderPhase::EndBarrier);
 
     // ========================================================================
-    // 阶段 6: PostRender - 后处理
+    // 帧结束：调用 DeviceContext 进行 Present 和帧推进
     // ========================================================================
-    ExecutePhase(TaskPhase::PostRender);
+    if (m_deviceContext) {
+
+        m_deviceContext->EndFrame();
+    }
 
     // 更新统计信息
     UpdateStats();
-
-    // ========================================================================
-    // 帧结束：推进到下一帧
-    // ========================================================================
-    if (m_commandManager) {
-        m_commandManager->EndFrame();
-    }
 
     // 等待目标帧率
     WaitForTargetFPS();
