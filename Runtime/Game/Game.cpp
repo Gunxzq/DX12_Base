@@ -59,8 +59,6 @@ int Game::Run() {
 
         // 调用 FrameDriver::Tick() 来处理消息和执行注册的 Systems
         m_context->FrameDriver->Tick();
-
-        Render();
     }
 
     // 停止 FrameDriver
@@ -85,24 +83,7 @@ void Game::Shutdown() {
 }
 
 void Game::Update(float deltaTime) {
-    // 消息处理由 FrameDriver::Tick() 完成
     // 此方法保留给纯逻辑更新（如物理、动画等）
-}
-
-void Game::Render() {
-    auto *renderer = m_context->DeviceContext;
-    ID3D12GraphicsCommandList *cmdList = renderer->BeginFrame();
-
-    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = renderer->GetCurrentBackBufferView();
-    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = renderer->GetDepthStencilView();
-
-    cmdList->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
-
-    const float clearColor[] = {0.4f, 0.6f, 0.9f, 1.0f};
-    cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-    cmdList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-
-    renderer->EndFrame();
 }
 
 void Game::InitializeGameModules() {

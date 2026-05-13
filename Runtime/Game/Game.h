@@ -24,7 +24,6 @@ public:
 
     // ── 主循环组件 ──
     void Update(float deltaTime);
-    void Render();
 
     // ── 状态查询 ──
     bool IsRunning() const { return m_isRunning; }
