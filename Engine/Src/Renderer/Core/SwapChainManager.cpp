@@ -76,6 +76,9 @@ void SwapChainManager::Resize(uint32_t width, uint32_t height) {
     ThrowIfFailed(m_swapChain->ResizeBuffers(m_params.bufferCount, width, height, m_params.format,
                                              DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH));
 
+    m_params.width = width;
+    m_params.height = height;
+
     m_backBuffers.resize(m_params.bufferCount);
     for (UINT i = 0; i < m_params.bufferCount; ++i) {
         ThrowIfFailed(m_swapChain->GetBuffer(i, IID_PPV_ARGS(&m_backBuffers[i])));
