@@ -1,9 +1,12 @@
 #pragma once
 
+#include "Command/CommandManager.h"
 #include "Common/Common.h"
 #include "Common/d3dUtil.h"
-#include "Command/CommandManager.h"
+#include "Renderer/Core/D3D12FeatureChecker.h"
+#include "Renderer/Core/SwapChainManager.h"
 #include <cstdint>
+#include <memory>
 #include <wrl/client.h>
 
 // 前向声明
@@ -15,12 +18,14 @@ namespace Renderer {
 // ========================================================================
 // D3D12DeviceContext - D3D12 核心上下文
 // 负责初始化和管理 D3D12 的核心资源：
-//   - IDXGIFactory4
-//   - ID3D12Device
 //   - ID3D12CommandQueue
+//   - 命令列表和命令分配器
+//   - Fence 同步
+//
+// 委托 SwapChainManager 管理：
 //   - IDXGISwapChain
 //   - 描述符堆 (RTV/DSV)
-//   - 命令列表和命令分配器
+//   - 后台缓冲区和深度模板缓冲区
 // ========================================================================
 
 class D3D12DeviceContext {
@@ -35,6 +40,9 @@ public:
         bool enableDebugLayer = false;                              // 是否启用调试层
         bool enable4xMsaa = false;                                  // 是否启用 4x MSAA
         D3D_FEATURE_LEVEL minFeatureLevel = D3D_FEATURE_LEVEL_11_0; // 最低功能级别
+        int adapterIndex = -1;             // 适配器索引，-1 表示自动选择最佳适配器
+        bool enableVsync = true;           // 是否启用垂直同步
+        uint32_t swapChainBufferCount = 2; // 交换链缓冲区数量
     };
 
 public:
@@ -90,18 +98,19 @@ public:
 
     // ── 描述符访问 ──
 
-    ID3D12Device *GetDevice() const { return md3dDevice.Get(); }
-    ID3D12CommandQueue *GetCommandQueue() const { return mCommandQueue.Get(); }
-    IDXGISwapChain *GetSwapChain() const { return mSwapChain.Get(); }
+    ID3D12Device *GetDevice() const { return md3dDevice; }
+    ID3D12CommandQueue *GetCommandQueue() const;
 
-    UINT GetCurrentBackBufferIndex() const { return mCurrBackBuffer; }
-    ID3D12Resource *GetCurrentBackBuffer() const { return mSwapChainBuffer[mCurrBackBuffer].Get(); }
+    UINT GetCurrentBackBufferIndex() const { return m_swapChainManager.GetCurrentBackBufferIndex(); }
+    ID3D12Resource *GetCurrentBackBuffer() const { return m_swapChainManager.GetCurrentBackBuffer(); }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentBackBufferView() const;
-    D3D12_CPU_DESCRIPTOR_HANDLE GetDepthStencilView() const;
+    D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentBackBufferView() const {
+        return m_swapChainManager.GetCurrentBackBufferView();
+    }
+    D3D12_CPU_DESCRIPTOR_HANDLE GetDepthStencilView() const { return m_swapChainManager.GetDepthStencilView(); }
 
-    UINT GetRtvDescriptorSize() const { return mRtvDescriptorSize; }
-    UINT GetDsvDescriptorSize() const { return mDsvDescriptorSize; }
+    UINT GetRtvDescriptorSize() const { return m_swapChainManager.GetRtvDescriptorSize(); }
+    UINT GetDsvDescriptorSize() const { return m_swapChainManager.GetDsvDescriptorSize(); }
     UINT GetCbvSrvUavDescriptorSize() const { return mCbvSrvUavDescriptorSize; }
 
     // ── 视口和裁剪矩形 ──
@@ -133,50 +142,25 @@ public:
 private:
     // ── 内部初始化 ──
 
-    void CreateFactory();
-    void CreateDevice();
-    void CreateCommandQueue();
-    void CreateCommandAllocators();
-    void CreateSwapChain();
-    void CreateDescriptorHeaps();
-    void CreateDepthStencilBuffer();
     void UpdateViewportAndScissorRect();
-
-    // ── 辅助函数 ──
-
-    void LogAdapters();
-    void LogAdapterOutputs(IDXGIAdapter *adapter);
-    void LogOutputDisplayModes(IDXGIOutput *output, DXGI_FORMAT format);
 
     // ── 成员变量 ──
 
     InitParams mParams;
 
-    Microsoft::WRL::ComPtr<IDXGIFactory4> mFactory;
-    Microsoft::WRL::ComPtr<ID3D12Device> md3dDevice;
-    Microsoft::WRL::ComPtr<ID3D12Fence> mFence;
+    // 功能检测器（内部管理设备和工厂）
+    std::unique_ptr<D3D12FeatureChecker> m_featureChecker;
 
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> mCommandQueue;
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> mDirectCmdListAlloc;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> mCommandList;
+    // 设备指针由 D3D12FeatureChecker 管理，这里只持有裸指针
+    ID3D12Device *md3dDevice = nullptr;
 
-    static constexpr int SwapChainBufferCount = 2;
-    Microsoft::WRL::ComPtr<IDXGISwapChain> mSwapChain;
-    Microsoft::WRL::ComPtr<ID3D12Resource> mSwapChainBuffer[SwapChainBufferCount];
-    Microsoft::WRL::ComPtr<ID3D12Resource> mDepthStencilBuffer;
-
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> mRtvHeap;
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> mDsvHeap;
+    // 交换链管理器
+    SwapChainManager m_swapChainManager;
 
     D3D12_VIEWPORT mViewport;
     D3D12_RECT mScissorRect;
 
-    UINT mRtvDescriptorSize = 0;
-    UINT mDsvDescriptorSize = 0;
     UINT mCbvSrvUavDescriptorSize = 0;
-
-    UINT64 mCurrentFence = 0;
-    int mCurrBackBuffer = 0;
 
     bool m4xMsaaState = false;
     UINT m4xMsaaQuality = 0;
