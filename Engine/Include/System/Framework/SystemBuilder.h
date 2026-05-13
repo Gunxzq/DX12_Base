@@ -38,6 +38,11 @@ public:
     /// 设置优先级
     SystemBuilder &Priority(TaskPriority priority);
 
+    SystemBuilder &RenderPhase(RenderPhase phase) {
+        m_info.renderPhase = phase;
+        return *this;
+    }
+
     /// 完成注册
     SystemId Build();
 

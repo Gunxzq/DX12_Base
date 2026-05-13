@@ -7,8 +7,9 @@
  * 定义 System 相关的核心类型，供 SystemRegistry 和 SystemBuilder 使用
  */
 
-#include "System/ECS/Registry.h"   // 引入 ECS::Registry
-#include "System/Scheduler/Task.h" // 引入 TaskId, TaskPhase, ThreadType, TaskPriority
+#include "System/ECS/Registry.h"
+#include "System/Scheduler/RenderPhase.h"
+#include "System/Scheduler/Task.h"
 #include <functional>
 #include <string>
 #include <vector>
@@ -103,6 +104,7 @@ struct SystemInfo {
     TaskPhase phase = TaskPhase::Update;
     ThreadType threadType = ThreadType::Any;
     TaskPriority priority = TaskPriority::Normal;
+    RenderPhase renderPhase = RenderPhase::Opaque;
     std::vector<SystemId> dependencies;              // 依赖的其他System
     std::vector<MessageTypeHash> interestedMessages; // 感兴趣的消息类型
 };
