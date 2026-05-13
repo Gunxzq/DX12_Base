@@ -63,7 +63,6 @@ uint64_t CommandManager::SubmitAndSignal(D3D12_COMMAND_LIST_TYPE type, CommandLi
     CommandQueue *queue = GetCommandQueue(type);
     assert(queue != nullptr);
 
-    cmdList.Close();
     queue->Execute(cmdList);
 
     return m_fenceManager.Signal(type, queue->Get(), sequence);
@@ -87,34 +86,72 @@ uint64_t CommandManager::SubmitAndSignalBatch(D3D12_COMMAND_LIST_TYPE type, std:
     return m_fenceManager.Signal(type, queue->Get(), sequence);
 }
 
-void CommandManager::BeginFrame() {
-    uint32_t frame = m_currentFrame;
-    m_frameResources[frame].inUse = true;
-
-    uint32_t prevFrame = (frame + m_frameCount - 1) % m_frameCount;
-    uint64_t prevFenceValue = m_frameResources[prevFrame].fenceValue;
-
-    uint64_t completedValue = GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-
-    if (prevFenceValue > 0 && completedValue >= prevFenceValue) {
-        // 上一帧已完成
+void CommandManager::ExecuteBatchAndClose(
+    D3D12_COMMAND_LIST_TYPE type,
+    const std::vector<typename CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles) {
+    if (handles.empty()) {
+        return;
     }
+    OutputDebugStringW(L"[DEBUG] CommandManager::ExecuteBatchAndClose - Processing ");
+    OutputDebugStringW(std::to_wstring(handles.size()).c_str());
+    OutputDebugStringW(L" command lists\n");
+
+    CommandQueue *queue = GetCommandQueue(type);
+    assert(queue != nullptr);
+
+    std::vector<ID3D12CommandList *> rawLists;
+    rawLists.reserve(handles.size());
+
+    for (const auto &handle : handles) {
+        if (handle.IsValid()) {
+            OutputDebugStringW(
+                L"[DEBUG] CommandManager::ExecuteBatchAndClose - Getting and closing list with handle index: ");
+            OutputDebugStringW(std::to_wstring(handle.index).c_str());
+            OutputDebugStringW(L"\n");
+            CommandList cmdList = GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(handle);
+            cmdList.Close();
+            rawLists.push_back(cmdList.Get());
+        }
+    }
+
+    if (!rawLists.empty()) {
+        queue->Get()->ExecuteCommandLists(static_cast<UINT>(rawLists.size()), rawLists.data());
+    }
+}
+
+void CommandManager::BeginFrame() {
+
+    uint32_t frameToWait = (m_currentFrame + 1) % m_frameCount;
+    uint64_t fenceValue = m_frameResources[frameToWait].fenceValue;
+
+    // 2. 如果该帧有记录的 Fence 值，则进行等待
+    if (fenceValue > 0) {
+        m_fenceManager.WaitForSequence(D3D12_COMMAND_LIST_TYPE_DIRECT, fenceValue);
+    }
+
+    // 标记当前帧为使用中
+    m_frameResources[m_currentFrame].inUse = true;
 }
 
 void CommandManager::EndFrame() {
     uint32_t frame = m_currentFrame;
-    uint64_t sequence = m_fenceManager.GetNextSequence() - 1;
+
+    // 获取下一序列号作为本帧的结束标记
+    uint64_t sequence = m_fenceManager.GetNextSequence();
 
     CommandQueue *queue = GetGraphicsQueue();
     if (queue) {
+        // 在队列末尾发出信号，记录本帧完成的 Fence 值
         uint64_t fenceValue = m_fenceManager.Signal(D3D12_COMMAND_LIST_TYPE_DIRECT, queue->Get(), sequence);
         m_frameResources[frame].fenceValue = fenceValue;
     }
 
+    // 推进到下一帧
     m_currentFrame = (m_currentFrame + 1) % m_frameCount;
 
-    uint32_t prevFrame = (m_currentFrame + m_frameCount - 1) % m_frameCount;
-    m_frameResources[prevFrame].inUse = false;
+    // 重置即将被复用的那一帧的状态（可选，但在逻辑上更清晰）
+    uint32_t nextFrame = m_currentFrame;
+    m_frameResources[nextFrame].inUse = false;
 }
 
 void CommandManager::WaitForFrame(uint32_t frameIndex, D3D12_COMMAND_LIST_TYPE type) {

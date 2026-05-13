@@ -46,14 +46,14 @@ public:
 
     uint64_t GetNextSequence() { return m_fenceManager.GetNextSequence(); }
 
-    CommandQueue *GetCommandQueue(D3D12_COMMAND_LIST_TYPE type) {
+    CommandQueue *GetCommandQueue(D3D12_COMMAND_LIST_TYPE type) const {
         auto it = m_queues.find(type);
         return it != m_queues.end() ? it->second.get() : nullptr;
     }
 
-    CommandQueue *GetGraphicsQueue() { return GetCommandQueue(D3D12_COMMAND_LIST_TYPE_DIRECT); }
-    CommandQueue *GetComputeQueue() { return GetCommandQueue(D3D12_COMMAND_LIST_TYPE_COMPUTE); }
-    CommandQueue *GetCopyQueue() { return GetCommandQueue(D3D12_COMMAND_LIST_TYPE_COPY); }
+    CommandQueue *GetGraphicsQueue() const { return GetCommandQueue(D3D12_COMMAND_LIST_TYPE_DIRECT); }
+    CommandQueue *GetComputeQueue() const { return GetCommandQueue(D3D12_COMMAND_LIST_TYPE_COMPUTE); }
+    CommandQueue *GetCopyQueue() const { return GetCommandQueue(D3D12_COMMAND_LIST_TYPE_COPY); }
 
     template <D3D12_COMMAND_LIST_TYPE Type>
     typename CommandAllocatorPool<Type>::Handle AcquireAllocator(uint64_t currentCompleted) {
@@ -70,6 +70,14 @@ public:
         assert(it != m_allocatorPools.end());
         auto *specificPool = static_cast<CommandAllocatorPool<Type> *>(it->second.get());
         specificPool->Release(handle, fenceValue);
+    }
+
+    template <D3D12_COMMAND_LIST_TYPE Type>
+    ID3D12CommandAllocator *GetAllocator(const typename CommandAllocatorPool<Type>::Handle &handle) {
+        auto it = m_allocatorPools.find(Type);
+        assert(it != m_allocatorPools.end() && "Allocator pool not initialized for this type");
+        assert(handle.IsValid() && handle.allocator != nullptr);
+        return handle.allocator->Get();
     }
 
     template <D3D12_COMMAND_LIST_TYPE Type>
@@ -102,6 +110,9 @@ public:
 
     uint64_t SubmitAndSignal(D3D12_COMMAND_LIST_TYPE type, CommandList &cmdList, uint64_t sequence);
     uint64_t SubmitAndSignalBatch(D3D12_COMMAND_LIST_TYPE type, std::vector<CommandList> &cmdLists, uint64_t sequence);
+    void
+    ExecuteBatchAndClose(D3D12_COMMAND_LIST_TYPE type,
+                         const std::vector<typename CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles);
 
     // ========================================================================
     // 主线程接口

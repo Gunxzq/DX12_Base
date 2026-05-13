@@ -41,6 +41,9 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
 
             bool expectedInUse = false;
             if (entry.inUse.compare_exchange_strong(expectedInUse, true, std::memory_order_acquire)) {
+                if (entry.cmdList) {
+                    entry.cmdList->Close(); // ✅ 确保已关闭
+                }
                 return {idx};
             }
         }
@@ -67,6 +70,9 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
     if (FAILED(hr)) {
         m_pool.pop_back(); // 回滚
         throw std::runtime_error("Failed to create CommandList in Pool");
+    }
+    if (SUCCEEDED(hr)) {
+        m_pool[newIndex].cmdList->Close(); // ✅ 关闭后返回
     }
 
     // 按需创建时，命令列表处于 "Recording" 状态，可以直接使用，无需 Close
