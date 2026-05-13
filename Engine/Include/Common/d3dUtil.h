@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include "Common/ThrowHelper.h"
 #include "Common/MathHelper.h"
+#include "Common/ThrowHelper.h"
 #include "Renderer/Utils/DDSTextureLoader.h"
 #include "d3dx12.h"
 #include <D3Dcompiler.h>
@@ -35,13 +35,12 @@ public:
     static bool IsKeyDown(int vkeyCode);
     static std::string ToString(HRESULT hr);
 
-    static UINT CalcConstantBufferByteSize(UINT byteSize) {
-        return (byteSize + 255) & ~255;
-    }
+    static UINT CalcConstantBufferByteSize(UINT byteSize) { return (byteSize + 255) & ~255; }
 
     static ComPtr<ID3DBlob> LoadBinary(const std::wstring &filename);
     static ComPtr<ID3D12Resource> CreateDefaultBuffer(ID3D12Device *device, ID3D12GraphicsCommandList *cmdList,
-                                                       const void *initData, UINT64 byteSize, ComPtr<ID3D12Resource> &uploadBuffer);
+                                                      const void *initData, UINT64 byteSize,
+                                                      ComPtr<ID3D12Resource> &uploadBuffer);
     static ComPtr<ID3DBlob> CompileShader(const std::wstring &filename, const D3D_SHADER_MACRO *defines,
                                           const std::string &entrypoint, const std::string &target);
 };
