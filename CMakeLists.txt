@@ -179,6 +179,12 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     $<TARGET_FILE_DIR:${PROJECT_NAME}>/Config
 )
 
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Shaders
+    $<TARGET_FILE_DIR:${PROJECT_NAME}>/Shaders
+)
+
 # ========================================================================
 # 5. 集成 Google Test (通过 vcpkg) - 默认启用测试
 # ========================================================================
