@@ -1,13 +1,19 @@
 #pragma once
 
-#include "Renderer/Core/Command/CommandList/CommandList.h"
-#include "System/ECS/Registry.h"
 #include <cstdint>
 
-// 前置声明
+namespace DX12Engine::Renderer {
 class D3D12DeviceContext;
+class CommandList; // 前向声明
+} // namespace DX12Engine::Renderer
+
+namespace DX12Engine::ECS {
+class Registry; // 前向声明
+}
 
 namespace DX12Engine::Renderer {
+
+class D3D12DeviceContext;
 
 // IRenderer 接口
 // 定义了所有渲染模块（如 SceneRenderer, UIRenderer）必须遵守的契约
@@ -51,8 +57,6 @@ public:
      * @note 用于更新摄像机、动画状态等非图形逻辑
      */
     virtual void Update(float deltaTime) = 0;
-
-    virtual void RecordCommands(uint32_t backBufferIndex) = 0;
 
     /**
      * @brief 录制渲染命令
