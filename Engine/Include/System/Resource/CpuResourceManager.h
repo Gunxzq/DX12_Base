@@ -1,4 +1,3 @@
-// ResourceManager.h
 #pragma once
 #include "Core/Config/ResourceConfig.h"
 #include "System/Resource/Core/DataPool.h"
@@ -28,9 +27,9 @@ namespace Resource {
  *
  * 状态管理：委托给 HandlePool，使用 ResourceState 枚举
  */
-class ResourceManager {
+class CpuResourceManager {
 public:
-    static ResourceManager &GetInstance();
+    static CpuResourceManager &GetInstance();
 
     void Initialize(const ResourceSystemConfig &config);
     void Shutdown();
@@ -144,12 +143,12 @@ public:
     void CleanupUnused();
 
 private:
-    ResourceManager() = default;
-    ~ResourceManager() = default;
+    CpuResourceManager() = default;
+    ~CpuResourceManager() = default;
 
     // 禁止拷贝
-    ResourceManager(const ResourceManager &) = delete;
-    ResourceManager &operator=(const ResourceManager &) = delete;
+    CpuResourceManager(const CpuResourceManager &) = delete;
+    CpuResourceManager &operator=(const CpuResourceManager &) = delete;
 
     // 初始化状态
     bool m_initialized = false;
