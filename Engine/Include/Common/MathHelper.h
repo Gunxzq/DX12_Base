@@ -6,6 +6,10 @@
 
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <DirectXMath.h>
 #include <Windows.h>
 #include <cstdint>

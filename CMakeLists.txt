@@ -64,7 +64,16 @@ target_compile_definitions(DX12EngineCore PRIVATE
     MI_OVERRIDE=ON
 )
 
+# 【新增优化 1】启用多进程编译 (/MP)
+# 允许编译器同时使用多个核心进行编译，显著加快大型项目的构建速度
+target_compile_options(DX12EngineCore PRIVATE /MP)
 
+# 【新增优化 2】配置预编译头 (PCH)
+# 指定 Common.h 为预编译头，因为它是引擎中最基础且被广泛包含的头文件
+# 这将大幅减少每个 cpp文件重复解析 Windows.h, DirectXMath, STL 等重型头文件的时间
+target_precompile_headers(DX12EngineCore PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Include/Common/Common.h"
+)
 
 # 链接依赖库
 target_link_libraries(DX12EngineCore PUBLIC 
@@ -112,6 +121,11 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     _UNICODE
     MI_OVERRIDE=ON
 )
+
+# 【新增优化 3】为主程序也启用 /MP 和 PCH
+# 虽然主程序代码较少，但保持一致性并加速 Runtime 部分的编译
+target_compile_options(${PROJECT_NAME} PRIVATE /MP)
+target_precompile_headers(${PROJECT_NAME} REUSE_FROM DX12EngineCore)
 
 # 引擎库编译定义 (与 EXE 保持一致，确保 mimalloc 正确注入)
 target_compile_definitions(DX12EngineCore PRIVATE

@@ -31,16 +31,14 @@ d3dUtil::CreateDefaultBuffer(ID3D12Device *device, ID3D12GraphicsCommandList *cm
     // Create the actual default buffer resource.
     CD3DX12_HEAP_PROPERTIES defaultHeapProps(D3D12_HEAP_TYPE_DEFAULT);
     CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
-    ThrowIfFailed(device->CreateCommittedResource(&defaultHeapProps,
-                                                  D3D12_HEAP_FLAG_NONE, &bufferDesc,
+    ThrowIfFailed(device->CreateCommittedResource(&defaultHeapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
                                                   D3D12_RESOURCE_STATE_COMMON, nullptr,
                                                   IID_PPV_ARGS(defaultBuffer.GetAddressOf())));
 
     // In order to copy CPU memory data into our default buffer, we need to create
     // an intermediate upload heap.
     CD3DX12_HEAP_PROPERTIES uploadHeapProps(D3D12_HEAP_TYPE_UPLOAD);
-    ThrowIfFailed(device->CreateCommittedResource(&uploadHeapProps,
-                                                  D3D12_HEAP_FLAG_NONE, &bufferDesc,
+    ThrowIfFailed(device->CreateCommittedResource(&uploadHeapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
                                                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                                                   IID_PPV_ARGS(uploadBuffer.GetAddressOf())));
 
@@ -88,4 +86,22 @@ ComPtr<ID3DBlob> d3dUtil::CompileShader(const std::wstring &filename, const D3D_
     ThrowIfFailed(hr);
 
     return byteCode;
+}
+
+HRESULT d3dUtil::CreateUploadBuffer(ID3D12Device *device, UINT64 byteSize, D3D12_RESOURCE_STATES resourceState,
+                                    ID3D12Resource **outResource) {
+    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+    CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
+
+    return device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc, resourceState, nullptr,
+                                           IID_PPV_ARGS(outResource));
+}
+
+HRESULT d3dUtil::CreateDefaultBuffer(ID3D12Device *device, UINT64 byteSize, D3D12_RESOURCE_STATES resourceState,
+                                     ID3D12Resource **outResource) {
+    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
+    CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
+
+    return device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc, resourceState, nullptr,
+                                           IID_PPV_ARGS(outResource));
 }
