@@ -82,13 +82,20 @@ void FrameDriver::SubmitRenderCommand(RenderPhase phase, const CmdListHandle &ha
 void FrameDriver::ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence) {
     auto &handles = m_renderBuckets[static_cast<size_t>(phase)];
     if (!handles.empty()) {
-        // 在批量执行前，让队列等待 BeginBarrier 完成
-        if (waitSequence > 0) {
-            auto *queue = m_deviceContext->GetCommandQueue();
-            auto *fence = GetCommandManager()->GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
-            queue->Wait(fence, waitSequence);
-        }
+
+        // // 在批量执行前，让队列等待 BeginBarrier 完成
+        // if (waitSequence > 0) {
+        //     auto *queue = m_deviceContext->GetCommandQueue();
+        //     auto *fence = GetCommandManager()->GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
+        //     queue->Wait(fence, waitSequence);
+        // }
         m_deviceContext->GetCommandManager().SubmitBatch(handles, waitSequence);
+
+        for (const auto &handle : handles) {
+            if (handle.IsValid()) {
+                m_deviceContext->GetCommandManager().ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(handle);
+            }
+        }
         handles.clear();
     }
 }
@@ -156,7 +163,7 @@ uint64_t FrameDriver::SubmitBarrier(RenderPhase phase) {
         throw;
     }
 
-    cmdMgr.SubmitAndSignal(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList, sequence);
+    cmdMgr.Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
 
     cmdMgr.ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
     cmdMgr.ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, sequence);
@@ -235,21 +242,21 @@ bool FrameDriver::Tick() {
     // ========================================================================
 
     // 1. 提交帧开始屏障 (Present -> RenderTarget)
-    uint64_t barrierSeq = SubmitBarrier(RenderPhase::BeginBarrier);
+    // uint64_t barrierSeq = SubmitBarrier(RenderPhase::BeginBarrier);
 
     // 2. 执行用户注册的渲染 System
     ExecutePhase(TaskPhase::Render);
     ExecutePhase(TaskPhase::PostRender);
 
     // 3. 按顺序批量执行各个渲染阶段的命令列表
-    ExecuteRenderPhase(RenderPhase::PrePass, barrierSeq);
-    ExecuteRenderPhase(RenderPhase::Opaque, barrierSeq);
-    ExecuteRenderPhase(RenderPhase::Transparent, barrierSeq);
-    ExecuteRenderPhase(RenderPhase::PostProcess, barrierSeq);
-    ExecuteRenderPhase(RenderPhase::UI, barrierSeq);
+    ExecuteRenderPhase(RenderPhase::PrePass, 0);
+    ExecuteRenderPhase(RenderPhase::Opaque, 0);
+    ExecuteRenderPhase(RenderPhase::Transparent, 0);
+    ExecuteRenderPhase(RenderPhase::PostProcess, 0);
+    ExecuteRenderPhase(RenderPhase::UI, 0);
 
     // 5. 提交帧结束屏障 (RenderTarget -> Present) 并 Present
-    SubmitBarrier(RenderPhase::EndBarrier);
+    // SubmitBarrier(RenderPhase::EndBarrier);
 
     // ========================================================================
     // 帧结束：调用 DeviceContext 进行 Present 和帧推进

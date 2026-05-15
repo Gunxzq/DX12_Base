@@ -79,9 +79,6 @@ void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, DX12Engine::System::Ev
 
     // 如果没有消息，且没有常驻System，图保持为空
     // 空的图在执行阶段会直接跳过，实现"极致节能"
-    if (messages.empty()) {
-        return;
-    }
 
     // ========================================================================
     // 阶段 2: 将消息和System转化为Task
@@ -124,10 +121,9 @@ std::unordered_set<SystemId> TaskGraphBuilder::ActivateSystems(const std::vector
     // 同时加入"常驻System"（每帧都运行的System，如渲染准备）
     // 这些System在注册时标记为"AlwaysRun"
     for (const auto &[id, info] : SystemRegistry::GetAllSystems()) {
-        // TODO: 添加AlwaysRun标记支持
-        // if (info.alwaysRun) {
-        //     activated.insert(id);
-        // }
+        if (info.alwaysRun) {
+            activated.insert(id);
+        }
     }
 
     return activated;
@@ -150,7 +146,9 @@ std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &gra
     // 保存到线程局部变量，供 GetCurrentMessageContext() 使用
     g_currentMessages = messages;
 
-    // 遍历每条消息，为处理该消息的每个 System 创建 Task
+    // ========================================================================
+    // 阶段 1: 为消息触发的 System 创建 Task
+    // ========================================================================
     for (const auto &msgCtx : messages) {
         // 设置当前消息上下文
         g_currentMessageContext = &msgCtx;
@@ -174,7 +172,7 @@ std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &gra
             task.thread = info->threadType;
             task.priority = static_cast<uint32_t>(info->priority);
 
-            // 包装System函数，直接捕获 msgCtx（不依赖 thread-local，避免悬空指针）
+            // 包装System函数，按值捕获 msgCtx
             task.execute = [info, &registry, msgCtx]() {
                 if (info->func) {
                     info->func(registry, msgCtx);
@@ -184,6 +182,40 @@ std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &gra
             TaskId tid = graph.AddTask(std::move(task));
             systemToTask[sysId] = tid;
         }
+    }
+
+    // ========================================================================
+    // 阶段 2: 为常驻 System (alwaysRun) 创建 Task
+    // ========================================================================
+    MessageContext emptyCtx; // 常驻系统使用空的消息上下文
+
+    for (const auto &[sysId, info] : SystemRegistry::GetAllSystems()) {
+        // 跳过已经创建的 Task
+        if (systemToTask.find(sysId) != systemToTask.end()) {
+            continue;
+        }
+
+        // 只处理常驻系统
+        if (!info.alwaysRun) {
+            continue;
+        }
+
+        // 创建Task
+        Task task;
+        task.name = info.name;
+        task.phase = info.phase;
+        task.thread = info.threadType;
+        task.priority = static_cast<uint32_t>(info.priority);
+
+        // 包装System函数，传递空的消息上下文
+        task.execute = [info_ptr = &info, &registry, emptyCtx]() {
+            if (info_ptr->func) {
+                info_ptr->func(registry, emptyCtx);
+            }
+        };
+
+        TaskId tid = graph.AddTask(std::move(task));
+        systemToTask[sysId] = tid;
     }
 
     // 清理
