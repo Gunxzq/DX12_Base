@@ -37,7 +37,7 @@ bool Game::Initialize() {
 
     System::Resource::GpuResourceManager::GetInstance().Initialize();
 
-    // InitializeGameModules();
+    InitializeGameModules();
 
     // 初始化 OpaqueRenderer
     m_opaqueRenderer = std::make_unique<OpaqueRenderer>();
@@ -66,117 +66,27 @@ int Game::Run() {
     m_context->Logging->Info("[Game] Starting game loop with FrameDriver...");
     m_isRunning = true;
     m_context->MainTimer->Reset();
-    OutputDebugStringW(L"[DEBUG] Before Show()\n");
     m_context->Window->Show();
-    OutputDebugStringW(L"[DEBUG] After Show()\n");
 
     uint32_t frameCount = 0;
     const uint32_t maxFrames = 300;
+
     // 初始化 FrameDriver
-    // m_context->FrameDriver->Initialize();
+    m_context->FrameDriver->Initialize();
 
     OutputDebugStringW(L"[DEBUG] Entering main loop\n");
 
     while (m_isRunning && !m_context->Window->ShouldClose()) {
         m_context->Window->ProcessMessages();
 
-        // 调用 FrameDriver::Tick() 来处理消息和执行注册的 Systems
-        // m_context->FrameDriver->Tick();
-
-             // 更新计时器
         m_context->MainTimer->Tick();
-        float deltaTime = m_context->MainTimer->DeltaTime();
 
-        // 逻辑更新
-        Update(deltaTime);
-
-        // ── 直接渲染流程（绕过 FrameDriver）──
-
-        // 1. 开始帧（等待上一帧完成，重置命令分配器）
-        m_context->DeviceContext->BeginFrame();
-
-        // 2. 获取当前帧索引和命令列表句柄
-        auto frameIndex = m_context->CommandManager->GetCurrentFrame();
-        auto allocatorHandle = m_context->CommandManager->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(
-            m_context->CommandManager->GetCompletedFenceValue());
-        auto allocator = m_context->CommandManager->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
-
-        auto cmdListHandle =
-            m_context->CommandManager->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-        auto cmdList = m_context->CommandManager->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-
-        // 3. 获取 BackBuffer 索引
-        auto backBufferIndex = m_context->DeviceContext->GetCurrentBackBufferIndex();
-
-        {
-            auto backBufferResource = m_context->DeviceContext->GetCurrentBackBuffer();
-            D3D12_RESOURCE_BARRIER barrier = {};
-            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-            barrier.Transition.pResource = backBufferResource;
-            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            cmdList.Get()->ResourceBarrier(1, &barrier);
-        }
-
-        // 4. 设置渲染目标
-        auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
-        auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
-
-        cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-        const auto &viewport = m_context->DeviceContext->GetViewport();
-        const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
-        cmdList.Get()->RSSetViewports(1, &viewport);
-        cmdList.Get()->RSSetScissorRects(1, &scissorRect);
-
-        // 5. 清除渲染目标和深度缓冲区
-        const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-        cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-        cmdList.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
-        // 6. 开始录制不透明物体绘制命令
-        m_opaqueRenderer->BeginFrame(cmdList, backBufferIndex);
-
-        // 7. 遍历 ECS 中的 Mesh + Transform 组件并绘制
-        auto view = m_context->Registry->view<MeshComponent, TransformComponent>();
-        for (const auto &[entity, mesh, transform] : view.each()) {
-            m_opaqueRenderer->DrawMesh(cmdList, mesh, transform, backBufferIndex);
-        }
-
-        // 8. 结束录制
-        m_opaqueRenderer->EndFrame();
-
-        // 在 m_opaqueRenderer->EndFrame() 之后，cmdList.Close() 之前添加：
-        {
-            auto backBufferResource = m_context->DeviceContext->GetCurrentBackBuffer();
-            D3D12_RESOURCE_BARRIER barrier = {};
-            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-            barrier.Transition.pResource = backBufferResource;
-            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-            barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            cmdList.Get()->ResourceBarrier(1, &barrier);
-        }
-
-        // 9. 关闭命令列表并提交
-        cmdList.Close();
-        uint64_t sequence = m_context->CommandManager->GetNextSequence();
-        m_context->CommandManager->SubmitAndSignal(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList, sequence);
-
-        // 10. 释放命令列表句柄
-        m_context->CommandManager->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-        m_context->CommandManager->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
-
-        m_context->DeviceContext->EndFrame();
-
-        // 13. 更新 GpuResourceManager（清理已完成的 GPU 资源）
-        System::Resource::GpuResourceManager::GetInstance().Update(m_context->CommandManager->GetCompletedFenceValue());
+        // 调用 FrameDriver::Tick() 来处理消息和执行注册的 Systems
+        m_context->FrameDriver->Tick();
     }
 
     // 停止 FrameDriver
-    // m_context->FrameDriver->Stop();
+    m_context->FrameDriver->Stop();
 
     m_context->Logging->Info("[Game] Game loop ended");
     Shutdown();
@@ -251,14 +161,130 @@ void Game::InitializeGameModules() {
          .threadType = ThreadType::Main, // 主线程执行
          .interestedMessages = {System::Event::WindowResizeEvent::StaticTypeHash}});
 
+    SystemRegistry::Register(
+        {.name = "MainRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 auto &cmdMgr = m_context->CommandManager;
+                 uint64_t completedFence = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+                 auto allocatorHandle = cmdMgr->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = cmdMgr->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+                 auto backBufferIndex = m_context->DeviceContext->GetCurrentBackBufferIndex();
+                 auto backBuffer = m_context->DeviceContext->GetCurrentBackBuffer();
+
+                 // 1. 屏障：Present -> RenderTarget
+                 D3D12_RESOURCE_BARRIER beginBarrier = {};
+                 beginBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 beginBarrier.Transition.pResource = backBuffer;
+                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 beginBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
+
+                 // 2. 设置视口和渲染目标
+                 const auto &viewport = m_context->DeviceContext->GetViewport();
+                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
+                 cmdList.Get()->RSSetViewports(1, &viewport);
+                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+
+                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
+                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
+                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+                 // 3. 清除
+                 const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
+                 cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+                 cmdList.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+                                                      1.0f, 0, 0, nullptr);
+
+                 // 4. 绘制
+                 m_opaqueRenderer->BeginFrame(cmdList, backBufferIndex);
+                 auto view = registry.view<MeshComponent, TransformComponent>();
+                 for (const auto &[entity, mesh, transform] : view.each()) {
+                     m_opaqueRenderer->DrawMesh(cmdList, mesh, transform, backBufferIndex);
+                 }
+                 m_opaqueRenderer->EndFrame();
+
+                 // 5. 屏障：RenderTarget -> Present
+                 D3D12_RESOURCE_BARRIER endBarrier = {};
+                 endBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 endBarrier.Transition.pResource = backBuffer;
+                 endBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 endBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+                 endBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &endBarrier);
+
+                 // 6. 关闭并提交
+                 cmdList.Close();
+
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdListHandle);
+
+                 uint64_t sequence = cmdMgr->GetNextSequence();
+                 // 释放分配器（传入 sequence，不是立即释放）
+                 cmdMgr->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Main,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::Opaque,
+         .dependencies = {},
+         .interestedMessages = {},
+         .alwaysRun = true});
+
+    // RotationSystem - 每帧旋转立方体 (常驻系统)
+    SystemRegistry::Register(
+        {.name = "RotationSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 // 使用 GameContext 中的定时器计算 delta time
+                 float deltaTime = m_context->MainTimer->DeltaTime();
+
+                 // 限制最大 delta time 避免跳帧时旋转过快
+                 if (deltaTime > 0.1f) {
+                     deltaTime = 0.016f; // 假设 60 FPS
+                 }
+
+                 // 调试输出：检查是否有实体
+                 static int frameCount = 0;
+                 frameCount++;
+
+                 auto view = registry.view<TransformComponent>();
+                 int entityCount = 0;
+
+                 view.each([deltaTime, &entityCount](TransformComponent &transform) {
+                     entityCount++;
+                     transform.rotation.y += deltaTime * 2.0f; // 每秒旋转 2 弧度
+
+                     // 每30帧输出一次调试信息
+                     if (frameCount % 30 == 0 && entityCount == 1) {
+                         char dbgBuf[256];
+                         sprintf_s(dbgBuf, "[RotationSystem] Frame=%d, DeltaTime=%.4f, Rotation=(%.2f, %.2f, %.2f)\n",
+                                   frameCount, deltaTime, transform.rotation.x, transform.rotation.y,
+                                   transform.rotation.z);
+                         ::OutputDebugStringA(dbgBuf);
+                     }
+                 });
+
+                 // 如果没有找到实体，输出警告
+                 if (entityCount == 0 && frameCount <= 10) {
+                     OutputDebugStringA("[WARNING] RotationSystem: No entities with TransformComponent found!\n");
+                 }
+             },
+         .phase = TaskPhase::Update,
+         .threadType = ThreadType::Main,
+         .priority = TaskPriority::Normal,
+         .dependencies = {},
+         .interestedMessages = {},
+         .alwaysRun = true});
+
     // 验证注册
     auto allSystems = SystemRegistry::GetAllSystems();
     wchar_t buf[128];
     swprintf_s(buf, L"[Game] Total systems registered: %zu", allSystems.size());
-    ::OutputDebugStringW(buf);
-
-    auto interested = SystemRegistry::GetInterestedSystems(System::Event::WindowResizeEvent::StaticTypeHash);
-    swprintf_s(buf, L"[Game] Systems interested in WindowResizeEvent: %zu", interested.size());
     ::OutputDebugStringW(buf);
 
     m_context->Logging->Info("[Game] Game modules initialized");
@@ -388,5 +414,12 @@ void Game::CreateTestCube() {
 
     // 验证 ECS 查询
     auto view = m_context->Registry->view<MeshComponent, TransformComponent>();
-    // m_context->Logging->Info("[Game] ECS query found {} entities with Mesh+Transform", view.size());
+    bool hasEntities = false;
+    view.each([&hasEntities](const MeshComponent &, const TransformComponent &) { hasEntities = true; });
+
+    if (!hasEntities) {
+        OutputDebugStringA("[WARNING] MainRenderSystem: No entities found!\n");
+    } else {
+        OutputDebugStringA("[INFO] MainRenderSystem: Rendering...\n");
+    }
 }

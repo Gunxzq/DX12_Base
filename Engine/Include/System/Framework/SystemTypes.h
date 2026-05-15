@@ -107,6 +107,7 @@ struct SystemInfo {
     RenderPhase renderPhase = RenderPhase::Opaque;
     std::vector<SystemId> dependencies;              // 依赖的其他System
     std::vector<MessageTypeHash> interestedMessages; // 感兴趣的消息类型
+    bool alwaysRun = false;                          // 常驻标志：每帧都执行，不依赖消息触发
 };
 
 } // namespace DX12Engine::Scheduler
