@@ -170,13 +170,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE SwapChainManager::GetDepthStencilView() const {
     return m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
 }
 
-ID3D12Resource *SwapChainManager::GetCurrentBackBuffer() const {
-
-    OutputDebugStringW(L"[DEBUG] GetCurrentBackBuffer called. Index: ");
-    OutputDebugStringW(std::to_wstring(m_currBackBuffer).c_str());
-    OutputDebugStringW(L"\n");
-    return m_backBuffers[m_currBackBuffer].Get();
-}
+ID3D12Resource *SwapChainManager::GetCurrentBackBuffer() const { return m_backBuffers[m_currBackBuffer].Get(); }
 
 ID3D12Resource *SwapChainManager::GetBackBuffer(UINT index) const {
     if (index >= m_backBuffers.size()) {
@@ -186,16 +180,9 @@ ID3D12Resource *SwapChainManager::GetBackBuffer(UINT index) const {
 }
 
 void SwapChainManager::Present(bool vsync) {
-    OutputDebugStringW(L"[DEBUG] Presenting. Current Index before Present: ");
-    OutputDebugStringW(std::to_wstring(m_currBackBuffer).c_str());
-    OutputDebugStringW(L"\n");
 
     m_swapChain->Present(vsync ? 1 : 0, 0);
     m_currBackBuffer = (m_currBackBuffer + 1) % m_params.bufferCount;
-
-    OutputDebugStringW(L"[DEBUG] Present complete. New Index: ");
-    OutputDebugStringW(std::to_wstring(m_currBackBuffer).c_str());
-    OutputDebugStringW(L"\n");
 }
 
 } // namespace DX12Engine::Renderer
