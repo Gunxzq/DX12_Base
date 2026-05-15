@@ -86,39 +86,6 @@ uint64_t CommandManager::SubmitAndSignalBatch(D3D12_COMMAND_LIST_TYPE type, std:
     return m_fenceManager.Signal(type, queue->Get(), sequence);
 }
 
-void CommandManager::ExecuteBatchAndClose(
-    D3D12_COMMAND_LIST_TYPE type,
-    const std::vector<typename CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles) {
-    if (handles.empty()) {
-        return;
-    }
-    OutputDebugStringW(L"[DEBUG] CommandManager::ExecuteBatchAndClose - Processing ");
-    OutputDebugStringW(std::to_wstring(handles.size()).c_str());
-    OutputDebugStringW(L" command lists\n");
-
-    CommandQueue *queue = GetCommandQueue(type);
-    assert(queue != nullptr);
-
-    std::vector<ID3D12CommandList *> rawLists;
-    rawLists.reserve(handles.size());
-
-    for (const auto &handle : handles) {
-        if (handle.IsValid()) {
-            OutputDebugStringW(
-                L"[DEBUG] CommandManager::ExecuteBatchAndClose - Getting and closing list with handle index: ");
-            OutputDebugStringW(std::to_wstring(handle.index).c_str());
-            OutputDebugStringW(L"\n");
-            CommandList cmdList = GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(handle);
-            cmdList.Close();
-            rawLists.push_back(cmdList.Get());
-        }
-    }
-
-    if (!rawLists.empty()) {
-        queue->Get()->ExecuteCommandLists(static_cast<UINT>(rawLists.size()), rawLists.data());
-    }
-}
-
 void CommandManager::BeginFrame() {
 
     uint32_t frameToWait = (m_currentFrame + 1) % m_frameCount;
@@ -211,6 +178,44 @@ CommandManager::PoolStats CommandManager::GetPoolStats() const {
     getListStats(D3D12_COMMAND_LIST_TYPE_COPY, stats.copyCommandListsTotal, stats.copyCommandListsInUse);
 
     return stats;
+}
+
+uint64_t
+CommandManager::SubmitBatch(const std::vector<CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles,
+                            uint64_t waitSequence) {
+
+    // 调用全确保列表是已关闭的
+    if (handles.empty())
+        return 0;
+
+    CommandQueue *queue = GetCommandQueue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+    // GPU 端等待（如果需要）
+    if (waitSequence > 0) {
+        auto *fence = m_fenceManager.GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT);
+        if (fence) {
+            queue->Wait(fence->Get(), waitSequence);
+        }
+    }
+
+    // 收集 CommandList 对象
+    std::vector<CommandList> cmdLists;
+    cmdLists.reserve(handles.size());
+
+    for (const auto &handle : handles) {
+        if (handle.IsValid()) {
+            CommandList cmdList = GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(handle);
+            cmdLists.push_back(cmdList);
+        }
+    }
+
+    // 使用 CommandQueue 的批量执行方法
+    if (!cmdLists.empty()) {
+        queue->ExecuteBatch(cmdLists);
+    }
+
+    // 返回当前序列号用于后续同步
+    return m_fenceManager.GetCurrentSequence();
 }
 
 } // namespace DX12Engine::Renderer

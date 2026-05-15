@@ -104,7 +104,7 @@ void D3D12DeviceContext::OnResize(uint32_t width, uint32_t height) {
     mClientWidth = width;
     mClientHeight = height;
 
-    m_commandManager.Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+    m_commandManager.FlushAllQueues();
 
     // 委托给 SwapChainManager 处理调整大小
     m_swapChainManager.Resize(width, height);
@@ -113,7 +113,6 @@ void D3D12DeviceContext::OnResize(uint32_t width, uint32_t height) {
 }
 
 ID3D12GraphicsCommandList *D3D12DeviceContext::BeginFrame() {
-    OutputDebugStringW(L"[DEBUG] D3D12DeviceContext::BeginFrame called.\n");
 
     m_commandManager.BeginFrame();
 
@@ -121,16 +120,12 @@ ID3D12GraphicsCommandList *D3D12DeviceContext::BeginFrame() {
 }
 
 void D3D12DeviceContext::EndFrame() {
-    OutputDebugStringW(L"[DEBUG] D3D12DeviceContext::EndFrame called.\n");
 
     m_swapChainManager.Present(mParams.enableVsync);
     m_commandManager.EndFrame();
 }
 
-void D3D12DeviceContext::FlushCommandQueue() {
-    OutputDebugStringW(L"[DEBUG] D3D12DeviceContext::FlushCommandQueue called.\n");
-    m_commandManager.Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
-}
+void D3D12DeviceContext::FlushCommandQueue() { m_commandManager.Flush(D3D12_COMMAND_LIST_TYPE_DIRECT); }
 
 ID3D12CommandQueue *D3D12DeviceContext::GetCommandQueue() const {
     CommandQueue *queue = m_commandManager.GetGraphicsQueue();

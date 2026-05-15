@@ -60,6 +60,12 @@ public:
      */
     uint64_t GetNextSequence() { return m_globalSequence.fetch_add(1, std::memory_order_relaxed); }
 
+    /**
+     * @brief 获取当前全局序号（不递增）
+     * @return 当前最新的序列号值
+     */
+    uint64_t GetCurrentSequence() const { return m_globalSequence.load(std::memory_order_relaxed); }
+
     // ========================================================================
     // 围栏操作
     // ========================================================================

@@ -110,9 +110,8 @@ public:
 
     uint64_t SubmitAndSignal(D3D12_COMMAND_LIST_TYPE type, CommandList &cmdList, uint64_t sequence);
     uint64_t SubmitAndSignalBatch(D3D12_COMMAND_LIST_TYPE type, std::vector<CommandList> &cmdLists, uint64_t sequence);
-    void
-    ExecuteBatchAndClose(D3D12_COMMAND_LIST_TYPE type,
-                         const std::vector<typename CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles);
+    uint64_t SubmitBatch(const std::vector<CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles,
+                         uint64_t waitSequence);
 
     // ========================================================================
     // 主线程接口
@@ -123,6 +122,12 @@ public:
     void WaitForFrame(uint32_t frameIndex, D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
     void WaitForAllFrames(D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
     void Flush(D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+    void FlushAllQueues() {
+        Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+        Flush(D3D12_COMMAND_LIST_TYPE_COMPUTE);
+        Flush(D3D12_COMMAND_LIST_TYPE_COPY);
+    }
 
     uint32_t GetCurrentFrame() const { return m_currentFrame; }
     uint32_t GetFrameCount() const { return m_frameCount; }

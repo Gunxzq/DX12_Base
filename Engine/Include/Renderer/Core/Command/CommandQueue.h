@@ -17,6 +17,9 @@ public:
     // 批量提交
     void ExecuteBatch(const std::vector<CommandList> &cmdLists);
 
+    // GPU 端等待围栏
+    void Wait(ID3D12Fence *fence, UINT64 value);
+
     ID3D12CommandQueue *Get() const { return m_queue.Get(); }
     D3D12_COMMAND_LIST_TYPE GetType() const { return m_type; }
 

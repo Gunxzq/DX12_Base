@@ -60,8 +60,9 @@ public:
 
     /**
      * @brief 获取一个命令列表句柄
+     * @param allocator 命令分配器
      * @return Handle
-     * @note 获取后必须调用 Reset 才能使用
+     * @note Pool 会自动处理状态转换，返回时 CommandList 已处于 Recording 状态
      */
     Handle AcquireHandle(ID3D12CommandAllocator *allocator);
 
@@ -73,7 +74,7 @@ public:
     /**
      * @brief 释放命令列表
      * @param handle 之前 AcquireHandle 得到的句柄
-     * @note 释放后，该 CommandList 对象在下次 Acquire 前不应再被使用
+     * @note Pool 会确保 CommandList 回到 Closed 状态，为下次重用准备
      */
     void Release(const Handle &handle);
 
@@ -83,6 +84,7 @@ private:
     struct alignas(CACHE_LINE_SIZE) Entry {
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> cmdList;
         std::atomic<bool> inUse{false};
+        std::atomic<bool> needsClose{false};
 
         // 更安全的 Padding 计算
         static constexpr size_t MemberSize =
@@ -98,7 +100,8 @@ private:
         Entry &operator=(const Entry &) = delete;
 
         // 支持移动
-        Entry(Entry &&other) noexcept : cmdList(std::move(other.cmdList)), inUse(other.inUse.load()) {
+        Entry(Entry &&other) noexcept
+            : cmdList(std::move(other.cmdList)), inUse(other.inUse.load()), needsClose(other.needsClose.load()) {
             other.inUse.store(false);
         }
 
@@ -106,6 +109,7 @@ private:
             if (this != &other) {
                 cmdList = std::move(other.cmdList);
                 inUse.store(other.inUse.load());
+                needsClose.store(other.needsClose.load());
                 other.inUse.store(false);
             }
             return *this;
@@ -118,6 +122,8 @@ private:
     ID3D12Device *m_device = nullptr;
     D3D12_COMMAND_LIST_TYPE m_type;
     std::mutex m_expandMutex;
+
+    void PrepareCommandList(CommandList &cmdList, ID3D12CommandAllocator *allocator, Entry &entry);
 };
 
 // ========================================================================

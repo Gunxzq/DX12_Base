@@ -88,17 +88,21 @@ void FrameDriver::ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence) {
             auto *fence = GetCommandManager()->GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
             queue->Wait(fence, waitSequence);
         }
-        m_deviceContext->GetCommandManager().ExecuteBatchAndClose(D3D12_COMMAND_LIST_TYPE_DIRECT, handles);
+        m_deviceContext->GetCommandManager().SubmitBatch(handles, waitSequence);
         handles.clear();
     }
 }
 
 uint64_t FrameDriver::SubmitBarrier(RenderPhase phase) {
-    if (!m_deviceContext)
+    if (!m_deviceContext) {
+        OutputDebugStringW(L"[DEBUG] SubmitBarrier: m_deviceContext is null, returning 0\n");
         return 0;
+    }
 
     auto &cmdMgr = m_deviceContext->GetCommandManager();
     uint64_t completed = cmdMgr.GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+    const char *phaseName = (phase == RenderPhase::BeginBarrier) ? "BeginBarrier" : "EndBarrier";
 
     auto allocHandle = cmdMgr.AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(completed);
     ID3D12CommandAllocator *allocator = cmdMgr.GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
@@ -106,7 +110,10 @@ uint64_t FrameDriver::SubmitBarrier(RenderPhase phase) {
     auto cmdListHandle = cmdMgr.AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
     CommandList cmdList = cmdMgr.GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
-    cmdList.Reset(allocator, nullptr);
+    if (!cmdList.IsValid()) {
+        OutputDebugStringW(L"[ERROR] CommandList is invalid!\n");
+        return 0;
+    }
 
     ID3D12Resource *backBuffer = m_deviceContext->GetCurrentBackBuffer();
 
@@ -142,11 +149,15 @@ uint64_t FrameDriver::SubmitBarrier(RenderPhase phase) {
 
     uint64_t sequence = cmdMgr.GetNextSequence();
 
-    cmdList.Close();
+    try {
+        cmdList.Close();
+    } catch (...) {
+        OutputDebugStringW(L"[ERROR] Close FAILED!\n");
+        throw;
+    }
 
     cmdMgr.SubmitAndSignal(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList, sequence);
 
-    // 屏障列表提交后立即释放资源
     cmdMgr.ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
     cmdMgr.ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, sequence);
 
@@ -154,7 +165,6 @@ uint64_t FrameDriver::SubmitBarrier(RenderPhase phase) {
     if (phase == RenderPhase::BeginBarrier) {
         auto *queue = m_deviceContext->GetCommandQueue();
         auto *fence = cmdMgr.GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
-
         queue->Wait(fence, sequence);
     }
 

@@ -26,4 +26,6 @@ void CommandQueue::ExecuteBatch(const std::vector<CommandList> &cmdLists) {
     m_queue->ExecuteCommandLists(static_cast<UINT>(rawLists.size()), rawLists.data());
 }
 
+void CommandQueue::Wait(ID3D12Fence *fence, UINT64 value) { m_queue->Wait(fence, value); }
+
 } // namespace DX12Engine::Renderer

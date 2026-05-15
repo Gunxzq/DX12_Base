@@ -40,11 +40,12 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
             Entry &entry = m_pool[idx];
 
             bool expectedInUse = false;
-            if (entry.inUse.compare_exchange_strong(expectedInUse, true, std::memory_order_acquire)) {
-                if (entry.cmdList) {
-                    entry.cmdList->Close(); // ✅ 确保已关闭
+            if (!entry.inUse.load(std::memory_order_relaxed)) {
+                if (entry.inUse.compare_exchange_strong(expectedInUse, true, std::memory_order_acquire)) {
+                    CommandList cmdList(entry.cmdList.Get());
+                    PrepareCommandList(cmdList, allocator, entry);
+                    return {idx};
                 }
-                return {idx};
             }
         }
     }
@@ -54,9 +55,12 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
 
     // 双重检查：防止其他线程在等待锁期间已经创建了新的项或释放了旧的项
     for (size_t i = 0; i < m_pool.size(); ++i) {
-        if (!m_pool[i].inUse.load(std::memory_order_relaxed)) {
+        Entry &entry = m_pool[i];
+        if (!entry.inUse.load(std::memory_order_relaxed)) {
             bool expectedInUse = false;
-            if (m_pool[i].inUse.compare_exchange_strong(expectedInUse, true, std::memory_order_acquire)) {
+            if (entry.inUse.compare_exchange_strong(expectedInUse, true, std::memory_order_acquire)) {
+                CommandList cmdList(entry.cmdList.Get());
+                PrepareCommandList(cmdList, allocator, entry);
                 return {i};
             }
         }
@@ -71,12 +75,9 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
         m_pool.pop_back(); // 回滚
         throw std::runtime_error("Failed to create CommandList in Pool");
     }
-    if (SUCCEEDED(hr)) {
-        m_pool[newIndex].cmdList->Close(); // ✅ 关闭后返回
-    }
-
-    // 按需创建时，命令列表处于 "Recording" 状态，可以直接使用，无需 Close
+    // 设置初始状态
     m_pool[newIndex].inUse.store(true, std::memory_order_relaxed);
+    m_pool[newIndex].needsClose.store(false, std::memory_order_release);
 
     return {newIndex};
 }
@@ -84,7 +85,26 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
 template <D3D12_COMMAND_LIST_TYPE Type> CommandList CommandListPool<Type>::GetCommandList(const Handle &handle) {
     assert(handle.IsValid());
     assert(handle.index < m_pool.size());
+
     return CommandList(m_pool[handle.index].cmdList.Get());
+}
+
+// ========================================================================
+// 私有辅助方法：准备 CommandList 状态
+// ========================================================================
+
+template <D3D12_COMMAND_LIST_TYPE Type>
+void CommandListPool<Type>::PrepareCommandList(CommandList &cmdList, ID3D12CommandAllocator *allocator, Entry &entry) {
+    bool expectedNeedsClose = true;
+    if (entry.needsClose.compare_exchange_strong(expectedNeedsClose, false, std::memory_order_acquire)) {
+        cmdList.Close();
+    }
+
+    // 此时 CommandList 一定是 Closed 状态，可以安全地 Reset
+    cmdList.Reset(allocator, nullptr);
+
+    // 标记为使用后需要 Close
+    entry.needsClose.store(true, std::memory_order_release);
 }
 
 template <D3D12_COMMAND_LIST_TYPE Type> void CommandListPool<Type>::Release(const Handle &handle) {
@@ -93,10 +113,10 @@ template <D3D12_COMMAND_LIST_TYPE Type> void CommandListPool<Type>::Release(cons
 
     Entry &entry = m_pool[handle.index];
 
-    // 可选：调试模式下检查是否真的被标记为 inUse
-    // assert(entry.inUse.load() == true);
+    assert(entry.inUse.load() == true);
 
     entry.inUse.store(false, std::memory_order_release);
+    entry.needsClose.store(false, std::memory_order_release);
 }
 
 // ========================================================================
