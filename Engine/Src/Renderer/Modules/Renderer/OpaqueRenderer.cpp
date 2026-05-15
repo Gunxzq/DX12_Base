@@ -77,15 +77,6 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, uint32_t backBufferIndex) 
     UpdateConstantBuffer(backBufferIndex);
     cmdList.Get()->SetGraphicsRootConstantBufferView(
         0, m_frameResources[backBufferIndex].constantBuffer->GetGPUVirtualAddress());
-
-    auto rtvHandle = m_context->GetCurrentBackBufferView();
-    auto dsvHandle = m_context->GetDepthStencilView();
-
-    if (dsvHandle.ptr == 0) {
-        OutputDebugStringW(L"[ERROR] DSV handle is null!\n");
-    }
-
-    cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
 }
 
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, const TransformComponent &transform,
