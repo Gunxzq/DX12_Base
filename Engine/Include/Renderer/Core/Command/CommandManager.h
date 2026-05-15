@@ -108,10 +108,10 @@ public:
     // 提交接口
     // ------------------------------------------------------------------------
 
-    uint64_t SubmitAndSignal(D3D12_COMMAND_LIST_TYPE type, CommandList &cmdList, uint64_t sequence);
-    uint64_t SubmitAndSignalBatch(D3D12_COMMAND_LIST_TYPE type, std::vector<CommandList> &cmdLists, uint64_t sequence);
-    uint64_t SubmitBatch(const std::vector<CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles,
-                         uint64_t waitSequence);
+    void Submit(D3D12_COMMAND_LIST_TYPE type, CommandList &cmdList);
+
+    void SubmitBatch(const std::vector<CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles,
+                     uint64_t waitSequence);
 
     // ========================================================================
     // 主线程接口

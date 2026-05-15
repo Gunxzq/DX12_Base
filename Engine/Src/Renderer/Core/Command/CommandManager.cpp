@@ -44,6 +44,15 @@ void CommandManager::Initialize(ID3D12Device *device, uint32_t frameCount) {
 
     m_commandListPools[D3D12_COMMAND_LIST_TYPE_COPY] =
         std::make_unique<CommandListPool<D3D12_COMMAND_LIST_TYPE_COPY>>(device);
+
+    CommandQueue *queue = GetGraphicsQueue();
+    uint64_t initSequence = m_fenceManager.GetNextSequence();
+    m_fenceManager.Signal(D3D12_COMMAND_LIST_TYPE_DIRECT, queue->Get(), initSequence);
+    m_fenceManager.WaitForSequence(D3D12_COMMAND_LIST_TYPE_DIRECT, initSequence); // 等待完成
+
+    for (uint32_t i = 0; i < m_frameCount; ++i) {
+        m_frameResources[i].fenceValue = initSequence;
+    }
 }
 
 void CommandManager::Shutdown() {
@@ -59,66 +68,26 @@ void CommandManager::Shutdown() {
     m_device = nullptr;
 }
 
-uint64_t CommandManager::SubmitAndSignal(D3D12_COMMAND_LIST_TYPE type, CommandList &cmdList, uint64_t sequence) {
-    CommandQueue *queue = GetCommandQueue(type);
-    assert(queue != nullptr);
-
-    queue->Execute(cmdList);
-
-    return m_fenceManager.Signal(type, queue->Get(), sequence);
-}
-
-uint64_t CommandManager::SubmitAndSignalBatch(D3D12_COMMAND_LIST_TYPE type, std::vector<CommandList> &cmdLists,
-                                              uint64_t sequence) {
-    if (cmdLists.empty()) {
-        return sequence;
-    }
-
-    CommandQueue *queue = GetCommandQueue(type);
-    assert(queue != nullptr);
-
-    for (auto &cmdList : cmdLists) {
-        cmdList.Close();
-    }
-
-    queue->ExecuteBatch(cmdLists);
-
-    return m_fenceManager.Signal(type, queue->Get(), sequence);
-}
-
 void CommandManager::BeginFrame() {
 
-    uint32_t frameToWait = (m_currentFrame + 1) % m_frameCount;
+    uint32_t frameToWait = (m_currentFrame + m_frameCount - 1) % m_frameCount;
+
     uint64_t fenceValue = m_frameResources[frameToWait].fenceValue;
 
-    // 2. 如果该帧有记录的 Fence 值，则进行等待
     if (fenceValue > 0) {
         m_fenceManager.WaitForSequence(D3D12_COMMAND_LIST_TYPE_DIRECT, fenceValue);
     }
 
-    // 标记当前帧为使用中
     m_frameResources[m_currentFrame].inUse = true;
 }
 
 void CommandManager::EndFrame() {
     uint32_t frame = m_currentFrame;
-
-    // 获取下一序列号作为本帧的结束标记
-    uint64_t sequence = m_fenceManager.GetNextSequence();
-
+    uint64_t sequence = m_fenceManager.GetCurrentSequence();
     CommandQueue *queue = GetGraphicsQueue();
-    if (queue) {
-        // 在队列末尾发出信号，记录本帧完成的 Fence 值
-        uint64_t fenceValue = m_fenceManager.Signal(D3D12_COMMAND_LIST_TYPE_DIRECT, queue->Get(), sequence);
-        m_frameResources[frame].fenceValue = fenceValue;
-    }
-
-    // 推进到下一帧
+    uint64_t fenceValue = m_fenceManager.Signal(D3D12_COMMAND_LIST_TYPE_DIRECT, queue->Get(), sequence);
+    m_frameResources[frame].fenceValue = fenceValue;
     m_currentFrame = (m_currentFrame + 1) % m_frameCount;
-
-    // 重置即将被复用的那一帧的状态（可选，但在逻辑上更清晰）
-    uint32_t nextFrame = m_currentFrame;
-    m_frameResources[nextFrame].inUse = false;
 }
 
 void CommandManager::WaitForFrame(uint32_t frameIndex, D3D12_COMMAND_LIST_TYPE type) {
@@ -180,13 +149,15 @@ CommandManager::PoolStats CommandManager::GetPoolStats() const {
     return stats;
 }
 
-uint64_t
-CommandManager::SubmitBatch(const std::vector<CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles,
-                            uint64_t waitSequence) {
-
-    // 调用全确保列表是已关闭的
-    if (handles.empty())
-        return 0;
+/**
+ * @brief 提交命令批次
+ * @param handles
+ * @param waitSequence
+ * @return uint64_t
+ * @note 提交批次，但是不设置GPU端值，并不是真正的等待完成
+ */
+void CommandManager::SubmitBatch(const std::vector<CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle> &handles,
+                                 uint64_t waitSequence) {
 
     CommandQueue *queue = GetCommandQueue(D3D12_COMMAND_LIST_TYPE_DIRECT);
 
@@ -213,9 +184,15 @@ CommandManager::SubmitBatch(const std::vector<CommandListPool<D3D12_COMMAND_LIST
     if (!cmdLists.empty()) {
         queue->ExecuteBatch(cmdLists);
     }
+}
 
-    // 返回当前序列号用于后续同步
-    return m_fenceManager.GetCurrentSequence();
+void CommandManager::Submit(D3D12_COMMAND_LIST_TYPE type, CommandList &cmdList) {
+    assert(cmdList.IsValid() && "Cannot submit invalid command list");
+
+    CommandQueue *queue = GetCommandQueue(type);
+    if (queue) {
+        queue->Execute(cmdList);
+    }
 }
 
 } // namespace DX12Engine::Renderer

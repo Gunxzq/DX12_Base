@@ -121,8 +121,9 @@ ID3D12GraphicsCommandList *D3D12DeviceContext::BeginFrame() {
 
 void D3D12DeviceContext::EndFrame() {
 
-    m_swapChainManager.Present(mParams.enableVsync);
     m_commandManager.EndFrame();
+
+    m_swapChainManager.Present(mParams.enableVsync);
 }
 
 void D3D12DeviceContext::FlushCommandQueue() { m_commandManager.Flush(D3D12_COMMAND_LIST_TYPE_DIRECT); }
