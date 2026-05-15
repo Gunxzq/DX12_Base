@@ -26,6 +26,12 @@ void OpaqueRenderer::Initialize() {
     }
 
     LoadShaders();
+
+    if (!m_vsBlob || !m_psBlob) {
+        OutputDebugStringW(L"[ERROR] Failed to load shaders!\n");
+        throw std::runtime_error("OpaqueRenderer: Failed to load shaders");
+    }
+
     CreateRootSignature();
     CreatePSO();
 
@@ -40,6 +46,8 @@ void OpaqueRenderer::Initialize() {
     }
 
     OnResize(1280, 720);
+
+    OutputDebugStringW(L"[INFO] OpaqueRenderer initialized successfully\n");
 }
 
 void OpaqueRenderer::OnResize(uint32_t width, uint32_t height) {
@@ -88,27 +96,31 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, c
     ID3D12Resource *vb = gpuMgr.GetResource(mesh.vertexBuffer);
     ID3D12Resource *ib = gpuMgr.GetResource(mesh.indexBuffer);
 
-    if (!vb || !ib)
+    if (!vb || !ib) {
+        OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - Invalid vertex or index buffer!\n");
         return;
+    }
 
-    // 2. 设置顶点缓冲区和索引缓冲区
-    constexpr UINT vertexStride = sizeof(GeometryGenerator::Vertex);
-
-    D3D12_VERTEX_BUFFER_VIEW vbv;
-    vbv.BufferLocation = vb->GetGPUVirtualAddress();
-    vbv.StrideInBytes = vertexStride;
-    vbv.SizeInBytes = mesh.vertexCount * vertexStride;
-
-    D3D12_INDEX_BUFFER_VIEW ibv;
-    ibv.BufferLocation = ib->GetGPUVirtualAddress();
-    ibv.Format = DXGI_FORMAT_R32_UINT;
-    ibv.SizeInBytes = mesh.indexCount * sizeof(uint32_t);
-
-    cmdList.Get()->IASetVertexBuffers(0, 1, &vbv);
-    cmdList.Get()->IASetIndexBuffer(&ibv);
+    // 2. 使用 MeshComponent 中存储的 VBV/IBV（包含正确的 stride）
+    cmdList.Get()->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+    cmdList.Get()->IASetIndexBuffer(&mesh.indexBufferView);
     cmdList.Get()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    // 3. 绘制调用
+    // 3. 更新常量缓冲区中的世界矩阵
+    UpdateConstantBufferWithTransform(backBufferIndex, transform);
+
+    // 4. 绘制调用
+    static bool firstDraw = true;
+    if (firstDraw) {
+        wchar_t debugInfo[256];
+        swprintf_s(debugInfo,
+                   L"[DEBUG] Drawing mesh: vertices=%u, indices=%u, stride=%u, position=(%.1f, %.1f, %.1f)\n",
+                   mesh.vertexCount, mesh.indexCount, mesh.vertexBufferView.StrideInBytes, transform.position.x,
+                   transform.position.y, transform.position.z);
+        OutputDebugStringW(debugInfo);
+        firstDraw = false;
+    }
+
     cmdList.Get()->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
 }
 
@@ -160,10 +172,26 @@ void OpaqueRenderer::CreatePSO() {
     psoDesc.pRootSignature = m_rootSignature.Get();
     psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsBlob->GetBufferPointer()), m_vsBlob->GetBufferSize()};
     psoDesc.PS = {reinterpret_cast<BYTE *>(m_psBlob->GetBufferPointer()), m_psBlob->GetBufferSize()};
+
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+
+    // // 启用线框模式以便调试
+    // D3D12_RASTERIZER_DESC rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    // rasterizerDesc.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    // rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // 禁用背面剔除
+    // psoDesc.RasterizerState = rasterizerDesc;
+
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+
+    // psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+
+    // 临时
+    D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
+    depthStencilDesc.DepthEnable = FALSE;
+    depthStencilDesc.StencilEnable = FALSE;
+    psoDesc.DepthStencilState = depthStencilDesc;
 
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
@@ -174,6 +202,8 @@ void OpaqueRenderer::CreatePSO() {
     psoDesc.SampleDesc.Quality = m_context->Is4xMsaaEnabled() ? (m_context->Get4xMsaaQuality() - 1) : 0;
 
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso)));
+
+    OutputDebugStringW(L"[INFO] PSO created successfully\n");
 }
 
 // ========================================================================
@@ -184,6 +214,32 @@ void OpaqueRenderer::UpdateConstantBuffer(uint32_t backBufferIndex) {
     XMMATRIX world = XMMatrixIdentity();
     XMMATRIX view = XMMatrixLookAtLH(XMVectorSet(0.0f, 2.0f, -5.0f, 1.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),
                                      XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
+
+    XMMATRIX worldViewProj = world * view * m_projectionMatrix;
+    XMFLOAT4X4 worldViewProjFX;
+    XMStoreFloat4x4(&worldViewProjFX, XMMatrixTranspose(worldViewProj));
+
+    memcpy(m_frameResources[backBufferIndex].mappedData, &worldViewProjFX, sizeof(XMFLOAT4X4));
+}
+
+void OpaqueRenderer::UpdateConstantBufferWithTransform(uint32_t backBufferIndex, const TransformComponent &transform) {
+    // 从 TransformComponent 构建世界矩阵
+    XMMATRIX translation = XMMatrixTranslation(transform.position.x, transform.position.y, transform.position.z);
+
+    XMMATRIX rotationX = XMMatrixRotationX(transform.rotation.x);
+    XMMATRIX rotationY = XMMatrixRotationY(transform.rotation.y);
+    XMMATRIX rotationZ = XMMatrixRotationZ(transform.rotation.z);
+    XMMATRIX rotation = rotationX * rotationY * rotationZ;
+
+    XMMATRIX scale = XMMatrixScaling(transform.scale.x, transform.scale.y, transform.scale.z);
+
+    XMMATRIX world = scale * rotation * translation;
+
+    // 视图矩阵（相机位置）
+    XMMATRIX view = XMMatrixLookAtLH(XMVectorSet(0.0f, 2.0f, -10.0f, 1.0f), // 相机位置：往后退到 -10
+                                     XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),   // 观察目标：原点
+                                     XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)    // 上方向
+    );
 
     XMMATRIX worldViewProj = world * view * m_projectionMatrix;
     XMFLOAT4X4 worldViewProjFX;

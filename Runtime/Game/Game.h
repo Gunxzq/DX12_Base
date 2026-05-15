@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Core/Context/GameContext.h"
+#include "Renderer/Modules/Renderer/OpaqueRenderer.h"
+#include "System/ECS/Entity.h"
 #include <memory>
 
 // ========================================================================
@@ -31,9 +33,12 @@ public:
 private:
     void InitializeGameModules();
     void ShutdownGameModules();
+    void CreateTestCube();
 
     // ── 成员变量 ──
     DX12Engine::Core::GameContext *m_context;
+    std::unique_ptr<DX12Engine::Renderer::OpaqueRenderer> m_opaqueRenderer;
+    DX12Engine::ECS::Entity m_cubeEntity;
     bool m_isRunning = false;
     bool m_isInitialized = false;
     float m_deltaTime = 0.0f;

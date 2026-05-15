@@ -72,6 +72,8 @@ private:
     void CreatePSO();
     void LoadShaders();
     void UpdateConstantBuffer(uint32_t backBufferIndex);
+    void UpdateConstantBufferWithTransform(uint32_t backBufferIndex,
+                                           const DX12Engine::ECS::TransformComponent &transform);
 
     // ========================================================================
     // 成员变量
