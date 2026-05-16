@@ -152,9 +152,19 @@ void Game::InitializeGameModules() {
                      ::OutputDebugStringA("[WindowResizeSystem] WARNING: m_context or Logging is null!\n");
                  }
 
+                 uint32_t width = ctx.GetLow32();
+                 uint32_t height = ctx.GetHigh32();
+
                  // DX12 resize
                  if (m_context && m_context->DeviceContext) {
                      m_context->DeviceContext->OnResize(ctx.GetLow32(), ctx.GetHigh32());
+                 }
+
+                 if (m_opaqueRenderer) {
+                     m_opaqueRenderer->OnResize(width, height);
+
+                     sprintf_s(dbgBuf, "[WindowResizeSystem] OpaqueRenderer projection matrix updated\n");
+                     ::OutputDebugStringA(dbgBuf);
                  }
              },
          .phase = TaskPhase::EarlyUpdate,

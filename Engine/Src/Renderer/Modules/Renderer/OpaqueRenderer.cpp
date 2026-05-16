@@ -45,7 +45,8 @@ void OpaqueRenderer::Initialize() {
         m_frameResources[i].constantBuffer->Map(0, nullptr, &m_frameResources[i].mappedData);
     }
 
-    OnResize(1280, 720);
+    const auto &viewport = m_context->GetViewport();
+    OnResize(static_cast<uint32_t>(viewport.Width), static_cast<uint32_t>(viewport.Height));
 
     OutputDebugStringW(L"[INFO] OpaqueRenderer initialized successfully\n");
 }
