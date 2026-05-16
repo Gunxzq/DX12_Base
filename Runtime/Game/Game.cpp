@@ -47,6 +47,11 @@ bool Game::Initialize() {
     // 创建测试立方体
     CreateTestCube();
 
+    if (m_context->FrameDriver) {
+        m_context->FrameDriver->SetTargetFPS(60); // Limit to 60 FPS
+        m_context->Logging->Info("[Game] Target FPS set to 60");
+    }
+
     m_isInitialized = true;
     m_context->Logging->Info("[Game] Game initialized successfully");
     return true;
@@ -65,7 +70,6 @@ int Game::Run() {
 
     m_context->Logging->Info("[Game] Starting game loop with FrameDriver...");
     m_isRunning = true;
-    m_context->MainTimer->Reset();
     m_context->Window->Show();
 
     uint32_t frameCount = 0;
@@ -78,7 +82,6 @@ int Game::Run() {
 
     while (m_isRunning && !m_context->Window->ShouldClose()) {
         m_context->Window->ProcessMessages();
-
         m_context->MainTimer->Tick();
 
         // 调用 FrameDriver::Tick() 来处理消息和执行注册的 Systems
@@ -117,15 +120,7 @@ void Game::Shutdown() {
     m_context->Logging->Info("[Game] Game shutdown complete");
 }
 
-void Game::Update(float deltaTime) {
-    // 此方法保留给纯逻辑更新（如物理、动画等）
-    if (m_context->Registry && entt::null != m_cubeEntity) {
-        auto *transform = m_context->Registry->TryGetComponent<TransformComponent>(m_cubeEntity);
-        if (transform) {
-            transform->rotation.y += deltaTime * 0.5f; // 每秒旋转 0.5 弧度
-        }
-    }
-}
+void Game::Update(float deltaTime) {}
 
 void Game::InitializeGameModules() {
     m_context->Logging->Info("[Game] Initializing game modules...");
@@ -246,50 +241,26 @@ void Game::InitializeGameModules() {
          .alwaysRun = true});
 
     // RotationSystem - 每帧旋转立方体 (常驻系统)
-    SystemRegistry::Register(
-        {.name = "RotationSystem",
-         .func =
-             [this](Registry &registry, const MessageContext &ctx) {
-                 // 使用 GameContext 中的定时器计算 delta time
-                 float deltaTime = m_context->MainTimer->DeltaTime();
+    SystemRegistry::Register({.name = "RotationSystem",
+                              .func =
+                                  [this](Registry &registry, const MessageContext &ctx) {
+                                      // 使用 GameContext 中的定时器计算 delta time
+                                      float deltaTime = m_context->MainTimer->GetDeltaTime();
 
-                 // 限制最大 delta time 避免跳帧时旋转过快
-                 if (deltaTime > 0.1f) {
-                     deltaTime = 0.016f; // 假设 60 FPS
-                 }
+                                      auto view = registry.view<TransformComponent>();
+                                      int entityCount = 0;
 
-                 // 调试输出：检查是否有实体
-                 static int frameCount = 0;
-                 frameCount++;
-
-                 auto view = registry.view<TransformComponent>();
-                 int entityCount = 0;
-
-                 view.each([deltaTime, &entityCount](TransformComponent &transform) {
-                     entityCount++;
-                     transform.rotation.y += deltaTime * 2.0f; // 每秒旋转 2 弧度
-
-                     // 每30帧输出一次调试信息
-                     if (frameCount % 30 == 0 && entityCount == 1) {
-                         char dbgBuf[256];
-                         sprintf_s(dbgBuf, "[RotationSystem] Frame=%d, DeltaTime=%.4f, Rotation=(%.2f, %.2f, %.2f)\n",
-                                   frameCount, deltaTime, transform.rotation.x, transform.rotation.y,
-                                   transform.rotation.z);
-                         ::OutputDebugStringA(dbgBuf);
-                     }
-                 });
-
-                 // 如果没有找到实体，输出警告
-                 if (entityCount == 0 && frameCount <= 10) {
-                     OutputDebugStringA("[WARNING] RotationSystem: No entities with TransformComponent found!\n");
-                 }
-             },
-         .phase = TaskPhase::Update,
-         .threadType = ThreadType::Main,
-         .priority = TaskPriority::Normal,
-         .dependencies = {},
-         .interestedMessages = {},
-         .alwaysRun = true});
+                                      view.each([deltaTime, &entityCount](TransformComponent &transform) {
+                                          entityCount++;
+                                          transform.rotation.y += deltaTime * 2.0f; // 每秒旋转 2 弧度
+                                      });
+                                  },
+                              .phase = TaskPhase::Update,
+                              .threadType = ThreadType::Main,
+                              .priority = TaskPriority::Normal,
+                              .dependencies = {},
+                              .interestedMessages = {},
+                              .alwaysRun = true});
 
     // 验证注册
     auto allSystems = SystemRegistry::GetAllSystems();
