@@ -70,7 +70,6 @@ void FrameDriver::Initialize(uint32_t workerThreadCount) {
     }
 
     m_running = true;
-    m_frameStartTime = std::chrono::steady_clock::now();
 }
 
 void FrameDriver::SubmitRenderCommand(RenderPhase phase, const CmdListHandle &handle) {
@@ -100,94 +99,90 @@ void FrameDriver::ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence) {
     }
 }
 
-uint64_t FrameDriver::SubmitBarrier(RenderPhase phase) {
-    if (!m_deviceContext) {
-        OutputDebugStringW(L"[DEBUG] SubmitBarrier: m_deviceContext is null, returning 0\n");
-        return 0;
-    }
+// uint64_t FrameDriver::SubmitBarrier(RenderPhase phase) {
+//     if (!m_deviceContext) {
+//         OutputDebugStringW(L"[DEBUG] SubmitBarrier: m_deviceContext is null, returning 0\n");
+//         return 0;
+//     }
 
-    auto &cmdMgr = m_deviceContext->GetCommandManager();
-    uint64_t completed = cmdMgr.GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+//     auto &cmdMgr = m_deviceContext->GetCommandManager();
+//     uint64_t completed = cmdMgr.GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
 
-    const char *phaseName = (phase == RenderPhase::BeginBarrier) ? "BeginBarrier" : "EndBarrier";
+//     const char *phaseName = (phase == RenderPhase::BeginBarrier) ? "BeginBarrier" : "EndBarrier";
 
-    auto allocHandle = cmdMgr.AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(completed);
-    ID3D12CommandAllocator *allocator = cmdMgr.GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
+//     auto allocHandle = cmdMgr.AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(completed);
+//     ID3D12CommandAllocator *allocator = cmdMgr.GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
 
-    auto cmdListHandle = cmdMgr.AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-    CommandList cmdList = cmdMgr.GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+//     auto cmdListHandle = cmdMgr.AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+//     CommandList cmdList = cmdMgr.GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
-    if (!cmdList.IsValid()) {
-        OutputDebugStringW(L"[ERROR] CommandList is invalid!\n");
-        return 0;
-    }
+//     if (!cmdList.IsValid()) {
+//         OutputDebugStringW(L"[ERROR] CommandList is invalid!\n");
+//         return 0;
+//     }
 
-    ID3D12Resource *backBuffer = m_deviceContext->GetCurrentBackBuffer();
+//     ID3D12Resource *backBuffer = m_deviceContext->GetCurrentBackBuffer();
 
-    D3D12_RESOURCE_STATES stateBefore =
-        (phase == RenderPhase::BeginBarrier) ? D3D12_RESOURCE_STATE_PRESENT : D3D12_RESOURCE_STATE_RENDER_TARGET;
-    D3D12_RESOURCE_STATES stateAfter =
-        (phase == RenderPhase::BeginBarrier) ? D3D12_RESOURCE_STATE_RENDER_TARGET : D3D12_RESOURCE_STATE_PRESENT;
+//     D3D12_RESOURCE_STATES stateBefore =
+//         (phase == RenderPhase::BeginBarrier) ? D3D12_RESOURCE_STATE_PRESENT : D3D12_RESOURCE_STATE_RENDER_TARGET;
+//     D3D12_RESOURCE_STATES stateAfter =
+//         (phase == RenderPhase::BeginBarrier) ? D3D12_RESOURCE_STATE_RENDER_TARGET : D3D12_RESOURCE_STATE_PRESENT;
 
-    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, stateBefore, stateAfter);
-    cmdList.Get()->ResourceBarrier(1, &barrier);
+//     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, stateBefore, stateAfter);
+//     cmdList.Get()->ResourceBarrier(1, &barrier);
 
-    if (phase == RenderPhase::BeginBarrier) {
-        D3D12_VIEWPORT viewport = m_deviceContext->GetViewport();
-        D3D12_RECT scissorRect = m_deviceContext->GetScissorRect();
-        cmdList.Get()->RSSetViewports(1, &viewport);
-        cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+//     if (phase == RenderPhase::BeginBarrier) {
+//         D3D12_VIEWPORT viewport = m_deviceContext->GetViewport();
+//         D3D12_RECT scissorRect = m_deviceContext->GetScissorRect();
+//         cmdList.Get()->RSSetViewports(1, &viewport);
+//         cmdList.Get()->RSSetScissorRects(1, &scissorRect);
 
-        auto rtvHandle = m_deviceContext->GetCurrentBackBufferView();
-        auto dsvHandle = m_deviceContext->GetDepthStencilView();
-        cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
+//         auto rtvHandle = m_deviceContext->GetCurrentBackBufferView();
+//         auto dsvHandle = m_deviceContext->GetDepthStencilView();
+//         cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
 
-        // 根据时间计算颜色
-        float time = static_cast<float>(m_stats.totalTime);
-        float r = (sin(time * 0.5f) + 1.0f) / 2.0f;
-        float g = (sin(time * 0.7f + 2.0f) + 1.0f) / 2.0f;
-        float b = (sin(time * 0.9f + 4.0f) + 1.0f) / 2.0f;
-        const float clearColor[] = {r, g, b, 1.0f};
+//         // 根据时间计算颜色
+//         float time = static_cast<float>(m_stats.totalTime);
+//         float r = (sin(time * 0.5f) + 1.0f) / 2.0f;
+//         float g = (sin(time * 0.7f + 2.0f) + 1.0f) / 2.0f;
+//         float b = (sin(time * 0.9f + 4.0f) + 1.0f) / 2.0f;
+//         const float clearColor[] = {r, g, b, 1.0f};
 
-        cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-        cmdList.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0,
-                                             nullptr);
-    }
+//         cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+//         cmdList.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0,
+//         0,
+//                                              nullptr);
+//     }
 
-    uint64_t sequence = cmdMgr.GetNextSequence();
+//     uint64_t sequence = cmdMgr.GetNextSequence();
 
-    try {
-        cmdList.Close();
-    } catch (...) {
-        OutputDebugStringW(L"[ERROR] Close FAILED!\n");
-        throw;
-    }
+//     try {
+//         cmdList.Close();
+//     } catch (...) {
+//         OutputDebugStringW(L"[ERROR] Close FAILED!\n");
+//         throw;
+//     }
 
-    cmdMgr.Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
+//     cmdMgr.Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
 
-    cmdMgr.ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-    cmdMgr.ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, sequence);
+//     cmdMgr.ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+//     cmdMgr.ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, sequence);
 
-    // 关键：在 GPU 端插入等待，确保后续命令在屏障完成后才执行
-    if (phase == RenderPhase::BeginBarrier) {
-        auto *queue = m_deviceContext->GetCommandQueue();
-        auto *fence = cmdMgr.GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
-        queue->Wait(fence, sequence);
-    }
+//     // 关键：在 GPU 端插入等待，确保后续命令在屏障完成后才执行
+//     if (phase == RenderPhase::BeginBarrier) {
+//         auto *queue = m_deviceContext->GetCommandQueue();
+//         auto *fence = cmdMgr.GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
+//         queue->Wait(fence, sequence);
+//     }
 
-    return sequence;
-}
+//     return sequence;
+// }
 
 bool FrameDriver::Tick() {
     if (!m_running)
         return false;
 
-    m_frameStartTime = std::chrono::steady_clock::now();
-
-    // 计算 DeltaTime
-    auto duration = std::chrono::duration<float>(m_frameStartTime - m_lastFrameTime);
-    m_stats.deltaTime = duration.count();
-    m_stats.totalTime += m_stats.deltaTime;
+    // 帧统计
     m_stats.frameNumber++;
 
     // ========================================================================
@@ -272,15 +267,9 @@ bool FrameDriver::Tick() {
     // 等待目标帧率
     WaitForTargetFPS();
 
-    m_lastFrameTime = m_frameStartTime;
-    return m_running;
-}
+    m_lastFrameTime = std::chrono::steady_clock::now(); // 更新
 
-void FrameDriver::Run() {
-    m_running = true;
-    while (Tick()) {
-        // 主循环
-    }
+    return m_running;
 }
 
 uint32_t FrameDriver::RegisterFrameSyncCallback(FrameSyncCallback callback, const std::string &name) {
@@ -340,7 +329,7 @@ void FrameDriver::WaitForTargetFPS() {
 
     float targetFrameTime = 1.0f / m_targetFPS;
     auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration<float>(now - m_frameStartTime).count();
+    auto elapsed = std::chrono::duration<float>(now - m_lastFrameTime).count();
 
     if (elapsed < targetFrameTime) {
         float sleepTime = targetFrameTime - elapsed;

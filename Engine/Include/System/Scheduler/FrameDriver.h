@@ -27,16 +27,12 @@ namespace DX12Engine::Scheduler {
 
 struct FrameStats {
     uint32_t frameNumber = 0;
-    float deltaTime = 0.0f;              // 上一帧耗时（秒）
-    float fixedDeltaTime = 1.0f / 60.0f; // 固定时间步长
-    double totalTime = 0.0;              // 累计运行时间
-    uint32_t taskCount = 0;              // 本帧任务数
-    uint32_t activeEntities = 0;         // 活跃实体数
+    uint32_t taskCount = 0;
+    uint32_t activeEntities = 0;
 
-    // 性能计数
-    float cpuLogicTime = 0.0f;  // CPU 逻辑耗时
-    float cpuRenderTime = 0.0f; // CPU 渲染耗时
-    float gpuTime = 0.0f;       // GPU 耗时（如果有）
+    float cpuLogicTime = 0.0f;
+    float cpuRenderTime = 0.0f;
+    float gpuTime = 0.0f;
 };
 
 // ========================================================================
@@ -109,9 +105,6 @@ public:
 
     /// 运行一帧（非阻塞，返回是否继续）
     bool Tick();
-
-    /// 运行主循环（阻塞直到 Stop()）
-    void Run();
 
     /// 请求停止主循环
     void Stop() { m_running = false; }
@@ -215,9 +208,8 @@ private:
     std::vector<CallbackEntry> m_frameSyncCallbacks;
     uint32_t m_nextCallbackId = 1;
 
-    // 时间管理
+    // 稳定帧率
     std::chrono::steady_clock::time_point m_lastFrameTime;
-    std::chrono::steady_clock::time_point m_frameStartTime;
 
     // 阶段执行
     void ExecutePhase(TaskPhase phase);
