@@ -2,7 +2,7 @@
 #include "Core/Config/ConfigManager.h"
 #include "Core/Context/GameContext.h"
 #include "Renderer/Core/D3D12DeviceContext.h"
-#include "Runtime/Scene/Camera.h"
+#include "Renderer/Modules/Camera/CameraManager.h"
 #include "System/ECS/Registry.h"
 #include "System/Event/MessageDispatcher.h"
 #include "System/Logger/DebugOverlay.h"
@@ -252,6 +252,11 @@ GameContext *Bootstrap::CreateContext() {
     m_context->FrameDriver = m_frameDriver;
     m_context->DeviceContext = m_deviceContext.get();
     m_context->CommandManager = &m_deviceContext->GetCommandManager();
+
+    m_context->CameraMgr = &DX12Engine::Renderer::CameraManager::GetInstance();
+    uint32_t width = m_window ? m_window->GetWidth() : 1280;
+    uint32_t height = m_window ? m_window->GetHeight() : 720;
+    m_context->CameraMgr->Initialize(width, height);
 
     return m_context.get();
 }

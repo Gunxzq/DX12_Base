@@ -7,6 +7,7 @@ namespace DX12Engine {
 namespace Renderer {
 class D3D12DeviceContext;
 class CommandManager;
+class CameraManager;
 } // namespace Renderer
 
 namespace System {
@@ -67,6 +68,7 @@ public:
 
     Renderer::D3D12DeviceContext *DeviceContext = nullptr; // D3D12 设备上下文
     Renderer::CommandManager *CommandManager = nullptr;    // 命令管理器（由 DeviceContext 管理）
+    Renderer::CameraManager *CameraMgr = nullptr;          // 相机管理器
 
     // ── 便捷访问方法 ──
 
