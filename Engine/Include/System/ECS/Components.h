@@ -1,4 +1,3 @@
-// System/ECS/Components.h 或类似位置
 #pragma once
 #include "System/Resource/ResourceHandle.h"
 #include <DirectXMath.h>
