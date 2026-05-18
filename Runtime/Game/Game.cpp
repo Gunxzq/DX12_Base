@@ -2,6 +2,7 @@
 #include "Common/d3dUtil.h"
 #include "Core/Context/GameContext.h"
 #include "Renderer/Core/D3D12DeviceContext.h"
+#include "Renderer/Modules/Camera/CameraManager.h"
 #include "Renderer/Utils/GeometryGenerator.h"
 #include "System/ECS/Components.h"
 #include "System/ECS/Registry.h"
@@ -36,6 +37,8 @@ bool Game::Initialize() {
     m_context->Logging->Info("[Game] Initializing game...");
 
     System::Resource::GpuResourceManager::GetInstance().Initialize();
+
+    InitializePassConstantBuffers();
 
     InitializeGameModules();
 
@@ -125,51 +128,152 @@ void Game::Update(float deltaTime) {}
 void Game::InitializeGameModules() {
     m_context->Logging->Info("[Game] Initializing game modules...");
 
-    // ─────────────────────────────────────────────────
-    // L4: 注册消息驱动的 Systems（利用调度层能力）
-    // ─────────────────────────────────────────────────
+    if (m_context->CameraMgr) {
+        auto &mainCamera = m_context->CameraMgr->GetMainCamera();
+        mainCamera.Position = DirectX::XMFLOAT3(0.0f, 0.0f, -10.0f);
+        mainCamera.Rotation = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f); // 确保看向 +Z 方向
 
-    // WindowResizeSystem - 处理窗口大小变化 (主线程执行)
+        // 强制立即更新一次矩阵，确保第一帧渲染时数据正确
+        m_context->CameraMgr->UpdateMainCamera();
+
+        m_context->Logging->Info("[Game] Main Camera set to Pos(0,0,-10) looking at +Z (Origin)");
+    }
+
+    if (m_context->FrameDriver) {
+        m_context->FrameDriver->RegisterImmediateCallback(
+            [this]() {
+                // 1. 更新相机管理器（计算 View/Proj 矩阵）
+                m_context->CameraMgr->UpdateMainCamera();
+
+                // 2. 获取当前帧索引
+                uint32_t frameIndex = m_context->DeviceContext->GetCurrentBackBufferIndex();
+
+                // 3. 构建 PassConstants
+                PassConstants passData;
+                const auto &camera = m_context->CameraMgr->GetMainCamera();
+
+                XMStoreFloat4x4(&passData.View, camera.ViewMatrix);
+                XMStoreFloat4x4(&passData.Proj, camera.ProjMatrix);
+                XMStoreFloat4x4(&passData.ViewProj, camera.ViewProjMatrix);
+
+                passData.CameraPos = camera.Position;
+                passData.TotalTime = static_cast<float>(m_context->MainTimer->GetGameTime());
+
+                static bool firstFrame = true;
+                if (firstFrame) {
+                    wchar_t buf[512];
+                    swprintf_s(buf,
+                               L"[DEBUG] Camera Proj Matrix:\n"
+                               L"  [0]: %.4f, %.4f, %.4f, %.4f\n"
+                               L"  [1]: %.4f, %.4f, %.4f, %.4f\n"
+                               L"  [2]: %.4f, %.4f, %.4f, %.4f\n"
+                               L"  [3]: %.4f, %.4f, %.4f, %.4f\n"
+                               L"  Aspect: %.4f\n",
+                               passData.Proj._11, passData.Proj._12, passData.Proj._13, passData.Proj._14,
+                               passData.Proj._21, passData.Proj._22, passData.Proj._23, passData.Proj._24,
+                               passData.Proj._31, passData.Proj._32, passData.Proj._33, passData.Proj._34,
+                               passData.Proj._41, passData.Proj._42, passData.Proj._43, passData.Proj._44,
+                               camera.AspectRatio);
+                    OutputDebugStringW(buf);
+                    firstFrame = false;
+                }
+
+                // 4. 上传到 GPU (Memcpy 到映射内存)
+                // 由于是在 Immediate 路径且主线程串行执行，这里没有竞态条件
+                memcpy(m_passCBResources[frameIndex].mappedData, &passData, sizeof(PassConstants));
+            },
+            "CameraUpdate");
+    }
+
     SystemRegistry::Register(
-        {.name = "WindowResizeSystem",
+        {.name = "CameraControlSystem",
          .func =
-             [this](Registry &, const MessageContext &ctx) {
-                 // 首先输出到调试器
-                 char dbgBuf[256];
-                 sprintf_s(dbgBuf, "[WindowResizeSystem] Executed! Width=%u Height=%u Payload=0x%llX\n", ctx.GetLow32(),
-                           ctx.GetHigh32(), (unsigned long long)ctx.payload);
-                 ::OutputDebugStringA(dbgBuf);
+             [this](Registry &registry, const MessageContext &ctx) {
+                 if (!m_context || !m_context->CameraMgr)
+                     return;
 
-                 // 尝试 spdlog 输出
-                 if (m_context && m_context->Logging) {
-                     m_context->Logging->Info("[WindowResizeSystem] spdlog: {}x{}", ctx.GetLow32(), ctx.GetHigh32());
-                 } else {
-                     ::OutputDebugStringA("[WindowResizeSystem] WARNING: m_context or Logging is null!\n");
+                 auto &camera = m_context->CameraMgr->GetMainCamera();
+                 float deltaTime = m_context->MainTimer->GetDeltaTime();
+
+                 // 定义旋转速度 (弧度/秒)
+                 const float rotateSpeed = 1.5f;
+
+                 // 从消息上下文中获取事件数据
+                 // 注意：如果 interestedMessages 设置了，ctx 将包含该消息的数据
+                 // 如果总是运行 (alwaysRun=true) 且没有特定消息，ctx 可能为空或包含最后一条消息
+                 // 为了确保每帧都能响应持续按键，我们结合 GetAsyncKeyState (最稳定)
+                 // 或者，如果我们要纯事件驱动，我们需要处理 WM_KEYDOWN 的重复发送。
+
+                 // 这里我们使用 GetAsyncKeyState 以确保平滑，这是 Win32 游戏的标准做法。
+                 // 事件系统可以用于其他逻辑（如 UI 交互）。
+
+                 bool upPressed = (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
+                 bool downPressed = (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
+                 bool leftPressed = (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
+                 bool rightPressed = (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
+
+                 // 调整俯仰角 (Pitch) - 绕 X 轴旋转
+                 if (upPressed) {
+                     camera.Rotation.x += rotateSpeed * deltaTime;
+                 }
+                 if (downPressed) {
+                     camera.Rotation.x -= rotateSpeed * deltaTime;
                  }
 
-                 uint32_t width = ctx.GetLow32();
-                 uint32_t height = ctx.GetHigh32();
-
-                 // DX12 resize
-                 if (m_context && m_context->DeviceContext) {
-                     m_context->DeviceContext->OnResize(ctx.GetLow32(), ctx.GetHigh32());
+                 // 调整偏航角 (Yaw) - 绕 Y 轴旋转
+                 if (leftPressed) {
+                     camera.Rotation.y -= rotateSpeed * deltaTime;
+                 }
+                 if (rightPressed) {
+                     camera.Rotation.y += rotateSpeed * deltaTime;
                  }
 
-                 if (m_opaqueRenderer) {
-                     m_opaqueRenderer->OnResize(width, height);
-
-                     sprintf_s(dbgBuf, "[WindowResizeSystem] OpaqueRenderer projection matrix updated\n");
-                     ::OutputDebugStringA(dbgBuf);
-                 }
+                 // 限制俯仰角范围 (-90 到 +90 度)
+                 const float maxPitch = DirectX::XM_PI / 2.0f - 0.01f;
+                 if (camera.Rotation.x > maxPitch)
+                     camera.Rotation.x = maxPitch;
+                 if (camera.Rotation.x < -maxPitch)
+                     camera.Rotation.x = -maxPitch;
              },
-         .phase = TaskPhase::EarlyUpdate,
-         .threadType = ThreadType::Main, // 主线程执行
-         .interestedMessages = {System::Event::WindowResizeEvent::StaticTypeHash}});
+         .phase = TaskPhase::Update,
+         .threadType = ThreadType::Main,
+         .priority = TaskPriority::High,
+         .dependencies = {},
+         .interestedMessages = {System::Event::KeyboardInputEvent::StaticTypeHash}, // 监听键盘事件
+         .alwaysRun = true}); // 即使没有新事件，也每帧运行以处理持续按键状态（如果需要结合 GetAsyncKeyState）
+
+    // WindowResizeSystem - 增加相机宽高比同步
+    SystemRegistry::Register({.name = "WindowResizeSystem",
+                              .func =
+                                  [this](Registry &, const MessageContext &ctx) {
+                                      uint32_t width = ctx.GetLow32();
+                                      uint32_t height = ctx.GetHigh32();
+
+                                      // 1. DX12 后端 resize
+                                      if (m_context && m_context->DeviceContext) {
+                                          m_context->DeviceContext->OnResize(width, height);
+                                      }
+
+                                      // 2. 相机管理器 resize (重新计算所有相机的投影矩阵)
+                                      if (m_context && m_context->CameraMgr) {
+                                          m_context->CameraMgr->OnResize(width, height);
+                                      }
+
+                                      // 3. 渲染模块 resize
+                                      if (m_opaqueRenderer) {
+                                          m_opaqueRenderer->OnResize(width, height);
+                                      }
+                                  },
+                              .phase = TaskPhase::EarlyUpdate,
+                              .threadType = ThreadType::Main,
+                              .interestedMessages = {System::Event::WindowResizeEvent::StaticTypeHash}});
 
     SystemRegistry::Register(
         {.name = "MainRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
+                 OutputDebugStringW(L"[DEBUG] MainRenderSystem executed.\n");
+
                  auto &cmdMgr = m_context->CommandManager;
                  uint64_t completedFence = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
 
@@ -207,8 +311,12 @@ void Game::InitializeGameModules() {
                                                       1.0f, 0, 0, nullptr);
 
                  // 4. 绘制
-                 m_opaqueRenderer->BeginFrame(cmdList, backBufferIndex);
+                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = GetCurrentPassCBAddress();
+                 m_opaqueRenderer->BeginFrame(cmdList, backBufferIndex, passCBAddr);
+
                  auto view = registry.view<MeshComponent, TransformComponent>();
+
+                 OutputDebugStringW(L"[DEBUG] Entities found: ");
                  for (const auto &[entity, mesh, transform] : view.each()) {
                      m_opaqueRenderer->DrawMesh(cmdList, mesh, transform, backBufferIndex);
                  }
@@ -403,4 +511,20 @@ void Game::CreateTestCube() {
     } else {
         OutputDebugStringA("[INFO] MainRenderSystem: Rendering...\n");
     }
+}
+
+void Game::InitializePassConstantBuffers() {
+    auto device = m_context->DeviceContext->GetDevice();
+    UINT cbSize = d3dUtil::CalcConstantBufferByteSize(sizeof(PassConstants));
+
+    for (uint32_t i = 0; i < 3; ++i) {
+        ThrowIfFailed(d3dUtil::CreateUploadBuffer(device, cbSize, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                  &m_passCBResources[i].resource));
+        m_passCBResources[i].resource->Map(0, nullptr, &m_passCBResources[i].mappedData);
+    }
+}
+
+D3D12_GPU_VIRTUAL_ADDRESS Game::GetCurrentPassCBAddress() const {
+    uint32_t frameIndex = m_context->DeviceContext->GetCurrentBackBufferIndex();
+    return m_passCBResources[frameIndex].resource->GetGPUVirtualAddress();
 }

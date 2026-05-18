@@ -161,6 +161,24 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         m_InSizeMove = false;
         return 0;
 
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN: {
+
+        uint32_t vk = static_cast<uint32_t>(wParam);
+
+        // 只关心方向键
+        if (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT) {
+            auto *dispatcher = System::Event::MessageDispatcher::GetInstance();
+            if (dispatcher) {
+
+                dispatcher->PostEvent(System::Event::KeyboardInputEvent::StaticTypeHash, 0, vk,
+                                      0, // Action: Pressed
+                                      System::Event::EventPriority::P2_Normal);
+            }
+        }
+        return 0;
+    }
+
     case WM_COMMAND:
         return DefWindowProcW(hWnd, msg, wParam, lParam);
     }

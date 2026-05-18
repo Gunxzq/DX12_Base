@@ -13,7 +13,7 @@ namespace Event {
 
 #define EVENT_LIST(X)                                                                                                  \
     X(WindowResizeEvent, 0x00000001, P1_High)                                                                          \
-    // X(MouseClickEvent, 0x00000002, P2_Normal)                                                                          \
+    X(KeyboardInputEvent, 0x00000002, P2_Normal)                                                                       \
     // X(KeyPressEvent, 0x00000003, P2_Normal)                                                                            \
 
 // ========================================================================

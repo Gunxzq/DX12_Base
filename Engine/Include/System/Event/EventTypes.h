@@ -49,6 +49,31 @@ struct WindowResizeEvent {
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
 
+struct KeyboardInputEvent {
+    EVENT_HEADER_FIELDS
+
+    // 使用自动生成的枚举值作为 Hash
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::KeyboardInputEvent);
+
+    uint32_t VirtualKey; // 存储 VK_UP, VK_DOWN 等虚拟键码
+    uint32_t Action;     // 0: Pressed, 1: Released (可选，目前主要关注 Pressed)
+    uint32_t Padding = 0;
+
+    /**
+     * @brief 构造函数
+     * @param vk 虚拟键码
+     * @param action 动作 (0 for Pressed)
+     */
+    KeyboardInputEvent(uint32_t vk, uint32_t action = 0)
+        : INIT_EVENT_HEADER(EventPriority::P2_Normal), VirtualKey(vk), Action(action), Padding(0) {}
+
+    // 禁用默认构造
+    KeyboardInputEvent() = delete;
+
+    // 提供实例方法获取类型哈希
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
 } // namespace Event
 } // namespace System
 } // namespace DX12Engine
