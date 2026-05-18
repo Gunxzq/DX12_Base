@@ -5,6 +5,7 @@
 #include "System/ECS/Components.h"
 #include "System/Resource/GpuResourceManager.h"
 #include <DirectXMath.h>
+#include <d3dcompiler.h>
 #include <entt/entt.hpp>
 
 using namespace DirectX;
@@ -36,13 +37,15 @@ void OpaqueRenderer::Initialize() {
     CreatePSO();
 
     auto device = m_context->GetDevice();
-    UINT cbSize = d3dUtil::CalcConstantBufferByteSize(sizeof(XMFLOAT4X4));
+    m_objectCBAlignedSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
     for (uint32_t i = 0; i < 3; ++i) {
-        ThrowIfFailed(d3dUtil::CreateUploadBuffer(device, cbSize, D3D12_RESOURCE_STATE_GENERIC_READ,
-                                                  &m_frameResources[i].constantBuffer));
+        UINT numObjectsPerFrame = 1000;
+        UINT cbSize = m_objectCBAlignedSize * numObjectsPerFrame;
 
-        m_frameResources[i].constantBuffer->Map(0, nullptr, &m_frameResources[i].mappedData);
+        ThrowIfFailed(d3dUtil::CreateUploadBuffer(device, cbSize, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                  &m_frameResources[i].objectConstantBuffer));
+        m_frameResources[i].objectConstantBuffer->Map(0, nullptr, &m_frameResources[i].mappedData);
     }
 
     const auto &viewport = m_context->GetViewport();
@@ -68,23 +71,31 @@ void OpaqueRenderer::Update(float deltaTime) {
 // 渲染辅助接口实现
 // ========================================================================
 
-void OpaqueRenderer::BeginFrame(CommandList &cmdList, uint32_t backBufferIndex) {
+void OpaqueRenderer::BeginFrame(CommandList &cmdList, uint32_t backBufferIndex,
+                                D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress) {
     if (!m_pso || !m_rootSignature)
         return;
+
+    // 重置当前帧的 Object CB 偏移量
+    m_currentObjectCBOffset = 0;
 
     cmdList.Get()->SetPipelineState(m_pso.Get());
     cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
 
-    UpdateConstantBuffer(backBufferIndex);
-    cmdList.Get()->SetGraphicsRootConstantBufferView(
-        0, m_frameResources[backBufferIndex].constantBuffer->GetGPUVirtualAddress());
+    cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
 }
 
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, const TransformComponent &transform,
                               uint32_t backBufferIndex) {
+
+    static int drawCallCount = 0;
+    drawCallCount++;
+    char buf[128];
+    sprintf_s(buf, "[DEBUG] DrawMesh #%d called, indexCount=%u\n", drawCallCount, mesh.indexCount);
+    OutputDebugStringA(buf);
+
     // 1. 获取 GPU 资源指针
     auto &gpuMgr = System::Resource::GpuResourceManager::GetInstance();
-
     ID3D12Resource *vb = gpuMgr.GetResource(mesh.vertexBuffer);
     ID3D12Resource *ib = gpuMgr.GetResource(mesh.indexBuffer);
 
@@ -98,22 +109,55 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, c
     cmdList.Get()->IASetIndexBuffer(&mesh.indexBufferView);
     cmdList.Get()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    // 3. 更新常量缓冲区中的世界矩阵
-    UpdateConstantBufferWithTransform(backBufferIndex, transform);
+    // 3. 构建 ObjectConstants (World Matrix)
+    XMMATRIX translation = XMMatrixTranslation(transform.position.x, transform.position.y, transform.position.z);
+    XMMATRIX rotation = XMMatrixRotationRollPitchYaw(transform.rotation.x, transform.rotation.y, transform.rotation.z);
+    XMMATRIX scale = XMMatrixScaling(transform.scale.x, transform.scale.y, transform.scale.z);
+    XMMATRIX world = scale * rotation * translation;
 
-    // 4. 绘制调用
-    static bool firstDraw = true;
-    if (firstDraw) {
-        wchar_t debugInfo[256];
-        swprintf_s(debugInfo,
-                   L"[DEBUG] Drawing mesh: vertices=%u, indices=%u, stride=%u, position=(%.1f, %.1f, %.1f)\n",
-                   mesh.vertexCount, mesh.indexCount, mesh.vertexBufferView.StrideInBytes, transform.position.x,
-                   transform.position.y, transform.position.z);
-        OutputDebugStringW(debugInfo);
-        firstDraw = false;
+    // 计算 WorldInvTranspose (用于法线，虽然当前 Shader 没用法线，但结构体里有)
+    XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+
+    ObjectConstants objCB;
+    XMStoreFloat4x4(&objCB.World, world);
+    XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
+
+    if (drawCallCount <= 5) { // 只打印前5帧，避免刷屏
+        wchar_t buf[512];
+        swprintf_s(buf,
+                   L"[DEBUG] DrawMesh #%d | Pos(%.1f, %.1f, %.1f)\n"
+                   L"  World[0]: %.4f, %.4f, %.4f, %.4f\n"
+                   L"  World[1]: %.4f, %.4f, %.4f, %.4f\n"
+                   L"  World[2]: %.4f, %.4f, %.4f, %.4f\n"
+                   L"  World[3]: %.4f, %.4f, %.4f, %.4f\n",
+                   drawCallCount, transform.position.x, transform.position.y, transform.position.z, objCB.World._11,
+                   objCB.World._12, objCB.World._13, objCB.World._14, objCB.World._21, objCB.World._22, objCB.World._23,
+                   objCB.World._24, objCB.World._31, objCB.World._32, objCB.World._33, objCB.World._34, objCB.World._41,
+                   objCB.World._42, objCB.World._43, objCB.World._44);
+        OutputDebugStringW(buf);
     }
+    // ==================================
 
+    // 4. 上传 ObjectConstants 到当前帧的环形缓冲区
+    // 计算当前物体的偏移地址
+    uint8_t *mappedBase = static_cast<uint8_t *>(m_frameResources[backBufferIndex].mappedData);
+    uint8_t *mappedCurrent = mappedBase + m_currentObjectCBOffset;
+
+    // 拷贝数据
+    memcpy(mappedCurrent, &objCB, sizeof(ObjectConstants));
+
+    // 计算当前物体的 GPU 虚拟地址
+    D3D12_GPU_VIRTUAL_ADDRESS objCBAddress =
+        m_frameResources[backBufferIndex].objectConstantBuffer->GetGPUVirtualAddress() + m_currentObjectCBOffset;
+
+    // 5. 绑定 Object Constant Buffer (b0)
+    cmdList.Get()->SetGraphicsRootConstantBufferView(0, objCBAddress);
+
+    // 6. 绘制调用
     cmdList.Get()->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+
+    // 7. 更新偏移量，为下一个物体做准备
+    m_currentObjectCBOffset += m_objectCBAlignedSize;
 }
 
 void OpaqueRenderer::EndFrame() {
@@ -125,17 +169,53 @@ void OpaqueRenderer::EndFrame() {
 // ========================================================================
 
 void OpaqueRenderer::LoadShaders() {
-    m_vsBlob = d3dUtil::LoadBinary(L"Shaders/color_vs.cso");
-    m_psBlob = d3dUtil::LoadBinary(L"Shaders/color_ps.cso");
+
+    UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+
+    Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
+    HRESULT hr;
+
+    hr = D3DCompileFromFile(L"Shaders/color.hlsl", // 文件名
+                            nullptr,               // defines
+                            nullptr,               // includes
+                            "VS",                  // entry point
+                            "vs_5_1",              // target profile
+                            compileFlags,          // flags1
+                            0,                     // flags2
+                            &m_vsBlob,             // output shader blob
+                            &errors                // error messages
+    );
+
+    if (FAILED(hr)) {
+        if (errors) {
+            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+        }
+        throw std::runtime_error("OpaqueRenderer: Failed to compile Vertex Shader");
+    }
+
+    // 2. 编译像素着色器
+    errors = nullptr; // 重置错误 Blob
+    hr = D3DCompileFromFile(L"Shaders/color.hlsl", nullptr, nullptr, "PS", "ps_5_1", compileFlags, 0, &m_psBlob,
+                            &errors);
+
+    if (FAILED(hr)) {
+        if (errors) {
+            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+        }
+        throw std::runtime_error("OpaqueRenderer: Failed to compile Pixel Shader");
+    }
+
+    OutputDebugStringW(L"[INFO] Shaders compiled successfully at runtime\n");
 }
 
 void OpaqueRenderer::CreateRootSignature() {
     auto device = m_context->GetDevice();
 
-    CD3DX12_ROOT_PARAMETER slotRootParameter[1];
-    slotRootParameter[0].InitAsConstantBufferView(0);
+    CD3DX12_ROOT_PARAMETER slotRootParameter[2];
+    slotRootParameter[0].InitAsConstantBufferView(0); // b0: cbPerObject
+    slotRootParameter[1].InitAsConstantBufferView(1); // b1: cbPass
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(1, slotRootParameter, 0, nullptr,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(2, slotRootParameter, 0, nullptr,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -167,7 +247,7 @@ void OpaqueRenderer::CreatePSO() {
 
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 
-    // // 启用线框模式以便调试
+    // // // 启用线框模式以便调试
     // D3D12_RASTERIZER_DESC rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     // rasterizerDesc.FillMode = D3D12_FILL_MODE_WIREFRAME;
     // rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // 禁用背面剔除
@@ -175,9 +255,7 @@ void OpaqueRenderer::CreatePSO() {
 
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 
-    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-
-    // psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 
     // 临时
     D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
@@ -196,48 +274,6 @@ void OpaqueRenderer::CreatePSO() {
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso)));
 
     OutputDebugStringW(L"[INFO] PSO created successfully\n");
-}
-
-// ========================================================================
-// 辅助方法
-// ========================================================================
-
-void OpaqueRenderer::UpdateConstantBuffer(uint32_t backBufferIndex) {
-    XMMATRIX world = XMMatrixIdentity();
-    XMMATRIX view = XMMatrixLookAtLH(XMVectorSet(0.0f, 2.0f, -5.0f, 1.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),
-                                     XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
-
-    XMMATRIX worldViewProj = world * view * m_projectionMatrix;
-    XMFLOAT4X4 worldViewProjFX;
-    XMStoreFloat4x4(&worldViewProjFX, XMMatrixTranspose(worldViewProj));
-
-    memcpy(m_frameResources[backBufferIndex].mappedData, &worldViewProjFX, sizeof(XMFLOAT4X4));
-}
-
-void OpaqueRenderer::UpdateConstantBufferWithTransform(uint32_t backBufferIndex, const TransformComponent &transform) {
-    // 从 TransformComponent 构建世界矩阵
-    XMMATRIX translation = XMMatrixTranslation(transform.position.x, transform.position.y, transform.position.z);
-
-    XMMATRIX rotationX = XMMatrixRotationX(transform.rotation.x);
-    XMMATRIX rotationY = XMMatrixRotationY(transform.rotation.y);
-    XMMATRIX rotationZ = XMMatrixRotationZ(transform.rotation.z);
-    XMMATRIX rotation = rotationX * rotationY * rotationZ;
-
-    XMMATRIX scale = XMMatrixScaling(transform.scale.x, transform.scale.y, transform.scale.z);
-
-    XMMATRIX world = scale * rotation * translation;
-
-    // 视图矩阵（相机位置）
-    XMMATRIX view = XMMatrixLookAtLH(XMVectorSet(0.0f, 2.0f, -10.0f, 1.0f), // 相机位置：往后退到 -10
-                                     XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),   // 观察目标：原点
-                                     XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)    // 上方向
-    );
-
-    XMMATRIX worldViewProj = world * view * m_projectionMatrix;
-    XMFLOAT4X4 worldViewProjFX;
-    XMStoreFloat4x4(&worldViewProjFX, XMMatrixTranspose(worldViewProj));
-
-    memcpy(m_frameResources[backBufferIndex].mappedData, &worldViewProjFX, sizeof(XMFLOAT4X4));
 }
 
 } // namespace DX12Engine::Renderer

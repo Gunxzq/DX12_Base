@@ -2,6 +2,7 @@
 
 #include "Common/d3dUtil.h"
 #include "Renderer/Core/Command/CommandList/CommandList.h"
+#include "Renderer/Core/PassConstants.h"
 #include "System/ECS/Registry.h"
 #include "System/Resource/GpuResourceManager.h"
 #include <array>
@@ -44,9 +45,12 @@ public:
 
     /**
      * @brief 开始录制不透明物体的绘制命令
-     * @note 设置 PSO、根签名和全局常量缓冲区
+     * @param cmdList 当前命令列表
+     * @param backBufferIndex 当前帧索引
+     * @param passConstantsAddress 由上层（Game/Immediate Callback）计算并上传好的 PassConstants GPU 地址
+     * @note 设置 PSO、根签名，并绑定 Pass Constant Buffer (b1)
      */
-    void BeginFrame(CommandList &cmdList, uint32_t backBufferIndex);
+    void BeginFrame(CommandList &cmdList, uint32_t backBufferIndex, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress);
 
     /**
      * @brief 绘制单个 Mesh
@@ -71,9 +75,6 @@ private:
     void CreateRootSignature();
     void CreatePSO();
     void LoadShaders();
-    void UpdateConstantBuffer(uint32_t backBufferIndex);
-    void UpdateConstantBufferWithTransform(uint32_t backBufferIndex,
-                                           const DX12Engine::ECS::TransformComponent &transform);
 
     // ========================================================================
     // 成员变量
@@ -91,12 +92,15 @@ private:
 
     // 常量缓冲区资源（每帧一个，用于三缓冲）
     struct FrameResources {
-        Microsoft::WRL::ComPtr<ID3D12Resource> constantBuffer;
+        Microsoft::WRL::ComPtr<ID3D12Resource> objectConstantBuffer;
         void *mappedData = nullptr;
         uint64_t fenceValue = 0;
     };
     std::array<FrameResources, 3> m_frameResources;
-    uint32_t m_currentFrameIndex = 0;
+
+    //  用于在单帧内为多个物体分配 Object CBV 空间的偏移量
+    uint32_t m_currentObjectCBOffset = 0;
+    uint32_t m_objectCBAlignedSize = 0;
 
     // 投影矩阵（窗口 Resize 时更新）
     DirectX::XMMATRIX m_projectionMatrix;
