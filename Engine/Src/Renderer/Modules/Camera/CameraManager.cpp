@@ -20,27 +20,20 @@ CameraManager &CameraManager::GetInstance() {
 // 初始化与关闭
 // ========================================================================
 
-void CameraManager::Initialize(D3D12DeviceContext *deviceContext) {
-    // 存储引用以备后用（例如 OnResize 时可能需要通知其他模块，或者未来扩展）
-    m_deviceContext = deviceContext;
+void CameraManager::Initialize(uint32_t initialWidth, uint32_t initialHeight) {
+    if (initialHeight == 0) {
+        initialHeight = 1; // 避免除以零
+    }
 
     // 初始化主相机默认参数
     m_mainCamera.Type = ProjectionType::Perspective;
     m_mainCamera.FOV = XMConvertToRadians(60.0f);
-
-    // 如果 deviceContext 存在，尝试获取初始宽高比，否则使用默认 16:9
-    if (deviceContext) {
-        // 假设 D3D12DeviceContext 有获取窗口尺寸的方法，如果没有则保持默认
-        // m_mainCamera.AspectRatio = deviceContext->GetAspectRatio();
-    } else {
-        m_mainCamera.AspectRatio = 16.0f / 9.0f;
-    }
-
+    m_mainCamera.AspectRatio = static_cast<float>(initialWidth) / static_cast<float>(initialHeight);
     m_mainCamera.NearPlane = 0.1f;
     m_mainCamera.FarPlane = 1000.0f;
     m_mainCamera.Position = XMFLOAT3(0.0f, 0.0f, -5.0f);
 
-    // 初始计算一次矩阵，确保数据有效
+    // 初始计算一次矩阵
     CalculateMatrices(m_mainCamera);
 }
 

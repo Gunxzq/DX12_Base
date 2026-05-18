@@ -35,7 +35,7 @@ public:
      * @brief 初始化管理器
      * @param deviceContext DX12 设备上下文，用于获取命令管理器和帧资源
      */
-    void Initialize(D3D12DeviceContext *deviceContext);
+    void Initialize(uint32_t initialWidth, uint32_t initialHeight);
 
     /**
      * @brief 关闭管理器，释放资源
@@ -46,16 +46,7 @@ public:
     // 主相机管理 (Main Camera)
     // =========================================================================
 
-    /**
-     * @brief 获取主相机的可写引用
-     * @return Camera& 主相机实例
-     * @note L4 层（如 InputSystem）应通过此接口修改相机的 Position/Rotation
-     */
     Camera &GetMainCamera();
-
-    /**
-     * @brief 获取主相机的只读引用
-     */
     const Camera &GetMainCamera() const;
 
     /**

@@ -13,6 +13,8 @@ enum class ProjectionType : uint8_t {
 
 // 相机结构体：纯数据容器 (POD)
 struct Camera {
+    // 显式声明默认构造函数
+    Camera() = default;
 
     ProjectionType Type = ProjectionType::Perspective;
 
