@@ -181,6 +181,25 @@ public:
     /// 获取已注册的回调数量
     size_t GetFrameSyncCallbackCount() const { return m_frameSyncCallbacks.size(); }
 
+    // ========================================================================
+    // 即时执行回调注册（用于零延迟需求，如相机、输入）
+    // ========================================================================
+
+    /**
+     * @brief 注册即时执行回调
+     *
+     * 这些回调会在每帧 Render 阶段之前、主线程上立即执行。
+     * 适用于需要零延迟反馈的逻辑（如相机矩阵更新、UI 交互状态刷新）。
+     *
+     * @param callback 回调函数
+     * @param name 回调名称（用于调试）
+     * @return 回调 ID
+     */
+    uint32_t RegisterImmediateCallback(std::function<void()> callback, const std::string &name = "");
+
+    /// 注销即时执行回调
+    void UnregisterImmediateCallback(uint32_t callbackId);
+
 private:
     ECS::Registry &m_registry;
     TaskExecutor m_executor;
@@ -211,11 +230,21 @@ private:
     // 稳定帧率
     std::chrono::steady_clock::time_point m_lastFrameTime;
 
+    // 即时执行回调
+    struct ImmediateCallbackEntry {
+        uint32_t id;
+        std::string name;
+        std::function<void()> callback;
+    };
+    std::vector<ImmediateCallbackEntry> m_immediateCallbacks;
+    uint32_t m_nextImmediateCallbackId = 1;
+
     // 阶段执行
+    void ExecuteImmediate();
     void ExecutePhase(TaskPhase phase);
     void ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence); // 批量执行某阶段的命令
-    uint64_t SubmitBarrier(RenderPhase phase);                         // 提交资源屏障
-    void FrameSync();                                                  // 调用 L4 回调
+    // uint64_t SubmitBarrier(RenderPhase phase);                         // 提交资源屏障
+    void FrameSync(); // 调用 L4 回调
     void WaitForTargetFPS();
     void UpdateStats();
 };

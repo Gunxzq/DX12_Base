@@ -222,36 +222,44 @@ bool FrameDriver::Tick() {
     }
 
     // ========================================================================
-    // 逻辑更新阶段
+    // 即时执行路径 (Immediate Path)
+    // 目的：为零延迟的相机和 UI 提供最新数据
     // ========================================================================
-    ExecutePhase(TaskPhase::EarlyUpdate);
-    ExecutePhase(TaskPhase::Update);
-    ExecutePhase(TaskPhase::LateUpdate);
-    ExecutePhase(TaskPhase::PreRender);
-
-    // 4. 帧同步回调
-    FrameSync();
+    ExecuteImmediate();
 
     // ========================================================================
-    // 渲染流程开始
+    // 渲染阶段 (Render Phase)
+    // 读取的是【上一帧】在 FrameSync 中准备好的数据 (Slot N-1)
     // ========================================================================
 
-    // 1. 提交帧开始屏障 (Present -> RenderTarget)
-    // uint64_t barrierSeq = SubmitBarrier(RenderPhase::BeginBarrier);
-
-    // 2. 执行用户注册的渲染 System
+    // A. 执行渲染逻辑 System (录制命令列表)
+    // 这些 System 会读取 ECS 中的 Transform 等组件的“只读视图”或“前端缓冲区”
     ExecutePhase(TaskPhase::Render);
     ExecutePhase(TaskPhase::PostRender);
 
-    // 3. 按顺序批量执行各个渲染阶段的命令列表
+    // B. 提交命令列表到 GPU
+    // 注意：此时 GPU 开始执行第 N-1 帧的渲染任务
     ExecuteRenderPhase(RenderPhase::PrePass, 0);
     ExecuteRenderPhase(RenderPhase::Opaque, 0);
     ExecuteRenderPhase(RenderPhase::Transparent, 0);
     ExecuteRenderPhase(RenderPhase::PostProcess, 0);
     ExecuteRenderPhase(RenderPhase::UI, 0);
 
-    // 5. 提交帧结束屏障 (RenderTarget -> Present) 并 Present
-    // SubmitBarrier(RenderPhase::EndBarrier);
+    // ========================================================================
+    // 逻辑更新阶段 (Update Phase)
+    // 写入的是【当前帧】的数据 (Slot N)，为下一帧做准备
+    // ========================================================================
+
+    ExecutePhase(TaskPhase::EarlyUpdate);
+    ExecutePhase(TaskPhase::Update);
+    ExecutePhase(TaskPhase::LateUpdate);
+    ExecutePhase(TaskPhase::PreRender); // 剔除结果存入 Slot N
+
+    // ========================================================================
+    // 4. 帧同步 (FrameSync)
+    // 将 Slot N 的数据“冻结”并标记为“可读”，准备供下一帧 Render 使用
+    // ========================================================================
+    FrameSync();
 
     // ========================================================================
     // 帧结束：调用 DeviceContext 进行 Present 和帧推进
@@ -340,6 +348,27 @@ void FrameDriver::WaitForTargetFPS() {
 void FrameDriver::UpdateStats() {
     m_stats.taskCount = static_cast<uint32_t>(m_taskGraph.GetTaskCount());
     // m_stats.activeEntities = m_registry.Alive();  // 需要 Registry 提供接口
+}
+
+uint32_t FrameDriver::RegisterImmediateCallback(std::function<void()> callback, const std::string &name) {
+    uint32_t id = m_nextImmediateCallbackId++;
+    m_immediateCallbacks.push_back({id, name, std::move(callback)});
+    return id;
+}
+
+void FrameDriver::UnregisterImmediateCallback(uint32_t callbackId) {
+    auto it = std::remove_if(m_immediateCallbacks.begin(), m_immediateCallbacks.end(),
+                             [callbackId](const ImmediateCallbackEntry &entry) { return entry.id == callbackId; });
+    m_immediateCallbacks.erase(it, m_immediateCallbacks.end());
+}
+
+void FrameDriver::ExecuteImmediate() {
+    // 在主线程上串行执行所有注册的即时回调
+    for (const auto &entry : m_immediateCallbacks) {
+        if (entry.callback) {
+            entry.callback();
+        }
+    }
 }
 
 } // namespace DX12Engine::Scheduler
