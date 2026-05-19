@@ -22,6 +22,9 @@
       { "key": "E" },
       { "key": "Gamepad_X" }
     ],
+    "ResetCamera": [
+      { "key": "R" }
+    ],
     "Pause": [
       { "key": "Escape" },
       { "key": "Gamepad_Start" }
@@ -38,7 +41,7 @@
   "contexts": {
     "Gameplay": {
       "priority": 10,
-      "enabled_actions": ["Move", "Look", "Jump", "Sprint", "Interact", "Pause"]
+      "enabled_actions": ["Move", "Look", "Jump", "Sprint", "Interact", "Pause","ResetCamera"]
     },
     "UI": {
       "priority": 20,
