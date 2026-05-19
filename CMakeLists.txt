@@ -36,6 +36,8 @@ find_package(mimalloc REQUIRED)
 find_package(Jolt CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(Taskflow CONFIG REQUIRED)
+find_package(GameNetworkingSockets CONFIG REQUIRED)
+find_package(protobuf CONFIG REQUIRED)
 
 # ========================================================================
 # 3. 构建引擎核心库 (Static Library)
@@ -56,7 +58,6 @@ target_include_directories(DX12EngineCore PUBLIC
 )
 
 
-# 【关键修改 1】为引擎库也添加 MI_OVERRIDE 定义
 # 确保引擎内部的所有代码都使用 mimalloc 的重载操作符
 target_compile_definitions(DX12EngineCore PRIVATE
     UNICODE
@@ -64,11 +65,11 @@ target_compile_definitions(DX12EngineCore PRIVATE
     MI_OVERRIDE=ON
 )
 
-# 【新增优化 1】启用多进程编译 (/MP)
+
 # 允许编译器同时使用多个核心进行编译，显著加快大型项目的构建速度
 target_compile_options(DX12EngineCore PRIVATE /MP)
 
-# 【新增优化 2】配置预编译头 (PCH)
+
 # 指定 Common.h 为预编译头，因为它是引擎中最基础且被广泛包含的头文件
 # 这将大幅减少每个 cpp文件重复解析 Windows.h, DirectXMath, STL 等重型头文件的时间
 target_precompile_headers(DX12EngineCore PRIVATE
@@ -90,6 +91,15 @@ target_link_libraries(DX12EngineCore PUBLIC
     Jolt::Jolt
     imgui::imgui
     Taskflow::Taskflow
+
+    GameNetworkingSockets::static
+    protobuf::libprotobuf
+)
+
+
+# 如果只在 Runtime 使用，也可以只加在 Runtime 上
+target_compile_definitions(DX12EngineCore PUBLIC
+    STEAMNETWORKINGSOCKETS_STATIC_LINK
 )
 
 # ========================================================================
