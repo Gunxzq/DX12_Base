@@ -4,6 +4,9 @@
 #include "System/Logger/Logger.h"
 
 namespace DX12Engine {
+namespace Input {
+class InputSystem;
+}
 namespace Renderer {
 class D3D12DeviceContext;
 class CommandManager;
@@ -69,6 +72,8 @@ public:
     Renderer::D3D12DeviceContext *DeviceContext = nullptr; // D3D12 设备上下文
     Renderer::CommandManager *CommandManager = nullptr;    // 命令管理器（由 DeviceContext 管理）
     Renderer::CameraManager *CameraMgr = nullptr;          // 相机管理器
+
+    Input::InputSystem *InputSys = nullptr; // 输入系统
 
     // ── 便捷访问方法 ──
 

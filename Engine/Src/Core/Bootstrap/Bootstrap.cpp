@@ -5,6 +5,7 @@
 #include "Renderer/Modules/Camera/CameraManager.h"
 #include "System/ECS/Registry.h"
 #include "System/Event/MessageDispatcher.h"
+#include "System/Input/InputSystem.h"
 #include "System/Logger/DebugOverlay.h"
 #include "System/Logger/Logger.h"
 #include "System/Scheduler/FrameDriver.h"
@@ -204,6 +205,16 @@ void Bootstrap::InitializeModules() {
         System::Event::MessageDispatcher::Init();
         Logger::GetInstance()->Info("[Bootstrap] MessageDispatcher initialized.");
 
+        Logger::GetInstance()->Info("[Bootstrap] Initializing InputSystem...");
+        auto &inputSys = DX12Engine::Input::InputSystem::Get();
+        // 假设配置文件路径为 "Config/input_bindings.json" 或在 ConfigManager 中获取
+        std::string inputConfigPath = "Config/default_input.json";
+        if (!inputSys.Initialize(inputConfigPath)) {
+            Logger::GetInstance()->Warn(
+                "[Bootstrap] InputSystem initialization failed or config not found. Using defaults.");
+            // 根据需求决定是抛出异常还是继续
+        }
+
         // 6. ECS Registry (调度系统需要)
         InitializeRegistry();
 
@@ -257,6 +268,12 @@ GameContext *Bootstrap::CreateContext() {
     uint32_t width = m_window ? m_window->GetWidth() : 1280;
     uint32_t height = m_window ? m_window->GetHeight() : 720;
     m_context->CameraMgr->Initialize(width, height);
+
+    m_context->InputSys = &DX12Engine::Input::InputSystem::Get();
+
+    if (m_frameDriver) {
+        m_frameDriver->SetGameContext(m_context.get());
+    }
 
     return m_context.get();
 }
