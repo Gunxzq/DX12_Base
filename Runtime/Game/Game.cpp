@@ -1,4 +1,5 @@
 #include "Game.h"
+#include "./Input/GameInputActions.h"
 #include "Common/d3dUtil.h"
 #include "Core/Context/GameContext.h"
 #include "Renderer/Core/D3D12DeviceContext.h"
@@ -8,6 +9,7 @@
 #include "System/ECS/Registry.h"
 #include "System/Event/MessageDispatcher.h"
 #include "System/Framework/SystemRegistry.h"
+#include "System/Input/InputSystem.h"
 #include "System/Resource/GpuResourceManager.h"
 #include "System/Scheduler/FrameDriver.h"
 #include "System/Window/Window.h"
@@ -84,9 +86,7 @@ int Game::Run() {
     OutputDebugStringW(L"[DEBUG] Entering main loop\n");
 
     while (m_isRunning && !m_context->Window->ShouldClose()) {
-        m_context->Window->ProcessMessages();
         m_context->MainTimer->Tick();
-
         // 调用 FrameDriver::Tick() 来处理消息和执行注册的 Systems
         m_context->FrameDriver->Tick();
     }
@@ -127,6 +127,12 @@ void Game::Update(float deltaTime) {}
 
 void Game::InitializeGameModules() {
     m_context->Logging->Info("[Game] Initializing game modules...");
+
+    if (!m_context->InputSys) {
+        m_context->InputSys = &DX12Engine::Input::InputSystem::Get();
+
+        m_context->InputSys->Initialize("Config/default_input.json");
+    }
 
     if (m_context->CameraMgr) {
         auto &mainCamera = m_context->CameraMgr->GetMainCamera();
@@ -184,63 +190,6 @@ void Game::InitializeGameModules() {
             },
             "CameraUpdate");
     }
-
-    SystemRegistry::Register(
-        {.name = "CameraControlSystem",
-         .func =
-             [this](Registry &registry, const MessageContext &ctx) {
-                 if (!m_context || !m_context->CameraMgr)
-                     return;
-
-                 auto &camera = m_context->CameraMgr->GetMainCamera();
-                 float deltaTime = m_context->MainTimer->GetDeltaTime();
-
-                 // 定义旋转速度 (弧度/秒)
-                 const float rotateSpeed = 1.5f;
-
-                 // 从消息上下文中获取事件数据
-                 // 注意：如果 interestedMessages 设置了，ctx 将包含该消息的数据
-                 // 如果总是运行 (alwaysRun=true) 且没有特定消息，ctx 可能为空或包含最后一条消息
-                 // 为了确保每帧都能响应持续按键，我们结合 GetAsyncKeyState (最稳定)
-                 // 或者，如果我们要纯事件驱动，我们需要处理 WM_KEYDOWN 的重复发送。
-
-                 // 这里我们使用 GetAsyncKeyState 以确保平滑，这是 Win32 游戏的标准做法。
-                 // 事件系统可以用于其他逻辑（如 UI 交互）。
-
-                 bool upPressed = (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
-                 bool downPressed = (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
-                 bool leftPressed = (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
-                 bool rightPressed = (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
-
-                 // 调整俯仰角 (Pitch) - 绕 X 轴旋转
-                 if (upPressed) {
-                     camera.Rotation.x += rotateSpeed * deltaTime;
-                 }
-                 if (downPressed) {
-                     camera.Rotation.x -= rotateSpeed * deltaTime;
-                 }
-
-                 // 调整偏航角 (Yaw) - 绕 Y 轴旋转
-                 if (leftPressed) {
-                     camera.Rotation.y -= rotateSpeed * deltaTime;
-                 }
-                 if (rightPressed) {
-                     camera.Rotation.y += rotateSpeed * deltaTime;
-                 }
-
-                 // 限制俯仰角范围 (-90 到 +90 度)
-                 const float maxPitch = DirectX::XM_PI / 2.0f - 0.01f;
-                 if (camera.Rotation.x > maxPitch)
-                     camera.Rotation.x = maxPitch;
-                 if (camera.Rotation.x < -maxPitch)
-                     camera.Rotation.x = -maxPitch;
-             },
-         .phase = TaskPhase::Update,
-         .threadType = ThreadType::Main,
-         .priority = TaskPriority::High,
-         .dependencies = {},
-         .interestedMessages = {System::Event::KeyboardInputEvent::StaticTypeHash}, // 监听键盘事件
-         .alwaysRun = true}); // 即使没有新事件，也每帧运行以处理持续按键状态（如果需要结合 GetAsyncKeyState）
 
     // WindowResizeSystem - 增加相机宽高比同步
     SystemRegistry::Register({.name = "WindowResizeSystem",
@@ -369,6 +318,17 @@ void Game::InitializeGameModules() {
                               .dependencies = {},
                               .interestedMessages = {},
                               .alwaysRun = true});
+
+    SystemRegistry::Register({
+        .name = "CameraControlSystem",
+        .func = [this](Registry &registry, const MessageContext &ctx) { this->HandleCameraInput(); },
+        .phase = DX12Engine::Scheduler::TaskPhase::EarlyUpdate, // 在渲染前更新相机位置
+        .threadType = DX12Engine::Scheduler::ThreadType::Main,
+        .priority = DX12Engine::Scheduler::TaskPriority::High,
+        .dependencies = {},
+        .interestedMessages = {},
+        .alwaysRun = true // 常驻任务
+    });
 
     // 验证注册
     auto allSystems = SystemRegistry::GetAllSystems();
@@ -527,4 +487,132 @@ void Game::InitializePassConstantBuffers() {
 D3D12_GPU_VIRTUAL_ADDRESS Game::GetCurrentPassCBAddress() const {
     uint32_t frameIndex = m_context->DeviceContext->GetCurrentBackBufferIndex();
     return m_passCBResources[frameIndex].resource->GetGPUVirtualAddress();
+}
+
+void Game::HandleCameraInput() {
+    if (!m_context || !m_context->InputSys || !m_context->CameraMgr || !m_context->Window) {
+        return;
+    }
+
+    auto &inputSys = *m_context->InputSys;
+    auto &cameraMgr = *m_context->CameraMgr;
+    auto &mainCamera = cameraMgr.GetMainCamera();
+    auto &window = *m_context->Window;
+
+    float deltaTime = m_context->MainTimer->GetDeltaTime();
+    if (deltaTime <= 0.0f)
+        return;
+
+    // =========================================================================
+    // 0. 调试：重置相机 (按 R 键)
+    // =========================================================================
+    if (inputSys.IsActionPressed(ActionId_ResetCamera)) {
+        mainCamera.Position = DirectX::XMFLOAT3(0.0f, 2.0f, -10.0f);
+        mainCamera.Rotation = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f);
+        m_context->Logging->Info("[Debug] Camera Reset!");
+    }
+
+    // =========================================================================
+    // 1. 鼠标捕获控制 (Cursor Capture)
+    // =========================================================================
+
+    bool wasCaptured = window.IsCursorCaptured();
+
+    // 策略：按 Pause (Esc) 切换捕获状态
+    // 如果当前未捕获且按下了 Pause，则捕获
+    // 如果当前已捕获且按下了 Pause，则释放
+    if (inputSys.IsActionPressed(ActionId_Pause)) {
+        bool newCaptureState = !wasCaptured;
+        window.SetCursorCapture(newCaptureState);
+
+        if (newCaptureState) {
+            m_skipLookInputThisFrame = true;
+            m_context->Logging->Info("[Input] Cursor Captured. Skipping first frame look input.");
+        }
+    }
+
+    // 额外保护：如果窗口失去焦点，强制释放捕获（已在 Window.cpp WM_ACTIVATE 中处理，但这里双重保险）
+    // 注意：IsCursorCaptured 是本地状态，如果窗口失焦，Window.cpp 会调用 SetCursorCapture(false) 同步状态
+
+    // =========================================================================
+    // 2. 相机旋转 (Look) - 仅当鼠标被捕获时生效
+    // =========================================================================
+    if (m_skipLookInputThisFrame) {
+        m_skipLookInputThisFrame = false;
+        return;
+    }
+
+    if (window.IsCursorCaptured()) {
+
+        // 获取鼠标相对移动量 (Delta)
+        // 确保 InputSystem 将 Mouse Delta 映射到了 ActionId_Look
+        FVector2D lookInput = inputSys.GetActionAxis2D(ActionId_Look);
+
+        // 灵敏度设置 (可根据需要调整或从配置读取)
+        const float mouseSensitivity = 0.002f;
+
+        // 更新偏航角 (Yaw) 和 俯仰角 (Pitch)
+        // lookInput.X -> Yaw (左右旋转)
+        // lookInput.Y -> Pitch (上下旋转)
+        mainCamera.Rotation.y += lookInput.X * mouseSensitivity;
+        mainCamera.Rotation.x += lookInput.Y * mouseSensitivity;
+
+        // 限制俯仰角 (Pitch Clamp)，防止万向节死锁或翻转
+        // 限制在 -89度 到 +89度 之间
+        const float maxPitch = DirectX::XM_PI / 2.0f - 0.01f;
+        mainCamera.Rotation.x = std::clamp(mainCamera.Rotation.x, -maxPitch, maxPitch);
+
+        // 可选：归一化 Yaw 到 [0, 2PI) 防止浮点数过大
+        if (mainCamera.Rotation.y > DirectX::XM_2PI)
+            mainCamera.Rotation.y -= DirectX::XM_2PI;
+        if (mainCamera.Rotation.y < 0.0f)
+            mainCamera.Rotation.y += DirectX::XM_2PI;
+    }
+
+    // =========================================================================
+    // 3. 相机移动 (Move) - WASD
+    // =========================================================================
+
+    // 获取移动输入 (-1.0 到 1.0)
+    FVector2D moveInput = inputSys.GetActionAxis2D(ActionId_Move);
+
+    // 检查是否冲刺 (Sprint)
+    bool isSprinting = inputSys.IsActionHeld(ActionId_Sprint);
+
+    // 基础移动速度
+    float baseMoveSpeed = 5.0f;
+    // 冲刺速度倍数
+    float sprintMultiplier = 2.0f;
+
+    float currentSpeed = baseMoveSpeed * (isSprinting ? sprintMultiplier : 1.0f);
+
+    // 只有当有输入时才计算移动
+    if (std::abs(moveInput.X) > 0.001f || std::abs(moveInput.Y) > 0.001f) {
+        float yaw = mainCamera.Rotation.y;
+
+        // 计算水平面上的 Forward 和 Right 向量
+        // Forward: 指向 Yaw 方向
+        DirectX::XMFLOAT3 forwardDir;
+        forwardDir.x = sin(yaw);
+        forwardDir.y = 0.0f;
+        forwardDir.z = cos(yaw);
+
+        // Right: 指向 Yaw + 90度 方向
+        DirectX::XMFLOAT3 rightDir;
+        rightDir.x = cos(yaw);
+        rightDir.y = 0.0f;
+        rightDir.z = -sin(yaw);
+
+        // 应用移动
+        // moveInput.Y 对应前后 (W/S), moveInput.X 对应左右 (A/D)
+        DirectX::XMVECTOR pos = DirectX::XMLoadFloat3(&mainCamera.Position);
+        DirectX::XMVECTOR fwd = DirectX::XMLoadFloat3(&forwardDir);
+        DirectX::XMVECTOR rgt = DirectX::XMLoadFloat3(&rightDir);
+
+        // 累加位移
+        pos += fwd * (moveInput.Y * currentSpeed * deltaTime);
+        pos += rgt * (moveInput.X * currentSpeed * deltaTime);
+
+        DirectX::XMStoreFloat3(&mainCamera.Position, pos);
+    }
 }

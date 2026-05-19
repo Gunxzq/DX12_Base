@@ -39,13 +39,18 @@ private:
     void ShutdownGameModules();
     void CreateTestCube();
 
+    void HandleCameraInput();
+
     // ── 成员变量 ──
     DX12Engine::Core::GameContext *m_context;
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderer> m_opaqueRenderer;
 
+     
+
     DX12Engine::ECS::Entity m_cubeEntity;
     bool m_isRunning = false;
     bool m_isInitialized = false;
+    bool m_skipLookInputThisFrame = false;
 
     // 环形缓冲区：存储每帧的 PassConstants 数据
     struct PassCBResource {
