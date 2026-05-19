@@ -1,6 +1,6 @@
 #pragma once
 #include "System/Input/Core/InputKeyCodes.h"
-#include <algorithm> // for std::clamp if needed later
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -104,38 +104,26 @@ public:
         return m_keyStates[static_cast<size_t>(code)];
     }
 
-    /**
-     * @brief 获取本帧鼠标 X 轴增量
-     */
     int GetMouseDeltaX() const { return m_mouseDeltaX; }
-
-    /**
-     * @brief 获取本帧鼠标 Y 轴增量
-     */
     int GetMouseDeltaY() const { return m_mouseDeltaY; }
-
-    /**
-     * @brief 获取本帧鼠标滚轮累积增量
-     */
     int GetMouseWheelDelta() const { return m_mouseWheelDelta; }
 
-    /**
-     * @brief 获取手柄轴值
-     */
     float GetGamepadAxis(EKeyCode axis) const {
         if (!IsValidKeyCode(axis))
             return 0.0f;
         return m_gamepadAxes[static_cast<size_t>(axis)];
     }
 
+    void ResetMouseDelta() {
+        m_mouseDeltaX = 0.0f;
+        m_mouseDeltaY = 0.0f;
+    }
+
 private:
     // 辅助函数：防止数组越界
     static constexpr size_t KEY_COUNT = 4096;
 
-    inline bool IsValidKeyCode(EKeyCode code) const {
-        size_t idx = static_cast<size_t>(code);
-        return idx < KEY_COUNT;
-    }
+    inline bool IsValidKeyCode(EKeyCode code) const { return static_cast<size_t>(code) < KEY_COUNT; }
 
     // 键盘状态表
     std::array<bool, KEY_COUNT> m_keyStates{};
@@ -144,10 +132,8 @@ private:
     std::array<float, KEY_COUNT> m_gamepadAxes{};
 
     // 鼠标状态
-    int m_mouseX = 0;
-    int m_mouseY = 0;
-    int m_mouseDeltaX = 0;
-    int m_mouseDeltaY = 0;
+    int m_mouseX = 0, m_mouseY = 0;
+    int m_mouseDeltaX = 0, m_mouseDeltaY = 0;
     int m_mouseWheelDelta = 0;
 };
 

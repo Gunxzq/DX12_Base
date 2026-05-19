@@ -21,6 +21,7 @@ struct BindingSource {
     // 轴向类型
     enum class AxisType { None, X, Y, Trigger, Wheel };
     AxisType Axis = AxisType::None;
+
     float AxisScale = 0.0f; // +1 / -1 / 阈值
 
     // 模拟阈值（扳机、滚轮等）
@@ -49,6 +50,15 @@ struct BindingSource {
         src.Device = DeviceType::Keyboard;
         src.KeyCode = key;
         src.ModifierKey = modifier;
+        return src;
+    }
+
+    static BindingSource KeyboardAxis(EKeyCode key, AxisType axis, float scale) {
+        BindingSource src;
+        src.Device = DeviceType::Keyboard;
+        src.KeyCode = key;
+        src.Axis = axis;
+        src.AxisScale = scale;
         return src;
     }
 
