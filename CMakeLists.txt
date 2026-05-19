@@ -42,8 +42,8 @@ find_package(Taskflow CONFIG REQUIRED)
 # ========================================================================
 # 收集 Engine 目录下的所有源文件和头文件
 file(GLOB_RECURSE ENGINE_SOURCES 
-    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Src/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Include/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/**/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/**/*.h"
 )
 
 # 创建静态库
@@ -51,7 +51,7 @@ add_library(DX12EngineCore STATIC ${ENGINE_SOURCES})
 
 # 设置包含目录 (PUBLIC 使得链接此库的目标也能找到头文件)
 target_include_directories(DX12EngineCore PUBLIC 
-    ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Include
+    ${CMAKE_CURRENT_SOURCE_DIR}/Engine
     ${CMAKE_CURRENT_SOURCE_DIR}/Content
 )
 
@@ -72,7 +72,7 @@ target_compile_options(DX12EngineCore PRIVATE /MP)
 # 指定 Common.h 为预编译头，因为它是引擎中最基础且被广泛包含的头文件
 # 这将大幅减少每个 cpp文件重复解析 Windows.h, DirectXMath, STL 等重型头文件的时间
 target_precompile_headers(DX12EngineCore PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Include/Common/Common.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Common/Common.h"
 )
 
 # 链接依赖库

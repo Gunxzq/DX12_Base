@@ -1,6 +1,6 @@
 ﻿#include "DX12_Base.h"
-#include "Core/Bootstrap/Bootstrap.h"
-#include "Core/Context/GameContext.h"
+#include "Boot/Bootstrap.h"
+#include "Boot/GameContext.h"
 #include "Game/Game.h"
 #include "framework.h"
 

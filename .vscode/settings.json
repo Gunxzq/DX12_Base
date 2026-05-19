@@ -11,7 +11,7 @@
         "editor.defaultFormatter": "ms-vscode.cpptools"
     },
     "C_Cpp.errorSquiggles": "enabled",
-    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.intelliSenseEngine": "Tag Parser",
     "C_Cpp.default.cppStandard": "c++20",
     
     // --- 关键配置开始 ---
@@ -21,6 +21,7 @@
     "C_Cpp.clang_format_path": "D:\\Dev\\vs2022\\VC\\Tools\\Llvm\\bin\\clang-format.exe",
     // 强制指定为 x64，这会覆盖默认的 win32
     "cmake.architecture": "x64", 
-    "cmake.generator": "Visual Studio 17 2022"
-    // --- 关键配置结束 ---
+    "cmake.generator": "Visual Studio 17 2022",
+    // 可选：禁用自动补全（进一步降低开销）
+    "C_Cpp.autocomplete": "disabled"
 }

@@ -1,6 +1,6 @@
 #pragma once
 // 引入引擎提供的哈希宏
-#include "System/Input/Core/InputActionId.h"
+#include "Platform/Input/Core/InputActionId.h"
 
 using DX12Engine::Input::ActionId;
 

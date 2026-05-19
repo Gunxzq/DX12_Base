@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Core/Context/GameContext.h"
-#include "Renderer/Core/PassConstants.h"
-#include "Renderer/Modules/Renderer/OpaqueRenderer.h"
-#include "System/ECS/Entity.h"
+#include "Boot/GameContext.h"
+#include "ECS/Core/Entity.h"
+#include "Renderer/Pipeline/OpaqueRenderer.h"
+#include "Renderer/RHI/PassConstants.h"
 #include <DirectXMath.h>
 #include <array>
 #include <memory>
@@ -44,8 +44,6 @@ private:
     // ── 成员变量 ──
     DX12Engine::Core::GameContext *m_context;
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderer> m_opaqueRenderer;
-
-     
 
     DX12Engine::ECS::Entity m_cubeEntity;
     bool m_isRunning = false;
