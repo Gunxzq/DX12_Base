@@ -1,0 +1,48 @@
+{
+  "version": "1.0",
+  "bindings": {
+    "Move": [
+      { "keys": ["W", "A", "S", "D"], "axis_map": {"W": "Y+", "S": "Y-", "A": "X-", "D": "X+"} },
+      { "keys": ["Up", "Left", "Down", "Right"], "axis_map": {"Up": "Y+", "Down": "Y-", "Left": "X-", "Right": "X+"} },
+      { "device": "Gamepad", "stick": "LeftStick" }
+    ],
+    "Look": [
+      { "device": "Mouse", "axis": "Delta" },
+      { "device": "Gamepad", "stick": "RightStick" }
+    ],
+    "Jump": [
+      { "key": "Space" },
+      { "key": "Gamepad_A" }
+    ],
+    "Sprint": [
+      { "key": "LeftShift", "requires": "W" }, 
+      { "key": "Gamepad_LB" }
+    ],
+    "Interact": [
+      { "key": "E" },
+      { "key": "Gamepad_X" }
+    ],
+    "Pause": [
+      { "key": "Escape" },
+      { "key": "Gamepad_Start" }
+    ],
+    "Confirm": [
+      { "key": "Enter" },
+      { "key": "Gamepad_A" }
+    ],
+    "Cancel": [
+      { "key": "Escape" },
+      { "key": "Gamepad_B" }
+    ]
+  },
+  "contexts": {
+    "Gameplay": {
+      "priority": 10,
+      "enabled_actions": ["Move", "Look", "Jump", "Sprint", "Interact", "Pause"]
+    },
+    "UI": {
+      "priority": 20,
+      "enabled_actions": ["Move", "Confirm", "Cancel", "Pause"]
+    }
+  }
+}
