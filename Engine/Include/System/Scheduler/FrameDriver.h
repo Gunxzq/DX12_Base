@@ -2,6 +2,7 @@
 #include "RenderPhase.h"
 #include "Renderer/Core/Command/CommandList/CommandListPool.h"
 #include "System/ECS/Registry.h"
+
 #include "TaskExecutor.h"
 #include "TaskGraphBuilder.h"
 #include <atomic>
@@ -11,6 +12,9 @@
 #include <vector>
 
 namespace DX12Engine {
+namespace Core {
+class GameContext; // 前置声明
+}
 namespace Renderer {
 class D3D12DeviceContext;
 class CommandManager;
@@ -121,6 +125,11 @@ public:
     /// 设置 D3D12 设备上下文（由 Bootstrap 在初始化时注入）
     void SetDeviceContext(DX12Engine::Renderer::D3D12DeviceContext *deviceContext) { m_deviceContext = deviceContext; }
 
+    void SetGameContext(DX12Engine::Core::GameContext *context) { m_gameContext = context; }
+
+    /// 获取 GameContext 指针
+    DX12Engine::Core::GameContext *GetGameContext() const { return m_gameContext; }
+
     /// 获取 D3D12 设备上下文
     DX12Engine::Renderer::D3D12DeviceContext *GetDeviceContext() const { return m_deviceContext; }
 
@@ -210,6 +219,8 @@ private:
 
     // D3D设备上下文
     DX12Engine::Renderer::D3D12DeviceContext *m_deviceContext = nullptr;
+
+    DX12Engine::Core::GameContext *m_gameContext = nullptr;
 
     // 双缓冲TaskGraph（避免每帧分配）
     TaskGraph m_backGraph; // 后台构建的图
