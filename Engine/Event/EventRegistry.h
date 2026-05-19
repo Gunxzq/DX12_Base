@@ -14,7 +14,7 @@ namespace Event {
 #define EVENT_LIST(X)                                                                                                  \
     X(WindowResizeEvent, 0x00000001, P1_High)                                                                          \
     X(KeyboardInputEvent, 0x00000002, P2_Normal)                                                                       \
-    // X(KeyPressEvent, 0x00000003, P2_Normal)                                                                            \
+    X(NetworkPacketEvent, 0x00000100, P2_Normal)
 
 // ========================================================================
 // 2. 自动生成枚举 (EventType)
