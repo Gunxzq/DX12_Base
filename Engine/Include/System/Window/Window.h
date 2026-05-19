@@ -2,6 +2,8 @@
 #include "Common/Common.h"
 #include "Resource.h"
 #include "System/Event/EventTypes.h"
+#include "System/Input/RawInputBuffer.h"
+#include <string>
 
 namespace DX12Engine {
 namespace Core {
@@ -24,6 +26,11 @@ public:
     HWND GetHandle() const { return m_hWnd; }
     uint32_t GetWidth() const { return m_Width; }
     uint32_t GetHeight() const { return m_Height; }
+    Input::RawInputBuffer &GetRawInputBuffer() { return m_rawInputBuffer; }
+    const Input::RawInputBuffer &GetRawInputBuffer() const { return m_rawInputBuffer; }
+
+    void SetCursorCapture(bool capture);
+    bool IsCursorCaptured() const { return m_cursorCaptured; }
 
     // 显示窗口
     void Show();
@@ -52,10 +59,14 @@ private:
     uint32_t m_Height = 0;
     bool m_ShouldClose = false;
 
+    bool m_cursorCaptured = false;
+
     // 是否处于模态大小调整状态（用户拖拽调整大小时为 true）
     bool m_InSizeMove = false;
     // 拖拽期间尺寸是否真正变化（用于减少 WM_EXITSIZEMOVE 时的不必要事件）
     bool m_SizeChangedDuringMove = false;
+
+    Input::RawInputBuffer m_rawInputBuffer;
 };
 
 } // namespace Core

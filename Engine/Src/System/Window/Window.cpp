@@ -2,6 +2,7 @@
 #include "Core/Config/WindowConfig.h"
 #include "System/Event/MessageDispatcher.h"
 #include <Windows.h>
+#include <Windowsx.h>
 
 namespace DX12Engine {
 namespace Core {
@@ -111,7 +112,45 @@ LRESULT CALLBACK Window::WndProcStatic(HWND hWnd, UINT msg, WPARAM wParam, LPARA
     return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
+void Window::SetCursorCapture(bool capture) {
+    if (m_cursorCaptured == capture) {
+        return;
+    }
+
+    m_cursorCaptured = capture;
+
+    if (capture) {
+
+        m_rawInputBuffer.Reset();
+
+        SetCapture(m_hWnd);
+
+        // 2. 隐藏系统光标
+        ShowCursor(FALSE);
+
+        // 3. 将光标移动到窗口中心，防止初始视角跳变
+        RECT rect;
+        GetClientRect(m_hWnd, &rect);
+        POINT center;
+        center.x = (rect.left + rect.right) / 2;
+        center.y = (rect.top + rect.bottom) / 2;
+        ClientToScreen(m_hWnd, &center);
+        SetCursorPos(center.x, center.y);
+
+        m_rawInputBuffer.Reset();
+    } else {
+        // 1. 释放捕获
+        ReleaseCapture();
+
+        // 2. 显示系统光标
+        ShowCursor(TRUE);
+    }
+}
+
 LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+
+    auto &buffer = m_rawInputBuffer;
+
     switch (msg) {
     case WM_ENTERSIZEMOVE:
         // 用户开始拖拽窗口，进入模态大小调整
@@ -120,9 +159,8 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         return 0;
 
     case WM_SIZE:
-        if (wParam == SIZE_MINIMIZED) {
+        if (wParam == SIZE_MINIMIZED)
             return 0;
-        }
 
         {
             uint32_t newWidth = LOWORD(lParam);
@@ -163,24 +201,82 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
-
-        uint32_t vk = static_cast<uint32_t>(wParam);
-
-        // 只关心方向键
-        if (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT) {
-            auto *dispatcher = System::Event::MessageDispatcher::GetInstance();
-            if (dispatcher) {
-
-                dispatcher->PostEvent(System::Event::KeyboardInputEvent::StaticTypeHash, 0, vk,
-                                      0, // Action: Pressed
-                                      System::Event::EventPriority::P2_Normal);
-            }
-        }
+        buffer.OnKeyDown(static_cast<Input::EKeyCode>(wParam));
         return 0;
+    }
+
+    case WM_KEYUP:
+    case WM_SYSKEYUP: {
+        buffer.OnKeyUp(static_cast<Input::EKeyCode>(wParam));
+        return 0;
+    }
+
+        // ==========================
+    // 鼠标输入
+    // ==========================
+    case WM_MOUSEMOVE: {
+        int x = GET_X_LPARAM(lParam);
+        int y = GET_Y_LPARAM(lParam);
+        buffer.OnMouseMove(x, y);
+        return 0;
+    }
+
+    case WM_MOUSEWHEEL: {
+        int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        buffer.OnMouseWheel(delta);
+        return 0;
+    }
+
+    case WM_LBUTTONDOWN:
+        buffer.OnKeyDown(Input::EKeyCode::Mouse_Left);
+        return 0;
+    case WM_LBUTTONUP:
+        buffer.OnKeyUp(Input::EKeyCode::Mouse_Left);
+        return 0;
+
+    case WM_RBUTTONDOWN:
+        buffer.OnKeyDown(Input::EKeyCode::Mouse_Right);
+        return 0;
+    case WM_RBUTTONUP:
+        buffer.OnKeyUp(Input::EKeyCode::Mouse_Right);
+        return 0;
+
+    case WM_MBUTTONDOWN:
+        buffer.OnKeyDown(Input::EKeyCode::Mouse_Middle);
+        return 0;
+    case WM_MBUTTONUP:
+        buffer.OnKeyUp(Input::EKeyCode::Mouse_Middle);
+        return 0;
+
+    case WM_XBUTTONDOWN: {
+        WORD xButton = HIWORD(wParam);
+        if (xButton == XBUTTON1)
+            buffer.OnKeyDown(Input::EKeyCode::Mouse_X1);
+        else if (xButton == XBUTTON2)
+            buffer.OnKeyDown(Input::EKeyCode::Mouse_X2);
+        return TRUE;
+    }
+    case WM_XBUTTONUP: {
+        WORD xButton = HIWORD(wParam);
+        if (xButton == XBUTTON1)
+            buffer.OnKeyUp(Input::EKeyCode::Mouse_X1);
+        else if (xButton == XBUTTON2)
+            buffer.OnKeyUp(Input::EKeyCode::Mouse_X2);
+        return TRUE;
     }
 
     case WM_COMMAND:
         return DefWindowProcW(hWnd, msg, wParam, lParam);
+
+    case WM_ACTIVATE:
+        if (LOWORD(wParam) == WA_INACTIVE) {
+            // 窗口失去焦点，重置所有输入状态，防止“卡键”
+            if (m_cursorCaptured) {
+                SetCursorCapture(false);
+            }
+            m_rawInputBuffer.Reset();
+        }
+        return 0;
     }
 
     return DefWindowProcW(hWnd, msg, wParam, lParam);
