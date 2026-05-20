@@ -1,4 +1,3 @@
-// Network/NetworkTypes.h
 #pragma once
 #include <cstdint>
 
