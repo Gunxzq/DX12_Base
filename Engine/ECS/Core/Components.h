@@ -3,7 +3,8 @@
 #include <DirectXMath.h>
 #include <d3d12.h>
 
-namespace DX12Engine::ECS {
+namespace DX12Engine {
+namespace ECS {
 
 // 变换组件（位置、旋转、缩放）
 struct TransformComponent {
@@ -21,8 +22,8 @@ struct TransformComponent {
 
 // 网格组件（GPU 资源句柄）
 struct MeshComponent {
-    DX12Engine::System::Resource::ResourceHandle vertexBuffer; // 通过 ResourceManager 管理
-    DX12Engine::System::Resource::ResourceHandle indexBuffer;
+    Resource::ResourceHandle vertexBuffer; // 通过 ResourceManager 管理
+    Resource::ResourceHandle indexBuffer;
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
 
@@ -31,4 +32,5 @@ struct MeshComponent {
     D3D12_INDEX_BUFFER_VIEW indexBufferView = {};
 };
 
-} // namespace DX12Engine::ECS
+} // namespace ECS
+} // namespace DX12Engine

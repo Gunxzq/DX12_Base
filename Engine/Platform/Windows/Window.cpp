@@ -4,10 +4,12 @@
 #include <Windows.h>
 #include <Windowsx.h>
 
-namespace DX12Engine {
-namespace Core {
+using namespace DX12Engine::Boot;
+using namespace DX12Engine::Event;
 
-Window::Window(const WindowConfig &config)
+namespace DX12Engine::Platform {
+
+Window::Window(const Boot::WindowConfig &config)
     : m_Title(config.title), m_InitWidth(config.width), m_InitHeight(config.height), m_IsResizable(config.resizable) {}
 
 Window::~Window() {
@@ -283,14 +285,12 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 }
 
 void Window::PostWindowResizeEvent(uint32_t width, uint32_t height) {
-    auto *dispatcher = System::Event::MessageDispatcher::GetInstance();
+    auto *dispatcher = Event::MessageDispatcher::GetInstance();
     if (!dispatcher) {
         return;
     }
 
-    dispatcher->PostEvent(System::Event::WindowResizeEvent::StaticTypeHash, 0, width, height,
-                          System::Event::EventPriority::P1_High);
+    dispatcher->PostEvent(Event::WindowResizeEvent::StaticTypeHash, 0, width, height, Event::EventPriority::P1_High);
 }
 
-} // namespace Core
-} // namespace DX12Engine
+} // namespace DX12Engine::Platform

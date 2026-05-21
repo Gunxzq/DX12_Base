@@ -2,6 +2,10 @@
 #include <algorithm>
 #include <chrono>
 
+using namespace DX12Engine::ECS;
+using namespace DX12Engine::Event;
+using namespace DX12Engine::Scheduler;
+
 namespace DX12Engine::Scheduler {
 
 // ========================================================================
@@ -24,16 +28,15 @@ inline uint64_t GetCurrentTimeUs() {
  * 2. 通过 GetArena 读取原始消息
  * 3. 构建完整的 MessageContext（填充 receiveTimestamp）
  */
-std::vector<MessageContext> CollectMessages(DX12Engine::System::Event::MessageDispatcher &dispatcher,
-                                            const FrameStats &frameStats) {
+std::vector<MessageContext> CollectMessages(Event::MessageDispatcher &dispatcher, const FrameStats &frameStats) {
     std::vector<MessageContext> messages;
 
     // 预算：每帧最多处理 1024 条消息，时间预算 1ms
-    DX12Engine::System::Event::FlushBudget budget;
+    Event::FlushBudget budget;
     budget.hardLimit = 1024;
     budget.maxTimeUs = 1000; // 1ms
 
-    std::vector<DX12Engine::System::Event::MessageIndex> indices;
+    std::vector<Event::MessageIndex> indices;
     uint32_t count = dispatcher.FlushEvents(indices, budget);
 
     if (count == 0) {
@@ -65,8 +68,8 @@ std::vector<MessageContext> CollectMessages(DX12Engine::System::Event::MessageDi
 // TaskGraphBuilder 实现
 // ========================================================================
 
-void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, DX12Engine::System::Event::MessageDispatcher &dispatcher,
-                                        ECS::Registry &registry, const FrameStats &frameStats) {
+void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, Event::MessageDispatcher &dispatcher, ECS::Registry &registry,
+                                        const FrameStats &frameStats) {
     // ========================================================================
     // 阶段 0: 清空上一帧的图
     // ========================================================================

@@ -3,7 +3,7 @@
 #include <spdlog/sinks/base_sink.h>
 
 namespace DX12Engine {
-namespace Core {
+namespace Logger {
 
 /**
  * @brief Debug Output Sink 模板实现
@@ -48,5 +48,5 @@ using debug_output_sink_mt = debug_output_sink_impl<std::mutex>;
 // 单线程版本 (Single-Threaded) - 仅在确定单线程调用时使用以获得更高性能
 using debug_output_sink_st = debug_output_sink_impl<spdlog::details::null_mutex>;
 
-} // namespace Core
+} // namespace Logger
 } // namespace DX12Engine

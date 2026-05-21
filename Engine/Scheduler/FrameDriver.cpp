@@ -11,10 +11,13 @@
 #include <Common/d3dx12.h>
 #include <thread>
 
-namespace DX12Engine::Scheduler {
-
-using namespace DX12Engine::System::Event;
+using namespace DX12Engine::Event;
 using namespace DX12Engine::Renderer;
+using namespace DX12Engine::Scheduler;
+using namespace DX12Engine::Boot;
+using namespace DX12Engine::Input;
+
+namespace DX12Engine::Scheduler {
 
 // ========================================================================
 // Thread-local Scheduler Context

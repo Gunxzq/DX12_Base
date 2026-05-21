@@ -2,8 +2,7 @@
 
 #include <algorithm>
 
-namespace DX12Engine {
-namespace Core {
+namespace DX12Engine::Logger {
 
 LogEntry::LogEntry(Level lvl, std::string msg, std::string fmt)
     : timestamp(std::chrono::steady_clock::now()), level(lvl), message(std::move(msg)), formatted(std::move(fmt)) {}
@@ -222,5 +221,4 @@ LRESULT DebugOverlay::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-} // namespace Core
-} // namespace DX12Engine
+} // namespace DX12Engine::Logger

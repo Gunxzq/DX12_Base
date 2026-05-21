@@ -6,8 +6,7 @@
 #include <vector>
 
 namespace DX12Engine {
-namespace System {
-namespace Resource {
+namespace Boot {
 
 // ========================================================================
 // 内存池策略枚举
@@ -69,6 +68,5 @@ struct ResourceSystemConfig {
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(ResourceSystemConfig, HandlePoolConfig, MemoryPools)
 };
 
-} // namespace Resource
-} // namespace System
+} // namespace Boot
 } // namespace DX12Engine

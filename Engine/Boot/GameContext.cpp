@@ -6,8 +6,7 @@
 #include "Renderer/RHI/Command/CommandManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 
-namespace DX12Engine {
-namespace Core {
+namespace DX12Engine::Boot {
 
 bool GameContext::IsValid() const {
     if (!Window) {
@@ -36,5 +35,4 @@ bool GameContext::IsValid() const {
 
 const char *GameContext::GetInvalidReason() const { return m_invalidReason ? m_invalidReason : "All fields are valid"; }
 
-} // namespace Core
-} // namespace DX12Engine
+} // namespace DX12Engine::Boot

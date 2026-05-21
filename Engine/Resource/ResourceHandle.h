@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace DX12Engine {
-namespace System {
+
 namespace Resource {
 
 // 32位句柄：18位索引 + 10位世代号 + 4位池ID
@@ -29,5 +29,5 @@ struct ResourceHandle {
 };
 
 } // namespace Resource
-} // namespace System
+
 } // namespace DX12Engine

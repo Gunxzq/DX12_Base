@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace DX12Engine {
-namespace System {
+
 namespace Resource {
 
 struct ThreadLocalCache;
@@ -81,5 +81,5 @@ private:
 };
 
 } // namespace Resource
-} // namespace System
+
 } // namespace DX12Engine

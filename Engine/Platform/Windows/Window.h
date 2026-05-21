@@ -6,13 +6,18 @@
 #include <string>
 
 namespace DX12Engine {
-namespace Core {
+
+namespace Boot {
+struct WindowConfig;
+}
+
+namespace Platform {
 
 struct WindowConfig;
 
 class Window {
 public:
-    Window(const WindowConfig &config);
+    Window(const Boot::WindowConfig &config);
     ~Window();
 
     // 1. 初始化与创建
@@ -69,5 +74,5 @@ private:
     Input::RawInputBuffer m_rawInputBuffer;
 };
 
-} // namespace Core
+} // namespace Platform
 } // namespace DX12Engine

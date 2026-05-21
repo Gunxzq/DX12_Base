@@ -10,7 +10,15 @@
 #include <unordered_set>
 #include <vector>
 
-namespace DX12Engine::Scheduler {
+namespace DX12Engine {
+
+namespace ECS {
+class Registry;
+}
+namespace Event {
+class MessageDispatcher;
+}
+namespace Scheduler {
 
 // ========================================================================
 // TaskGraphBuilder - 消息驱动的DAG构建器
@@ -42,8 +50,8 @@ public:
      * @param registry ECS注册表
      * @param frameStats 当前帧统计信息
      */
-    static void BuildFromBuckets(TaskGraph &graph, DX12Engine::System::Event::MessageDispatcher &dispatcher,
-                                 ECS::Registry &registry, const struct FrameStats &frameStats);
+    static void BuildFromBuckets(TaskGraph &graph, Event::MessageDispatcher &dispatcher, ECS::Registry &registry,
+                                 const struct FrameStats &frameStats);
 
 private:
     /**
@@ -74,4 +82,5 @@ private:
 // 定义在 TaskGraphBuilder.cpp 中
 const MessageContext *GetCurrentMessageContext();
 
-} // namespace DX12Engine::Scheduler
+} // namespace Scheduler
+} // namespace DX12Engine

@@ -11,7 +11,7 @@
 using namespace DirectX;
 using namespace DX12Engine::ECS;
 using namespace DX12Engine::Renderer;
-using namespace DX12Engine::System::Resource;
+using namespace DX12Engine::Resource;
 
 namespace DX12Engine::Renderer {
 
@@ -88,14 +88,8 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, uint32_t backBufferIndex,
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, const TransformComponent &transform,
                               uint32_t backBufferIndex) {
 
-    static int drawCallCount = 0;
-    drawCallCount++;
-    char buf[128];
-    sprintf_s(buf, "[DEBUG] DrawMesh #%d called, indexCount=%u\n", drawCallCount, mesh.indexCount);
-    OutputDebugStringA(buf);
-
     // 1. 获取 GPU 资源指针
-    auto &gpuMgr = System::Resource::GpuResourceManager::GetInstance();
+    auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
     ID3D12Resource *vb = gpuMgr.GetResource(mesh.vertexBuffer);
     ID3D12Resource *ib = gpuMgr.GetResource(mesh.indexBuffer);
 
@@ -122,20 +116,6 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, c
     XMStoreFloat4x4(&objCB.World, world);
     XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
 
-    if (drawCallCount <= 5) { // 只打印前5帧，避免刷屏
-        wchar_t buf[512];
-        swprintf_s(buf,
-                   L"[DEBUG] DrawMesh #%d | Pos(%.1f, %.1f, %.1f)\n"
-                   L"  World[0]: %.4f, %.4f, %.4f, %.4f\n"
-                   L"  World[1]: %.4f, %.4f, %.4f, %.4f\n"
-                   L"  World[2]: %.4f, %.4f, %.4f, %.4f\n"
-                   L"  World[3]: %.4f, %.4f, %.4f, %.4f\n",
-                   drawCallCount, transform.position.x, transform.position.y, transform.position.z, objCB.World._11,
-                   objCB.World._12, objCB.World._13, objCB.World._14, objCB.World._21, objCB.World._22, objCB.World._23,
-                   objCB.World._24, objCB.World._31, objCB.World._32, objCB.World._33, objCB.World._34, objCB.World._41,
-                   objCB.World._42, objCB.World._43, objCB.World._44);
-        OutputDebugStringW(buf);
-    }
     // ==================================
 
     // 4. 上传 ObjectConstants 到当前帧的环形缓冲区

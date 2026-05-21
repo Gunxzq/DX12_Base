@@ -11,7 +11,11 @@
 #include <vector>
 
 namespace DX12Engine {
-namespace System {
+
+namespace Boot {
+struct ResourceSystemConfig;
+}
+
 namespace Resource {
 
 // ========================================================================
@@ -31,7 +35,7 @@ class CpuResourceManager {
 public:
     static CpuResourceManager &GetInstance();
 
-    void Initialize(const ResourceSystemConfig &config);
+    void Initialize(const Boot::ResourceSystemConfig &config);
     void Shutdown();
 
     /**
@@ -177,11 +181,11 @@ private:
     mutable std::shared_mutex m_assetMutex;
 
     uint64_t GetCurrentFrame() const;
-    ResourceSystemConfig m_config;
-    void InitializeDataPoolsFromConfig(const ResourceSystemConfig &config);
+    Boot::ResourceSystemConfig m_config;
+    void InitializeDataPoolsFromConfig(const Boot::ResourceSystemConfig &config);
     DataPool *GetDataPoolForHandle(ResourceHandle handle) const;
 };
 
 } // namespace Resource
-} // namespace System
+
 } // namespace DX12Engine

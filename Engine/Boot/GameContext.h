@@ -13,11 +13,9 @@ class CommandManager;
 class CameraManager;
 } // namespace Renderer
 
-namespace System {
 namespace Event {
 class MessageDispatcher;
 }
-} // namespace System
 
 namespace ECS {
 class Registry;
@@ -27,15 +25,21 @@ namespace Scheduler {
 class FrameDriver;
 }
 
-namespace Core {
+namespace Logger {
+class Logger;
+}
+
+namespace Platform {
+class Window;
+}
+
+namespace Boot {
 
 // ========================================================================
 // 前向声明
 // ========================================================================
 
-class Window;
 class ConfigManager;
-class Logger;
 class GameTimer;
 
 // ========================================================================
@@ -56,11 +60,11 @@ public:
 
     // ── 基础设施子系统指针 ──
 
-    Window *Window = nullptr;                               // 窗口管理
-    ConfigManager *Config = nullptr;                        // 配置管理
-    Logger *Logging = nullptr;                              // 日志系统
-    GameTimer *MainTimer = nullptr;                         // 主计时器
-    System::Event::MessageDispatcher *Dispatcher = nullptr; // 消息分发器（单例）
+    Platform::Window *Window = nullptr;             // 窗口管理
+    ConfigManager *Config = nullptr;                // 配置管理
+    Logger::Logger *Logging = nullptr;              // 日志系统
+    GameTimer *MainTimer = nullptr;                 // 主计时器
+    Event::MessageDispatcher *Dispatcher = nullptr; // 消息分发器（单例）
 
     // ── 调度与数据层指针 ──
 
@@ -90,5 +94,5 @@ public:
     mutable const char *m_invalidReason = nullptr;
 };
 
-} // namespace Core
+} // namespace Boot
 } // namespace DX12Engine

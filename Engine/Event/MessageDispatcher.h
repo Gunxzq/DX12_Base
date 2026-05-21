@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace DX12Engine {
-namespace System {
+
 namespace Event {
 
 struct FlushBudget {
@@ -139,5 +139,5 @@ private:
 };
 
 } // namespace Event
-} // namespace System
+
 } // namespace DX12Engine

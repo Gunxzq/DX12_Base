@@ -7,7 +7,6 @@
 #include <vector>
 
 namespace DX12Engine {
-namespace System {
 namespace Resource {
 
 class DataPool {
@@ -30,7 +29,7 @@ public:
      * @param blockSize 固定块大小（Block策略使用）
      */
     void Initialize(const std::string &name, size_t totalSize, size_t alignment,
-                    MemoryStrategy strategy = MemoryStrategy::Linear, size_t blockSize = 0);
+                    Boot::MemoryStrategy strategy = Boot::MemoryStrategy::Linear, size_t blockSize = 0);
 
     void Shutdown();
 
@@ -84,7 +83,7 @@ private:
     size_t m_alignment = 16;
     size_t m_blockSize = 0; // 固定块大小
     uint8_t m_poolID = 0;
-    MemoryStrategy m_strategy = MemoryStrategy::Linear;
+    Boot::MemoryStrategy m_strategy = Boot::MemoryStrategy::Linear;
 
     static constexpr size_t BLOCK_SIZE = 64 * 1024 * 1024;
     static constexpr size_t TLS_ARENA_SIZE = 64 * 1024;
@@ -107,5 +106,5 @@ private:
 };
 
 } // namespace Resource
-} // namespace System
+
 } // namespace DX12Engine

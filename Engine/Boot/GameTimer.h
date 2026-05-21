@@ -5,7 +5,7 @@
 #include "HighResolutionTimer.h"
 
 namespace DX12Engine {
-namespace Core {
+namespace Boot {
 
 /**
  * @brief 游戏逻辑计时器
@@ -110,7 +110,7 @@ private:
     float m_gameTime = 0.0f;
 };
 
-} // namespace Core
+} // namespace Boot
 } // namespace DX12Engine
 
 #endif // GAMETIMER_H

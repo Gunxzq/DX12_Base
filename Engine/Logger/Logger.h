@@ -11,9 +11,12 @@
 #include <spdlog/logger.h>
 
 namespace DX12Engine {
-namespace Core {
+
+namespace Boot {
 
 struct LogConfig;
+}
+namespace Logger {
 
 // ========================================================================
 // Logger - 单例日志系统
@@ -39,7 +42,7 @@ public:
      * @throw std::runtime_error 如果初始化失败（如无法创建任何 Sink 或 Logger 实例）
      * @attention Thread-safe
      */
-    static void Init(const LogConfig &config);
+    static void Init(const Boot::LogConfig &config);
 
     /**
      * @brief 关闭日志系统
@@ -119,7 +122,7 @@ private:
      * @brief 内部初始化（需要持有锁）
      * @throw std::runtime_error
      */
-    void Init_Internal(const LogConfig &config);
+    void Init_Internal(const Boot::LogConfig &config);
 
     /**
      * @brief 内部关闭（需要持有锁）
@@ -147,5 +150,5 @@ private:
     inline static bool s_isInitialized = false;
 };
 
-} // namespace Core
+} // namespace Logger
 } // namespace DX12Engine

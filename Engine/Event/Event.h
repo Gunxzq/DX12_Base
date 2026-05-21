@@ -5,7 +5,7 @@
 #include <type_traits>
 
 namespace DX12Engine {
-namespace System {
+
 namespace Event {
 
 // ========================================================================
@@ -66,5 +66,5 @@ using MessageIndex = uint32_t;
     inline static EventTypeHash GetStaticTypeHash() { return StaticTypeHash; }
 
 } // namespace Event
-} // namespace System
+
 } // namespace DX12Engine

@@ -8,7 +8,7 @@
 #define WM_LOG_UPDATE (WM_USER + 1)
 
 namespace DX12Engine {
-namespace Core {
+namespace Logger {
 
 // ========================================================================
 // 日志条目
@@ -113,5 +113,5 @@ private:
     inline static DebugOverlay *s_instance = nullptr;
 };
 
-} // namespace Core
+} // namespace Logger
 } // namespace DX12Engine

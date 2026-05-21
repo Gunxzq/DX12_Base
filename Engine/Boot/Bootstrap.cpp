@@ -10,9 +10,17 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Scheduler/FrameDriver.h"
+#include <steam/isteamnetworkingutils.h>
+#include <steam/steamnetworkingsockets.h>
 
-using DX12Engine::ECS::Registry;
-using DX12Engine::Scheduler::FrameDriver;
+using namespace DX12Engine::DebugUI;
+using namespace DX12Engine::ECS;
+using namespace DX12Engine::Scheduler;
+using namespace DX12Engine::Input;
+using namespace DX12Engine::Event;
+using namespace DX12Engine::Renderer;
+using EngineLogger = DX12Engine::Logger::Logger;
+using namespace DX12Engine::Boot;
 
 namespace {
 void EarlyLog(const std::string &msg) {
@@ -23,7 +31,33 @@ void EarlyLog(const std::string &msg) {
 } // namespace
 
 namespace DX12Engine {
-namespace Core {
+
+void RegisterTestPanel() {
+    DebugUI::PanelConfig config;
+    config.name = "Debug Info";
+    config.group = "Debug";
+    config.drawFunc = [](float deltaTime, uint32_t frameNumber) {
+        ImGui::Text("FPS: %.1f", 1.0f / deltaTime);
+        ImGui::Text("Delta Time: %.3f ms", deltaTime * 1000.0f);
+        ImGui::Text("Frame: %u", frameNumber);
+
+        if (ImGui::CollapsingHeader("Performance")) {
+            ImGui::Text("CPU Time: %.2f ms", deltaTime * 1000.0f);
+            // 可以添加更多性能指标
+        }
+
+        if (ImGui::Button("ImGui Demo")) {
+            // 打开 ImGui Demo 窗口
+            auto &ui = DebugUI::DebugUIManager::Get();
+            // 需要添加一个方法来切换 Demo 窗口
+        }
+    };
+    config.visibleByDefault = true;
+
+    DebugUI::DebugUIManager::Get().RegisterPanel(config);
+}
+
+namespace Boot {
 
 Bootstrap::~Bootstrap() { Shutdown(); }
 
@@ -46,7 +80,7 @@ void Bootstrap::Shutdown() {
 
     // 6. 关闭 MessageDispatcher 单例
     try {
-        System::Event::MessageDispatcher::Shutdown();
+        Event::MessageDispatcher::Shutdown();
     } catch (...) {
         // 忽略
     }
@@ -54,7 +88,7 @@ void Bootstrap::Shutdown() {
     // 7. 关闭 Logger (如果已初始化)
     // 注意：Logger::Shutdown 是静态方法，内部会处理单例清理
     try {
-        Logger::Shutdown();
+        EngineLogger::Shutdown();
     } catch (...) {
         // 忽略析构期间的异常
     }
@@ -65,6 +99,10 @@ void Bootstrap::Shutdown() {
     } catch (...) {
         // 忽略
     }
+
+    // 9. 关闭 GNS 全局环境 (如果已初始化)
+    // 注意：确保在所有网络实例销毁后调用
+    GameNetworkingSockets_Kill();
 
     m_isInitialized = false;
 }
@@ -84,36 +122,36 @@ void Bootstrap::InitializeLogging() {
     const auto &logConfig = ConfigManager::GetInstance().GetLogConfig();
 
     // 任何获取实例，迫使创建
-    Logger::GetInstance();
+    EngineLogger::GetInstance();
 
     // Logger::Init 内部会抛出异常如果失败
-    Logger::Init(logConfig);
+    EngineLogger::Init(logConfig);
 
     // 现在 Logger 可用了，后续日志可以使用 Logger
-    Logger::GetInstance()->Info("[Bootstrap] Logging system initialized.");
+    EngineLogger::GetInstance()->Info("[Bootstrap] Logging system initialized.");
 }
 
 bool Bootstrap::CreateMainWindow() {
-    Logger::GetInstance()->Info("[Bootstrap] Creating Window...");
+    EngineLogger::GetInstance()->Info("[Bootstrap] Creating Window...");
 
     const auto &windowConfig = ConfigManager::GetInstance().GetWindowConfig();
 
-    m_window = std::make_unique<Window>(windowConfig);
+    m_window = std::make_unique<Platform::Window>(windowConfig);
 
     if (!m_window->Create()) {
-        Logger::GetInstance()->Error("[Bootstrap] Failed to create window");
+        EngineLogger::GetInstance()->Error("[Bootstrap] Failed to create window");
         return false;
     }
 
     // SwapChain 创建前需要窗口已显示
     m_window->Show();
 
-    Logger::GetInstance()->Info("[Bootstrap] Window created successfully");
+    EngineLogger::GetInstance()->Info("[Bootstrap] Window created successfully");
     return true;
 }
 
 bool Bootstrap::InitializeD3DDeviceContext() {
-    Logger::GetInstance()->Info("[Bootstrap] Initializing D3D12 Device Context...");
+    EngineLogger::GetInstance()->Info("[Bootstrap] Initializing D3D12 Device Context...");
 
     // 获取窗口配置
     const auto &windowConfig = ConfigManager::GetInstance().GetWindowConfig();
@@ -142,24 +180,24 @@ bool Bootstrap::InitializeD3DDeviceContext() {
     m_deviceContext = std::make_unique<DX12Engine::Renderer::D3D12DeviceContext>();
 
     if (!m_deviceContext->Initialize(params)) {
-        Logger::GetInstance()->Error("[Bootstrap] Failed to initialize D3D12 Device Context");
+        EngineLogger::GetInstance()->Error("[Bootstrap] Failed to initialize D3D12 Device Context");
         return false;
     }
 
-    Logger::GetInstance()->Info("[Bootstrap] D3D12 Device Context initialized successfully");
+    EngineLogger::GetInstance()->Info("[Bootstrap] D3D12 Device Context initialized successfully");
     return true;
 }
 
 void Bootstrap::InitializeRegistry() {
-    Logger::GetInstance()->Info("[Bootstrap] Initializing ECS Registry...");
+    EngineLogger::GetInstance()->Info("[Bootstrap] Initializing ECS Registry...");
 
-    m_registry = std::make_unique<Registry>();
+    m_registry = std::make_unique<ECS::Registry>();
 
-    Logger::GetInstance()->Info("[Bootstrap] ECS Registry initialized successfully");
+    EngineLogger::GetInstance()->Info("[Bootstrap] ECS Registry initialized successfully");
 }
 
 void Bootstrap::InitializeFrameDriver() {
-    Logger::GetInstance()->Info("[Bootstrap] Initializing FrameDriver...");
+    EngineLogger::GetInstance()->Info("[Bootstrap] Initializing FrameDriver...");
 
     if (!m_registry) {
         throw std::runtime_error("[Bootstrap] Registry must be initialized before FrameDriver");
@@ -179,7 +217,7 @@ void Bootstrap::InitializeFrameDriver() {
     }
     m_frameDriver = schedulerCtx.frameDriver;
 
-    Logger::GetInstance()->Info("[Bootstrap] FrameDriver initialized successfully");
+    EngineLogger::GetInstance()->Info("[Bootstrap] FrameDriver initialized successfully");
 }
 
 void Bootstrap::InitializeModules() {
@@ -200,17 +238,19 @@ void Bootstrap::InitializeModules() {
             throw std::runtime_error("[Bootstrap] InitializeD3DDeviceContext returned false.");
         }
 
-        // 5. MessageDispatcher 单例 (Event 层，调度系统需要)
-        Logger::GetInstance()->Info("[Bootstrap] Initializing MessageDispatcher...");
-        System::Event::MessageDispatcher::Init();
-        Logger::GetInstance()->Info("[Bootstrap] MessageDispatcher initialized.");
+        InitializeDebugUI();
 
-        Logger::GetInstance()->Info("[Bootstrap] Initializing InputSystem...");
+        // 5. MessageDispatcher 单例 (Event 层，调度系统需要)
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing MessageDispatcher...");
+        Event::MessageDispatcher::Init();
+        EngineLogger::GetInstance()->Info("[Bootstrap] MessageDispatcher initialized.");
+
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing InputSystem...");
         auto &inputSys = DX12Engine::Input::InputSystem::Get();
         // 假设配置文件路径为 "Config/input_bindings.json" 或在 ConfigManager 中获取
         std::string inputConfigPath = "Config/default_input.json";
         if (!inputSys.Initialize(inputConfigPath)) {
-            Logger::GetInstance()->Warn(
+            EngineLogger::GetInstance()->Warn(
                 "[Bootstrap] InputSystem initialization failed or config not found. Using defaults.");
             // 根据需求决定是抛出异常还是继续
         }
@@ -221,6 +261,14 @@ void Bootstrap::InitializeModules() {
         // 7. FrameDriver (调度层核心，由基础设施层创建)
         InitializeFrameDriver();
 
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing GameNetworkingSockets...");
+        SteamNetworkingErrMsg errMsg;
+        if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
+            EngineLogger::GetInstance()->Error("[Bootstrap] GNS Init Failed: %s", errMsg);
+            throw std::runtime_error("[Bootstrap] GNS Initialization Failed");
+        }
+        EngineLogger::GetInstance()->Info("[Bootstrap] GameNetworkingSockets initialized.");
+
     } catch (const std::exception &e) {
         // 如果任何一步失败，记录错误并重新抛出
         // 注意：如果 Logger 还没好，EarlyLog 会兜底
@@ -228,8 +276,8 @@ void Bootstrap::InitializeModules() {
 
         // 尝试用 Logger 记录，如果 Logger 没好则用 EarlyLog
         try {
-            if (Logger::GetInstance()) { // 简单的空指针检查，具体取决于 Logger 实现
-                Logger::GetInstance()->Critical(errMsg.c_str());
+            if (EngineLogger::GetInstance()) { // 简单的空指针检查，具体取决于 Logger 实现
+                EngineLogger::GetInstance()->Critical(errMsg.c_str());
             } else {
                 EarlyLog(errMsg);
             }
@@ -255,10 +303,10 @@ GameContext *Bootstrap::CreateContext() {
 
     m_context = std::make_unique<GameContext>();
     m_context->Config = &ConfigManager::GetInstance();
-    m_context->Logging = Logger::GetInstance();
+    m_context->Logging = EngineLogger::GetInstance();
     m_context->Window = m_window.get();
     m_context->MainTimer = m_mainTimer.get();
-    m_context->Dispatcher = System::Event::MessageDispatcher::GetInstance();
+    m_context->Dispatcher = Event::MessageDispatcher::GetInstance();
     m_context->Registry = m_registry.get();
     m_context->FrameDriver = m_frameDriver;
     m_context->DeviceContext = m_deviceContext.get();
@@ -275,6 +323,12 @@ GameContext *Bootstrap::CreateContext() {
         m_frameDriver->SetGameContext(m_context.get());
     }
 
+    auto &debugUI = DebugUI::DebugUIManager::Get();
+    debugUI.SetGameContext(m_context.get());
+    debugUI.AutoRegisterToFrameDriver(m_context.get());
+
+    RegisterTestPanel();
+
     return m_context.get();
 }
 
@@ -290,5 +344,29 @@ void Bootstrap::Run() {
     m_isInitialized = true;
 }
 
-} // namespace Core
+void Bootstrap::InitializeDebugUI() {
+    EngineLogger::GetInstance()->Info("[Bootstrap] Initializing DebugUI...");
+
+    auto &debugUI = DebugUI::DebugUIManager::Get();
+
+    // 1. 初始化 Win32 后端
+    debugUI.Initialize(m_window->GetHandle());
+
+    // 2. 初始化 DX12 后端
+    const auto &rendererConfig = ConfigManager::GetInstance().GetRendererConfig();
+
+    debugUI.InitDX12Backend(m_deviceContext->GetDevice(), m_deviceContext->GetCommandQueue(), 2,
+                            rendererConfig.formats.BackBufferFormatEnum);
+
+    // 3. 可选：配置样式和默认行为
+    debugUI.ApplyDarkTheme();
+    debugUI.SetShowMenuBar(true);
+
+    // 4. 注册到 FrameDriver（通过 GameContext）
+    // 这一步在 CreateContext 中完成，因为需要 GameContext
+
+    EngineLogger::GetInstance()->Info("[Bootstrap] DebugUI initialized successfully");
+}
+
+} // namespace Boot
 } // namespace DX12Engine

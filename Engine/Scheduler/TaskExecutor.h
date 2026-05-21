@@ -5,7 +5,8 @@
 #include <taskflow/taskflow.hpp>
 #include <vector>
 
-namespace DX12Engine::Scheduler {
+namespace DX12Engine {
+namespace Scheduler {
 
 // ========================================================================
 // TaskFlow 执行器
@@ -91,5 +92,5 @@ private:
     /// 将 Task 分发到对应队列
     void DispatchToThreadQueue(const Task &task);
 };
-
-} // namespace DX12Engine::Scheduler
+} // namespace Scheduler
+} // namespace DX12Engine

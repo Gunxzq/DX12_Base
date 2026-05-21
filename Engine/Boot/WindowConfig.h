@@ -4,7 +4,7 @@
 #include <nlohmann/json.hpp>
 
 namespace DX12Engine {
-namespace Core {
+namespace Boot {
 
 // ========================================================================
 // 窗口配置
@@ -21,5 +21,5 @@ struct WindowConfig {
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(WindowConfig, title, width, height, mode, resizable, maximizable)
 };
 
-} // namespace Core
+} // namespace Boot
 } // namespace DX12Engine

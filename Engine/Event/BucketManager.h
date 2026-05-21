@@ -7,7 +7,7 @@
 #include <cstdint>
 
 namespace DX12Engine {
-namespace System {
+
 namespace Event {
 
 // 最大支持的优先级数量
@@ -122,5 +122,5 @@ private:
 };
 
 } // namespace Event
-} // namespace System
+
 } // namespace DX12Engine

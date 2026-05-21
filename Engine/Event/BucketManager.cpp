@@ -15,9 +15,7 @@
 #define ARENA_CPU_PAUSE() sched_yield()
 #endif
 
-namespace DX12Engine {
-namespace System {
-namespace Event {
+namespace DX12Engine::Event {
 
 BucketManager::BucketManager() : m_activeMask(0) {}
 
@@ -272,6 +270,4 @@ float BucketManager::CalculateEffectivePriority(uint32_t basePriority, uint64_t 
     return baseScore + agingScore;
 }
 
-} // namespace Event
-} // namespace System
-} // namespace DX12Engine
+} // namespace DX12Engine::Event

@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace DX12Engine {
-namespace System {
+
 namespace Resource {
 
 // ========================================================================
@@ -13,9 +13,9 @@ namespace Resource {
 constexpr size_t MAX_POOL_COUNT = 16;
 
 struct PoolThreadState {
-    char *currentPtr = nullptr;  // LinearPool: 当前分配位置
-    char *endPtr = nullptr;      // LinearPool: Arena 结束位置
-    bool initialized = false;    // 是否已初始化
+    char *currentPtr = nullptr; // LinearPool: 当前分配位置
+    char *endPtr = nullptr;     // LinearPool: Arena 结束位置
+    bool initialized = false;   // 是否已初始化
     uint8_t padding[7] = {0};   // 对齐填充
 };
 
@@ -28,10 +28,8 @@ struct alignas(64) ResourceThreadContext {
 inline thread_local ResourceThreadContext g_threadContext;
 
 // 获取指定池的线程状态
-inline PoolThreadState *GetThreadPoolState(uint8_t poolId) {
-    return &g_threadContext.slotStates[poolId];
-}
+inline PoolThreadState *GetThreadPoolState(uint8_t poolId) { return &g_threadContext.slotStates[poolId]; }
 
 } // namespace Resource
-} // namespace System
+
 } // namespace DX12Engine

@@ -18,8 +18,7 @@ std::wstring Utf8ToWstring(const std::string &utf8Str) {
 
 } // namespace
 
-namespace DX12Engine {
-namespace Core {
+namespace DX12Engine::Boot {
 
 // 静态成员初始化 (如果需要，但这里 GetInstance 使用 local static)
 ConfigManager &ConfigManager::GetInstance() {
@@ -494,5 +493,4 @@ bool ConfigManager::AtomicWriteFile(const std::filesystem::path &targetPath, con
     }
 }
 
-} // namespace Core
-} // namespace DX12Engine
+} // namespace DX12Engine::Boot

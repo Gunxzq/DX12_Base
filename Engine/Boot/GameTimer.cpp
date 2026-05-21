@@ -1,7 +1,6 @@
 #include "GameTimer.h"
 
-namespace DX12Engine {
-namespace Core {
+namespace DX12Engine::Boot {
 
 GameTimer::GameTimer() { ResetGameTime(); }
 
@@ -36,5 +35,4 @@ void GameTimer::ResetGameTime() {
     m_highResTimer.Reset();
 }
 
-} // namespace Core
-} // namespace DX12Engine
+} // namespace DX12Engine::Boot

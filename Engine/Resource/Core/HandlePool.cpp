@@ -7,9 +7,7 @@
 #include <mutex>
 #include <thread>
 
-namespace DX12Engine {
-namespace System {
-namespace Resource {
+namespace DX12Engine::Resource {
 
 struct ThreadLocalCache {
     std::vector<uint32_t> freeIndices;
@@ -386,6 +384,4 @@ uint32_t HandlePool::GetActiveCount() const {
     return count;
 }
 
-} // namespace Resource
-} // namespace System
-} // namespace DX12Engine
+} // namespace DX12Engine::Resource

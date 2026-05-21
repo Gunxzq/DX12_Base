@@ -4,8 +4,7 @@
 #include <cstring>
 #include <iostream>
 
-namespace DX12Engine {
-namespace Network {
+namespace DX12Engine::Network {
 
 P2PTopology::P2PTopology() = default;
 
@@ -345,5 +344,4 @@ bool P2PTopology::HasAllInputsForFrame(uint32_t frameNum) const {
     return true;
 }
 
-} // namespace Network
-} // namespace DX12Engine
+} // namespace DX12Engine::Network

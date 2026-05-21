@@ -7,8 +7,7 @@
 
 using json = nlohmann::json;
 
-namespace DX12Engine {
-namespace Input {
+namespace DX12Engine::Input {
 
 // 内部辅助函数：解析单个 BindingSource
 static void ParseBindingSource(const json &sourceItem, BindingSource &outSource) {
@@ -224,5 +223,4 @@ public:
     }
 };
 
-} // namespace Input
-} // namespace DX12Engine
+} // namespace DX12Engine::Input

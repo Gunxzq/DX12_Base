@@ -3,7 +3,7 @@
 #include <spdlog/sinks/base_sink.h>
 
 namespace DX12Engine {
-namespace Core {
+namespace Logger {
 
 /**
  * @brief Null Sink
@@ -29,5 +29,5 @@ protected:
 using null_sink_mt = null_sink_impl<std::mutex>;
 using null_sink_st = null_sink_impl<spdlog::details::null_mutex>;
 
-} // namespace Core
+} // namespace Logger
 } // namespace DX12Engine

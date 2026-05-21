@@ -1,8 +1,6 @@
 #include "MessageDispatcher.h"
 
-namespace DX12Engine {
-namespace System {
-namespace Event {
+namespace DX12Engine::Event {
 
 MessageDispatcher *MessageDispatcher::GetInstance() {
     std::shared_lock lock(s_mutex);
@@ -91,6 +89,4 @@ void MessageDispatcher::EndFrame() {
     m_bucketManager.ResetFrame();
 }
 
-} // namespace Event
-} // namespace System
-} // namespace DX12Engine
+} // namespace DX12Engine::Event

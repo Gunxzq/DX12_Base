@@ -3,9 +3,9 @@
 #include <cassert>
 #include <iostream>
 
-namespace DX12Engine {
-namespace System {
-namespace Resource {
+using namespace DX12Engine::Boot;
+
+namespace DX12Engine::Resource {
 
 // Global frame counter for simulating engine main loop frame growth
 // In production, this should reference Engine::GetFrameCount()
@@ -409,6 +409,4 @@ void CpuResourceManager::CleanupUnused() {
     }
 }
 
-} // namespace Resource
-} // namespace System
-} // namespace DX12Engine
+} // namespace DX12Engine::Resource

@@ -8,7 +8,7 @@
 #include <mutex>
 
 namespace DX12Engine {
-namespace System {
+
 namespace Event {
 
 static constexpr size_t TLS_BUFFER_SIZE = 64 * 1024;
@@ -233,5 +233,5 @@ private:
 };
 
 } // namespace Event
-} // namespace System
+
 } // namespace DX12Engine

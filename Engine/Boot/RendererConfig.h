@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 
 namespace DX12Engine {
-namespace Core {
+namespace Boot {
 
 // ========================================================================
 // 辅助转换函数
@@ -139,5 +139,5 @@ struct RendererConfig {
     }
 };
 
-} // namespace Core
+} // namespace Boot
 } // namespace DX12Engine

@@ -6,9 +6,9 @@
 #include <cstring>
 #include <intrin.h>
 
-namespace DX12Engine {
-namespace System {
-namespace Resource {
+using namespace DX12Engine::Boot;
+
+namespace DX12Engine::Resource {
 
 void DataPool::Initialize(const std::string &name, size_t totalSize, size_t alignment, MemoryStrategy strategy,
                           size_t blockSize) {
@@ -468,6 +468,4 @@ void DataPool::AllocateBlockInternal() {
     m_blocks.push_back(newBlock);
 }
 
-} // namespace Resource
-} // namespace System
-} // namespace DX12Engine
+} // namespace DX12Engine::Resource

@@ -8,7 +8,6 @@
 #include <vector>
 
 namespace DX12Engine {
-namespace System {
 namespace Event {
 
 enum class DiscardPolicy { None, Throttle, Sample };
@@ -245,5 +244,5 @@ private:
 };
 
 } // namespace Event
-} // namespace System
+
 } // namespace DX12Engine

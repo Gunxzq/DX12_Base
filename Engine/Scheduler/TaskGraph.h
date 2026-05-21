@@ -5,7 +5,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace DX12Engine::Scheduler {
+namespace DX12Engine {
+namespace Scheduler {
 
 // ========================================================================
 // 任务图 (DAG - 有向无环图)
@@ -86,4 +87,5 @@ private:
     std::unordered_map<TaskId, int> CalculateInDegree() const;
 };
 
-} // namespace DX12Engine::Scheduler
+} // namespace Scheduler
+} // namespace DX12Engine

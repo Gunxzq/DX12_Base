@@ -21,7 +21,7 @@
  */
 
 namespace DX12Engine {
-namespace System {
+
 namespace Event {
 
 // ========================================================================
@@ -209,5 +209,5 @@ struct NetworkPacketEvent {
 };
 
 } // namespace Event
-} // namespace System
+
 } // namespace DX12Engine

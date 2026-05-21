@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 
-namespace DX12Engine::Scheduler {
+namespace DX12Engine {
+namespace Scheduler {
 
 // ========================================================================
 // 任务标识与类型
@@ -97,5 +98,6 @@ public:
         return task;
     }
 };
+} // namespace Scheduler
 
-} // namespace DX12Engine::Scheduler
+} // namespace DX12Engine

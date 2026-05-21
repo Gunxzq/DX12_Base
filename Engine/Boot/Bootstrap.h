@@ -1,12 +1,14 @@
 #pragma once
 
 #include "Common/Common.h"
+#include "DebugUI/DebugUIManager.h"
 #include "ECS/Core/Registry.h"
 #include "GameTimer.h"
 #include "Platform/Windows/Window.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 
 namespace DX12Engine {
+void RegisterTestPanel();
 
 namespace Scheduler {
 class FrameDriver;
@@ -15,8 +17,11 @@ namespace ECS {
 class Registry;
 }
 
-namespace Core {
+namespace Platform {
+class Window;
+}
 
+namespace Boot {
 // ========================================================================
 // 前向声明 (移到命名空间内部)
 // ========================================================================
@@ -55,7 +60,7 @@ public:
     /**
      * @brief 获取 ECS Registry 引用（用于初始化调度器）
      */
-    DX12Engine::ECS::Registry &GetRegistry();
+    ECS::Registry &GetRegistry();
 
 private:
     /**
@@ -93,6 +98,8 @@ private:
      */
     void InitializeFrameDriver();
 
+    void InitializeDebugUI();
+
     /**
      * @brief 初始化模块
      * @date 2026-04-21
@@ -100,18 +107,17 @@ private:
     void InitializeModules();
 
     // ── 成员变量 ──
-
-    std::unique_ptr<Window> m_window;                                          // 窗口
-    std::unique_ptr<GameContext> m_context;                                    // 游戏上下文
-    std::unique_ptr<GameTimer> m_mainTimer;                                    // 主计时器
-    std::unique_ptr<DX12Engine::Renderer::D3D12DeviceContext> m_deviceContext; // D3D12 设备上下文
-    std::unique_ptr<DX12Engine::ECS::Registry> m_registry;                     // ECS Registry
-    DX12Engine::Scheduler::FrameDriver *m_frameDriver = nullptr;               // FrameDriver (由基础设施层创建)
+    std::unique_ptr<Platform::Window> m_window;                    // 窗口
+    std::unique_ptr<GameContext> m_context;                        // 游戏上下文
+    std::unique_ptr<GameTimer> m_mainTimer;                        // 主计时器
+    std::unique_ptr<Renderer::D3D12DeviceContext> m_deviceContext; // D3D12 设备上下文
+    std::unique_ptr<ECS::Registry> m_registry;                     // ECS Registry
+    Scheduler::FrameDriver *m_frameDriver = nullptr;               // FrameDriver (由基础设施层创建)
 
     // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问
 
     bool m_isInitialized = false;
 };
 
-} // namespace Core
+} // namespace Boot
 } // namespace DX12Engine

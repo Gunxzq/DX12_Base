@@ -4,6 +4,8 @@
 #include "Game/Game.h"
 #include "framework.h"
 
+using namespace DX12Engine::Boot;
+
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine,
                       _In_ int nCmdShow) {
     UNREFERENCED_PARAMETER(hInstance);
@@ -11,13 +13,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
     UNREFERENCED_PARAMETER(lpCmdLine);
     UNREFERENCED_PARAMETER(nCmdShow);
 
-    DX12Engine::Core::Bootstrap bootstrap;
+    Bootstrap bootstrap;
 
     try {
         // 初始化模块
         bootstrap.Run();
 
-        DX12Engine::Core::GameContext *context = bootstrap.CreateContext();
+        GameContext *context = bootstrap.CreateContext();
 
         // Game 层直接使用 context->FrameDriver（由 Bootstrap 创建）
         auto game = std::make_unique<Game>(context);

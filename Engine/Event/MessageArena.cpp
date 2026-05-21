@@ -17,9 +17,7 @@
 
 #define ARENA_DBG(msg) ((void)0)
 
-namespace DX12Engine {
-namespace System {
-namespace Event {
+namespace DX12Engine::Event {
 
 thread_local MessageArena::TLSContext *g_currentTlsContext = nullptr;
 
@@ -211,6 +209,4 @@ void MessageArena::ResetFrame() {
     ARENA_DBG("Frame Reset. Ring buffer index continues from: " << m_globalIndexCounter.load());
 }
 
-} // namespace Event
-} // namespace System
-} // namespace DX12Engine
+} // namespace DX12Engine::Event

@@ -1,7 +1,6 @@
 #include "HighResolutionTimer.h"
 
-namespace DX12Engine {
-namespace Core {
+namespace DX12Engine::Boot {
 HighResolutionTimer::HighResolutionTimer() {
     QueryPerformanceFrequency((LARGE_INTEGER *)&m_frequency);
     Reset();
@@ -34,5 +33,4 @@ float HighResolutionTimer::TotalTime() const {
     return static_cast<float>(current - m_startTime) / m_frequency;
 }
 
-} // namespace Core
-} // namespace DX12Engine
+} // namespace DX12Engine::Boot

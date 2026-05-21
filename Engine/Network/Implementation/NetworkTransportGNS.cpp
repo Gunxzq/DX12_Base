@@ -12,8 +12,7 @@ std::map<HSteamListenSocket, DX12Engine::Network::NetworkTransportGNS *>
 // 实例互斥锁
 std::mutex DX12Engine::Network::NetworkTransportGNS::s_instanceMutex;
 
-namespace DX12Engine {
-namespace Network {
+namespace DX12Engine::Network {
 
 NetworkTransportGNS::NetworkTransportGNS() {}
 
@@ -584,5 +583,4 @@ PlayerId NetworkTransportGNS::GetPlayerId(HSteamNetConnection conn) const {
     return 0;
 }
 
-} // namespace Network
 } // namespace DX12Engine

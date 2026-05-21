@@ -8,7 +8,7 @@
 #include <nlohmann/json.hpp>
 
 namespace DX12Engine {
-namespace Core {
+namespace Boot {
 
 // ========================================================================
 // ConfigManager 类定义
@@ -219,5 +219,5 @@ private:
     std::unordered_map<std::string, std::vector<ConfigChangeCallback>> m_subscribers;
 };
 
-} // namespace Core
+} // namespace Boot
 } // namespace DX12Engine

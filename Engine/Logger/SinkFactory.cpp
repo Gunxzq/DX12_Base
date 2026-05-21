@@ -11,8 +11,9 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-namespace DX12Engine {
-namespace Core {
+using namespace DX12Engine::Boot;
+
+namespace DX12Engine::Logger {
 
 std::vector<std::shared_ptr<spdlog::sinks::sink>> SinkFactory::CreateSinks(const LogConfig &config) {
     std::vector<std::shared_ptr<spdlog::sinks::sink>> sinks;
@@ -134,5 +135,4 @@ std::shared_ptr<spdlog::sinks::sink> SinkFactory::CreateLogWindowSink(const LogC
     }
 }
 
-} // namespace Core
-} // namespace DX12Engine
+} // namespace DX12Engine::Logger

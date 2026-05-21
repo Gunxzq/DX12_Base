@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace DX12Engine {
-namespace System {
+
 namespace Event {
 
 // ========================================================================
@@ -61,5 +61,5 @@ constexpr EventPriority GetEventPriority(EventType type) {
 }
 
 } // namespace Event
-} // namespace System
+
 } // namespace DX12Engine

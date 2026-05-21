@@ -15,7 +15,7 @@
 
 class Game {
 public:
-    explicit Game(DX12Engine::Core::GameContext *context);
+    explicit Game(DX12Engine::Boot::GameContext *context);
     ~Game();
 
     Game(const Game &) = delete;
@@ -42,7 +42,7 @@ private:
     void HandleCameraInput();
 
     // ── 成员变量 ──
-    DX12Engine::Core::GameContext *m_context;
+    DX12Engine::Boot::GameContext *m_context;
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderer> m_opaqueRenderer;
 
     DX12Engine::ECS::Entity m_cubeEntity;

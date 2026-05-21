@@ -7,7 +7,7 @@
 #include <wrl/client.h> // For ComPtr if needed, though we use raw pointers for performance here
 
 namespace DX12Engine {
-namespace System {
+
 namespace Resource {
 
 /**
@@ -97,5 +97,5 @@ private:
 };
 
 } // namespace Resource
-} // namespace System
+
 } // namespace DX12Engine

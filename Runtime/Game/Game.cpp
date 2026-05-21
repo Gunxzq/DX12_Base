@@ -19,9 +19,10 @@ using namespace DX12Engine;
 using namespace DX12Engine::Scheduler;
 using namespace DX12Engine::ECS;
 using namespace DX12Engine::Renderer;
+using namespace DX12Engine::Input;
 using namespace DirectX;
 
-Game::Game(Core::GameContext *context) : m_context(context), m_isRunning(false), m_isInitialized(false) {}
+Game::Game(Boot::GameContext *context) : m_context(context), m_isRunning(false), m_isInitialized(false) {}
 
 Game::~Game() {
     if (m_isRunning || m_isInitialized) {
@@ -38,7 +39,7 @@ bool Game::Initialize() {
 
     m_context->Logging->Info("[Game] Initializing game...");
 
-    System::Resource::GpuResourceManager::GetInstance().Initialize();
+    Resource::GpuResourceManager::GetInstance().Initialize();
 
     InitializePassConstantBuffers();
 
@@ -113,11 +114,11 @@ void Game::Shutdown() {
     ShutdownGameModules();
 
     if (m_context && m_context->CommandManager) {
-        System::Resource::GpuResourceManager::GetInstance().Update(m_context->CommandManager->GetCompletedFenceValue());
+        Resource::GpuResourceManager::GetInstance().Update(m_context->CommandManager->GetCompletedFenceValue());
     }
 
     // 5. 最后关闭 GpuResourceManager
-    System::Resource::GpuResourceManager::GetInstance().Shutdown();
+    Resource::GpuResourceManager::GetInstance().Shutdown();
 
     m_isInitialized = false;
     m_context->Logging->Info("[Game] Game shutdown complete");
@@ -129,7 +130,7 @@ void Game::InitializeGameModules() {
     m_context->Logging->Info("[Game] Initializing game modules...");
 
     if (!m_context->InputSys) {
-        m_context->InputSys = &DX12Engine::Input::InputSystem::Get();
+        m_context->InputSys = &Input::InputSystem::Get();
 
         m_context->InputSys->Initialize("Config/default_input.json");
     }
@@ -165,25 +166,6 @@ void Game::InitializeGameModules() {
                 passData.CameraPos = camera.Position;
                 passData.TotalTime = static_cast<float>(m_context->MainTimer->GetGameTime());
 
-                static bool firstFrame = true;
-                if (firstFrame) {
-                    wchar_t buf[512];
-                    swprintf_s(buf,
-                               L"[DEBUG] Camera Proj Matrix:\n"
-                               L"  [0]: %.4f, %.4f, %.4f, %.4f\n"
-                               L"  [1]: %.4f, %.4f, %.4f, %.4f\n"
-                               L"  [2]: %.4f, %.4f, %.4f, %.4f\n"
-                               L"  [3]: %.4f, %.4f, %.4f, %.4f\n"
-                               L"  Aspect: %.4f\n",
-                               passData.Proj._11, passData.Proj._12, passData.Proj._13, passData.Proj._14,
-                               passData.Proj._21, passData.Proj._22, passData.Proj._23, passData.Proj._24,
-                               passData.Proj._31, passData.Proj._32, passData.Proj._33, passData.Proj._34,
-                               passData.Proj._41, passData.Proj._42, passData.Proj._43, passData.Proj._44,
-                               camera.AspectRatio);
-                    OutputDebugStringW(buf);
-                    firstFrame = false;
-                }
-
                 // 4. 上传到 GPU (Memcpy 到映射内存)
                 // 由于是在 Immediate 路径且主线程串行执行，这里没有竞态条件
                 memcpy(m_passCBResources[frameIndex].mappedData, &passData, sizeof(PassConstants));
@@ -215,14 +197,12 @@ void Game::InitializeGameModules() {
                                   },
                               .phase = TaskPhase::EarlyUpdate,
                               .threadType = ThreadType::Main,
-                              .interestedMessages = {System::Event::WindowResizeEvent::StaticTypeHash}});
+                              .interestedMessages = {Event::WindowResizeEvent::StaticTypeHash}});
 
     SystemRegistry::Register(
         {.name = "MainRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
-                 OutputDebugStringW(L"[DEBUG] MainRenderSystem executed.\n");
-
                  auto &cmdMgr = m_context->CommandManager;
                  uint64_t completedFence = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
 
@@ -265,7 +245,6 @@ void Game::InitializeGameModules() {
 
                  auto view = registry.view<MeshComponent, TransformComponent>();
 
-                 OutputDebugStringW(L"[DEBUG] Entities found: ");
                  for (const auto &[entity, mesh, transform] : view.each()) {
                      m_opaqueRenderer->DrawMesh(cmdList, mesh, transform, backBufferIndex);
                  }
@@ -322,9 +301,9 @@ void Game::InitializeGameModules() {
     SystemRegistry::Register({
         .name = "CameraControlSystem",
         .func = [this](Registry &registry, const MessageContext &ctx) { this->HandleCameraInput(); },
-        .phase = DX12Engine::Scheduler::TaskPhase::EarlyUpdate, // 在渲染前更新相机位置
-        .threadType = DX12Engine::Scheduler::ThreadType::Main,
-        .priority = DX12Engine::Scheduler::TaskPriority::High,
+        .phase = Scheduler::TaskPhase::EarlyUpdate, // 在渲染前更新相机位置
+        .threadType = Scheduler::ThreadType::Main,
+        .priority = Scheduler::TaskPriority::High,
         .dependencies = {},
         .interestedMessages = {},
         .alwaysRun = true // 常驻任务
@@ -387,7 +366,7 @@ void Game::CreateTestCube() {
     }
 
     // 3. 创建 GPU 资源
-    auto &gpuMgr = System::Resource::GpuResourceManager::GetInstance();
+    auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
     auto device = m_context->DeviceContext->GetDevice();
 
     // 创建顶点缓冲

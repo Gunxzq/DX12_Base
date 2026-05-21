@@ -3,7 +3,7 @@
 #include "Common/WindowsPlatform.h"
 
 namespace DX12Engine {
-namespace Core {
+namespace Boot {
 
 /**
  * @brief 纯粹的高精度计时器
@@ -47,5 +47,5 @@ private:
     __int64 m_prevTime;  // 上一帧的计数
 };
 
-} // namespace Core
+} // namespace Boot
 } // namespace DX12Engine

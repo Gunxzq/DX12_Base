@@ -3,9 +3,7 @@
 #include "Common/d3dx12.h"
 #include <cassert>
 
-namespace DX12Engine {
-namespace System {
-namespace Resource {
+namespace DX12Engine::Resource {
 
 GpuResourceManager &GpuResourceManager::GetInstance() {
     static GpuResourceManager instance;
@@ -186,6 +184,4 @@ size_t GpuResourceManager::GetTotalGpuMemoryUsage() const {
     return m_totalMemoryUsage;
 }
 
-} // namespace Resource
-} // namespace System
-} // namespace DX12Engine
+} // namespace DX12Engine::Resource

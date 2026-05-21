@@ -5,8 +5,7 @@
 #include <cmath>
 #include <iostream>
 
-namespace DX12Engine {
-namespace Input {
+namespace DX12Engine::Input {
 
 constexpr float LONG_PRESS_THRESHOLD = 0.5f; // 长按阈值 (秒)
 constexpr float DOUBLE_TAP_INTERVAL = 0.3f;  // 双击最大间隔 (秒)
@@ -234,5 +233,5 @@ void InputSystem::EvaluateActions(RawInputBuffer &rawBuffer, float currentTime) 
 }
 
 bool InputSystem::IsKeyboardKey(EKeyCode code) { return KeyCodeUtils::IsKeyboard(code); }
-} // namespace Input
+
 } // namespace DX12Engine

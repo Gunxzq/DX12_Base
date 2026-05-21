@@ -8,8 +8,10 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-namespace DX12Engine {
-namespace Core {
+using namespace DX12Engine::Logger;
+using namespace DX12Engine::Boot;
+
+namespace DX12Engine::Logger {
 
 // ========================================================================
 // Logger 单例实现
@@ -62,7 +64,7 @@ Logger::~Logger() {
     }
 }
 
-void Logger::Init_Internal(const LogConfig &config) {
+void Logger::Init_Internal(const Boot::LogConfig &config) {
 
     OutputDebugStringW(L"[Logger] Init_Internal called\n");
     // 如果已经初始化，先关闭旧的
@@ -170,5 +172,4 @@ void Logger::TestReset_Internal() {
 }
 #endif
 
-} // namespace Core
-} // namespace DX12Engine
+} // namespace DX12Engine::Logger

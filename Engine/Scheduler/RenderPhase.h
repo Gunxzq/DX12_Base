@@ -4,8 +4,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
-namespace DX12Engine::Scheduler {
+namespace DX12Engine {
 
+namespace Scheduler {
 enum class RenderPhase : uint8_t {
     // 帧开始屏障（引擎内部使用）
     BeginBarrier,
@@ -23,4 +24,6 @@ enum class RenderPhase : uint8_t {
     Count
 };
 
-} // namespace DX12Engine::Scheduler
+}
+
+} // namespace DX12Engine

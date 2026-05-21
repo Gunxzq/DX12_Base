@@ -4,7 +4,7 @@
 #include <nlohmann/json.hpp>
 
 namespace DX12Engine {
-namespace Core {
+namespace Boot {
 
 // ========================================================================
 // 日志级别定义
@@ -125,5 +125,5 @@ struct LogConfig {
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(LogConfig, GlobalLevel, FlushLevel, FormatPattern, Sinks)
 };
 
-} // namespace Core
+} // namespace Boot
 } // namespace DX12Engine

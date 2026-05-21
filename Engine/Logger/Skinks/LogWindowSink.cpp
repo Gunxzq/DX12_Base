@@ -1,7 +1,6 @@
 #include "LogWindowSink.h"
 
-namespace DX12Engine {
-namespace Core {
+namespace DX12Engine::Logger {
 
 template <typename Mutex>
 log_window_sink_impl<Mutex>::log_window_sink_impl(LogWindowCallback callback) : m_callback(std::move(callback)) {}
@@ -29,5 +28,4 @@ template <typename Mutex> void log_window_sink_impl<Mutex>::sink_it_(const spdlo
 template class log_window_sink_impl<std::mutex>;
 // template class log_window_sink_impl<spdlog::details::null_mutex>;
 
-} // namespace Core
-} // namespace DX12Engine
+} // namespace DX12Engine::Logger
