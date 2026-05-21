@@ -1,9 +1,10 @@
 #pragma once
 
-// 必须包含 Common.h 之前定义这些宏
-#define IMGUI_IMPL_DX12_USE_SR_DESCRIPTOR_INDEXING
-#define ImTextureID ID3D12Resource *
+// 1. 先包含 DX12 头文件，让 ID3D12Resource 类型可见
+#include <d3d12.h>
+#include <dxgi.h>
 
-#include "imgui.h"
-#include "imgui_impl_dx12.h"
-#include "imgui_impl_win32.h"
+// 4. 包含 ImGui 头文件
+#include "ThirdParty/imgui/backends/imgui_impl_dx12.h"
+#include "ThirdParty/imgui/backends/imgui_impl_win32.h"
+#include "ThirdParty/imgui/imgui.h"

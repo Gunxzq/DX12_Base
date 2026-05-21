@@ -34,7 +34,6 @@ find_package(spdlog CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(mimalloc REQUIRED)
 find_package(Jolt CONFIG REQUIRED)
-find_package(imgui CONFIG REQUIRED)
 find_package(Taskflow CONFIG REQUIRED)
 find_package(GameNetworkingSockets CONFIG REQUIRED)
 find_package(protobuf CONFIG REQUIRED)
@@ -55,6 +54,7 @@ add_library(DX12EngineCore STATIC ${ENGINE_SOURCES})
 target_include_directories(DX12EngineCore PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine
     ${CMAKE_CURRENT_SOURCE_DIR}/Content
+    ${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imgui
 )
 
 
@@ -63,6 +63,7 @@ target_compile_definitions(DX12EngineCore PRIVATE
     UNICODE
     _UNICODE
     MI_OVERRIDE=ON
+    IMGUI_DEFINE_MATH_OPERATORS   
 )
 
 
@@ -89,9 +90,7 @@ target_link_libraries(DX12EngineCore PUBLIC
     assimp::assimp
     mimalloc-static
     Jolt::Jolt
-    imgui::imgui
     Taskflow::Taskflow
-
     GameNetworkingSockets::static
     protobuf::libprotobuf
 )
@@ -227,3 +226,40 @@ if(BUILD_TESTS)
         gtest_discover_tests(DX12Tests)
     endif()
 endif()
+
+
+# ========================================================================
+# 7. 构建网络测试程序 (Standalone Executable)
+# ========================================================================
+# 注意：NetworkTest.cpp 有独立的 main 函数，必须单独编译为一个 exe
+
+add_executable(NetworkTest 
+    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/NetworkTest.cpp"
+)
+
+# 复用引擎核心的预编译头以加速编译
+target_precompile_headers(NetworkTest REUSE_FROM DX12EngineCore)
+
+# 链接引擎核心库 (其中已包含 GameNetworkingSockets 等依赖)
+target_link_libraries(NetworkTest PRIVATE 
+    DX12EngineCore
+)
+
+# 设置包含目录，确保能找到 "Network/..." 头文件
+target_include_directories(NetworkTest PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/Engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/Runtime
+)
+
+# 复制 Content/Config 等到 NetworkTest 的输出目录，确保运行时能找到资源（如果需要）
+add_custom_command(TARGET NetworkTest POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Content
+    $<TARGET_FILE_DIR:NetworkTest>/Content
+)
+
+add_custom_command(TARGET NetworkTest POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Config
+    $<TARGET_FILE_DIR:NetworkTest>/Config
+)
