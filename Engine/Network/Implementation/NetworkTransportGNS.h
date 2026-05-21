@@ -58,7 +58,8 @@ private:
     struct PendingEvent {
         PendingEventType type;
         HSteamNetConnection conn;
-        SteamNetConnectionInfo_t info;
+        HSteamListenSocket hListenSocket;      // 只存需要的字段
+        ESteamNetworkingConnectionState state; // 只存需要的字段
     };
 
     // ========== GNS 回调处理 ==========

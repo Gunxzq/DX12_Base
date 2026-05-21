@@ -290,33 +290,40 @@ void NetworkTransportGNS::OnSteamNetConnectionStatusChanged(SteamNetConnectionSt
 
     // 1. 优先从连接的用户数据中获取（适用于已建立的连接或主动发起的连接）
     intptr_t userData = info->m_info.m_nUserData;
-
-    // 检查 userData 是否有效（不是 -1 或 0）
-    if (userData != 0 && userData != (intptr_t)-1)
+    if (userData != 0 && userData != (intptr_t)-1) {
         instance = reinterpret_cast<NetworkTransportGNS *>(userData);
+        std::cout << "[GNS]   found from userData" << std::endl;
+    }
 
-    // 2. 如果是监听套接字上的事件（如新连接请求），从静态映射表中查找
-    else if (info->m_info.m_hListenSocket != k_HSteamListenSocket_Invalid) {
-        {
-            std::lock_guard lock(s_instanceMutex);
-            auto it = s_listenSocketInstances.find(info->m_info.m_hListenSocket);
-            if (it != s_listenSocketInstances.end())
-                instance = it->second;
+    // 2. 尝试从监听套接字映射表获取
+    if (!instance && info->m_info.m_hListenSocket != k_HSteamListenSocket_Invalid) {
+        std::lock_guard lock(s_instanceMutex);
+        auto it = s_listenSocketInstances.find(info->m_info.m_hListenSocket);
+        if (it != s_listenSocketInstances.end()) {
+            instance = it->second;
+            std::cout << "[GNS]   found from listenSocket map" << std::endl;
         }
     }
 
-    // 额外检查：如果 userData 是 -1，尝试从监听套接字查找
-    if (!instance && userData == (intptr_t)-1 && info->m_info.m_hListenSocket != k_HSteamListenSocket_Invalid) {
+    // 3. 尝试从 pendingConnections 反向查找（新增）
+    if (!instance) {
         std::lock_guard lock(s_instanceMutex);
-        auto it = s_listenSocketInstances.find(info->m_info.m_hListenSocket);
-        if (it != s_listenSocketInstances.end())
-            instance = it->second;
+        for (auto &pair : s_listenSocketInstances) {
+            auto &pending = pair.second->m_pendingConnections;
+            if (pending.find(info->m_hConn) != pending.end()) {
+                instance = pair.second;
+                std::cout << "[GNS]   found from pendingConnections" << std::endl;
+                break;
+            }
+        }
     }
 
-    if (instance)
+    if (instance) {
         instance->HandleConnectionStatusChanged(*info);
+    } else {
+        std::cout << "[GNS]   ERROR: no instance found!" << std::endl;
+    }
 }
-
 void NetworkTransportGNS::HandleConnectionStatusChanged(const SteamNetConnectionStatusChangedCallback_t &info) {
     HSteamNetConnection conn = info.m_hConn;
     ESteamNetworkingConnectionState state = info.m_info.m_eState;
@@ -342,7 +349,8 @@ void NetworkTransportGNS::HandleConnectionStatusChanged(const SteamNetConnection
         PendingEvent event;
         event.type = PendingEventType::Connecting;
         event.conn = conn;
-        event.info = info.m_info;
+        event.hListenSocket = info.m_info.m_hListenSocket;
+        event.state = state;
         m_pendingEvents.push_back(event);
         break;
     }
@@ -351,7 +359,8 @@ void NetworkTransportGNS::HandleConnectionStatusChanged(const SteamNetConnection
         PendingEvent event;
         event.type = PendingEventType::Connected;
         event.conn = conn;
-        event.info = info.m_info;
+        event.hListenSocket = info.m_info.m_hListenSocket;
+        event.state = state;
         m_pendingEvents.push_back(event);
         break;
     }
@@ -361,7 +370,8 @@ void NetworkTransportGNS::HandleConnectionStatusChanged(const SteamNetConnection
         PendingEvent event;
         event.type = PendingEventType::Disconnected;
         event.conn = conn;
-        event.info = info.m_info;
+        event.hListenSocket = info.m_info.m_hListenSocket;
+        event.state = state;
         m_pendingEvents.push_back(event);
         break;
     }
@@ -384,7 +394,6 @@ void NetworkTransportGNS::ProcessPendingEvents() {
         switch (event.type) {
         case PendingEventType::Connecting: {
             HSteamNetConnection conn = event.conn;
-            // 在主线程中调用 GNS API
             SteamNetworkingSockets()->AcceptConnection(conn);
             SteamNetworkingSockets()->SetConnectionPollGroup(conn, m_pollGroup);
             SteamNetworkingSockets()->SetConnectionUserData(conn, (intptr_t)this);
@@ -395,9 +404,16 @@ void NetworkTransportGNS::ProcessPendingEvents() {
             // 连接成功建立
             HSteamNetConnection conn = event.conn;
 
-            if (m_isServer || m_isP2P) {
-                // 服务器/P2P模式：等待客户端发送身份声明
+            if (m_isServer) {
+                // 服务器模式：等待客户端发送身份声明
                 m_pendingAuth[conn] = true;
+            } else if (m_isP2P) {
+                PlayerId peerId = static_cast<PlayerId>(conn);
+                m_playerToConnection[peerId] = conn;
+                m_connectionToPlayer[conn] = peerId;
+
+                if (m_onConnected)
+                    m_onConnected(peerId);
             } else {
                 // 客户端模式：直接使用连接句柄作为服务器的ID
                 PlayerId serverId = static_cast<PlayerId>(conn);
