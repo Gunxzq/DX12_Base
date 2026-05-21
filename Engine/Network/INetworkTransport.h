@@ -24,7 +24,7 @@ public:
 
     virtual void Stop() = 0;
 
-    virtual void Update(float deltaTime) = 0;
+    virtual void Update() = 0;
 
     // ========== 连接建立 ==========
 
