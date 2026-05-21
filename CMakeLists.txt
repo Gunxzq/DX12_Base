@@ -234,7 +234,7 @@ endif()
 # 注意：NetworkTest.cpp 有独立的 main 函数，必须单独编译为一个 exe
 
 add_executable(NetworkTest 
-    "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/NetworkTest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Tests/NetworkTest.cpp"
 )
 
 # 复用引擎核心的预编译头以加速编译
@@ -262,4 +262,19 @@ add_custom_command(TARGET NetworkTest POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_SOURCE_DIR}/Config
     $<TARGET_FILE_DIR:NetworkTest>/Config
+)
+
+
+# 添加网络测试程序
+add_executable(NetworkP2PTest 
+    "${CMAKE_CURRENT_SOURCE_DIR}/Tests/NetworkP2PTest.cpp"
+)
+
+target_link_libraries(NetworkP2PTest PRIVATE 
+    DX12EngineCore
+)
+
+target_include_directories(NetworkP2PTest PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/Engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/Runtime
 )
