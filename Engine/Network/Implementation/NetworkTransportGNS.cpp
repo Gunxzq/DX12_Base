@@ -188,10 +188,10 @@ bool NetworkTransportGNS::Connect(const std::string &address, uint16_t port) {
 
     // 验证用户数据是否设置成功
     intptr_t verify = SteamNetworkingSockets()->GetConnectionUserData(conn);
-    std::cout << "[GNS] Set userData for conn " << conn << ": expected=" << (intptr_t)this << ", actual=" << verify
-              << std::endl;
+    // std::cout << "[GNS] Set userData for conn " << conn << ": expected=" << (intptr_t)this << ", actual=" << verify
+    //           << std::endl;
     if (verify != (intptr_t)this) {
-        std::cerr << "[GNS] WARNING: SetConnectionUserData failed!" << std::endl;
+        // std::cerr << "[GNS] WARNING: SetConnectionUserData failed!" << std::endl;
     }
 
     SteamNetworkingSockets()->SetConnectionPollGroup(conn, m_pollGroup);
@@ -292,7 +292,6 @@ void NetworkTransportGNS::OnSteamNetConnectionStatusChanged(SteamNetConnectionSt
     intptr_t userData = info->m_info.m_nUserData;
     if (userData != 0 && userData != (intptr_t)-1) {
         instance = reinterpret_cast<NetworkTransportGNS *>(userData);
-        std::cout << "[GNS]   found from userData" << std::endl;
     }
 
     // 2. 尝试从监听套接字映射表获取
@@ -301,7 +300,6 @@ void NetworkTransportGNS::OnSteamNetConnectionStatusChanged(SteamNetConnectionSt
         auto it = s_listenSocketInstances.find(info->m_info.m_hListenSocket);
         if (it != s_listenSocketInstances.end()) {
             instance = it->second;
-            std::cout << "[GNS]   found from listenSocket map" << std::endl;
         }
     }
 
@@ -312,7 +310,7 @@ void NetworkTransportGNS::OnSteamNetConnectionStatusChanged(SteamNetConnectionSt
             auto &pending = pair.second->m_pendingConnections;
             if (pending.find(info->m_hConn) != pending.end()) {
                 instance = pair.second;
-                std::cout << "[GNS]   found from pendingConnections" << std::endl;
+
                 break;
             }
         }
@@ -321,7 +319,7 @@ void NetworkTransportGNS::OnSteamNetConnectionStatusChanged(SteamNetConnectionSt
     if (instance) {
         instance->HandleConnectionStatusChanged(*info);
     } else {
-        std::cout << "[GNS]   ERROR: no instance found!" << std::endl;
+        // std::cout << "[GNS]   ERROR: no instance found!" << std::endl;
     }
 }
 void NetworkTransportGNS::HandleConnectionStatusChanged(const SteamNetConnectionStatusChangedCallback_t &info) {

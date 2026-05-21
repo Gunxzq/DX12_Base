@@ -285,7 +285,6 @@ void P2PTopology::TryAdvanceFrame() {
  * @date 2026-05-21
  */
 void P2PTopology::AddPlayer(PlayerId playerId) {
-    std::cout << "[P2PTopology] AddPlayer called for " << playerId << std::endl; // 添加调试
 
     // 检查是否已存在
     if (m_playerInputQueues.find(playerId) != m_playerInputQueues.end())
