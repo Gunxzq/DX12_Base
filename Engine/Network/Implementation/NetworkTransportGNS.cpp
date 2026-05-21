@@ -406,12 +406,16 @@ void NetworkTransportGNS::ProcessPendingEvents() {
                 // 服务器模式：等待客户端发送身份声明
                 m_pendingAuth[conn] = true;
             } else if (m_isP2P) {
-                PlayerId peerId = static_cast<PlayerId>(conn);
-                m_playerToConnection[peerId] = conn;
-                m_connectionToPlayer[conn] = peerId;
+                // P2P 模式：不立即分配 ID，而是等待对方发送 ID
+                // 使用 m_pendingAuth 等待 ID 交换
+                m_pendingAuth[conn] = true;
 
-                if (m_onConnected)
-                    m_onConnected(peerId);
+                // 主动发送自己的 ID
+                if (m_localPlayerId != 0) {
+                    uint8_t buffer[8];
+                    memcpy(buffer, &m_localPlayerId, 8);
+                    SendToConnection(conn, buffer, 8, DeliveryMethod::Reliable);
+                }
             } else {
                 // 客户端模式：直接使用连接句柄作为服务器的ID
                 PlayerId serverId = static_cast<PlayerId>(conn);
