@@ -333,7 +333,7 @@ void P2PTopology::RemovePlayer(PlayerId playerId) {
 bool P2PTopology::HasAllInputsForFrame(uint32_t frameNum) const {
     // 如果没有其他玩家，直接返回 true
     if (m_playerList.empty())
-        return true;
+        return false;
 
     // 检查每个玩家是否有该帧的输入（O(1) 查找）
     for (const auto &pair : m_playerInputQueues) {
