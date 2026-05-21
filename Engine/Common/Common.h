@@ -9,3 +9,5 @@
 
 // ---------- 平台目标版本 ----------
 #include <SDKDDKVer.h>
+
+#include "ImGuiWrapper.h"
