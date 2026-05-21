@@ -1,7 +1,6 @@
-// Network/INetworkTransport.h
 #pragma once
-#include "NetworkConfig.h"
-#include "NetworkTypes.h"
+#include "Struct/NetworkConfig.h"
+#include "Struct/NetworkTypes.h"
 #include <functional>
 #include <string>
 #include <vector>
