@@ -24,23 +24,25 @@ public:
     // ========== INetworkTransport 接口实现 ==========
     bool Start(const NetworkConfig &config) override;
     void Stop() override;
-    void Update(float deltaTime) override;
+    void Update() override;
 
     bool Connect(const std::string &address, uint16_t port) override;
     bool Send(PlayerId targetPlayerId, const uint8_t *data, size_t size, DeliveryMethod method) override;
     bool Broadcast(const uint8_t *data, size_t size, DeliveryMethod method) override;
 
-    void SetOnConnected(OnConnectedCallback callback) override;
-    void SetOnConnectFailed(OnConnectFailedCallback callback) override;
-    void SetOnDisconnected(OnDisconnectedCallback callback) override;
-    void SetOnDataReceived(OnDataReceivedCallback callback) override;
-    void SetOnConnectionRequest(OnConnectionRequestCallback callback) override;
-    void SetOnError(OnErrorCallback callback) override;
+    void SetOnConnected(OnConnectedCallback callback) override { m_onConnected = std::move(callback); };
+    void SetOnConnectFailed(OnConnectFailedCallback callback) override { m_onConnectFailed = std::move(callback); };
+    void SetOnDisconnected(OnDisconnectedCallback callback) override { m_onDisconnected = std::move(callback); };
+    void SetOnDataReceived(OnDataReceivedCallback callback) override { m_onDataReceived = std::move(callback); };
+    void SetOnConnectionRequest(OnConnectionRequestCallback callback) override {
+        m_onConnectionRequest = std::move(callback);
+    };
+    void SetOnError(OnErrorCallback callback) override { m_onError = std::move(callback); };
 
-    PlayerId GetLocalPlayerId() const override;
+    PlayerId GetLocalPlayerId() const override { return m_localPlayerId; };
     ConnectionState GetConnectionState(PlayerId playerId) const override;
     std::vector<PlayerId> GetConnectedPlayers() const override;
-    const NetworkConfig &GetConfig() const override;
+    const NetworkConfig &GetConfig() const override { return m_config; };
 
     static std::map<HSteamListenSocket, NetworkTransportGNS *> s_listenSocketInstances;
     static std::mutex s_instanceMutex;
@@ -66,10 +68,8 @@ private:
 
     // ========== 内部方法 ==========
     void PollIncomingMessages();
-    void PollConnectionStateChanges();
     bool SendToConnection(HSteamNetConnection conn, const uint8_t *data, size_t size, DeliveryMethod method);
 
-    PlayerId AssignNewPlayerId(HSteamNetConnection conn);
     HSteamNetConnection GetConnection(PlayerId playerId) const;
     PlayerId GetPlayerId(HSteamNetConnection conn) const;
 
@@ -84,18 +84,20 @@ private:
     HSteamNetPollGroup m_pollGroup = k_HSteamNetPollGroup_Invalid;
 
     // ========== 连接映射 ==========
-    // 统一使用映射表管理所有远程连接 (P2P Peers, Server for Client)
+    // 双向映射
     std::unordered_map<PlayerId, HSteamNetConnection> m_playerToConnection;
     std::unordered_map<HSteamNetConnection, PlayerId> m_connectionToPlayer;
 
     // 用于跟踪正在尝试建立连接的句柄，以区分连接失败和断开连接
     std::unordered_map<HSteamNetConnection, std::pair<std::string, uint16_t>> m_pendingConnections;
 
+    // 用于跟踪等待身份验证的连接（服务器模式下使用）
+    std::unordered_map<HSteamNetConnection, bool> m_pendingAuth;
+
     // ========== 玩家 ID 管理 ==========
     PlayerId m_localPlayerId = 0;
-    PlayerId m_nextPlayerId = 1;
 
-    // 用于 Client 模式：记录服务器对应的 PlayerId (通常固定为 1 或由回调分配)
+    // 用于 Client 模式：记录服务器对应的 PlayerId (使用连接句柄)
     PlayerId m_serverPlayerId = 0;
 
     // ========== 回调 ==========

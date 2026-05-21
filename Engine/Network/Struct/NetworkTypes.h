@@ -5,7 +5,7 @@ namespace DX12Engine {
 namespace Network {
 
 // ========== 基础类型（语义化别名）==========
-using PlayerId = uint32_t;
+using PlayerId = uint64_t;
 using SequenceNumber = uint32_t;
 using FrameNumber = uint32_t;
 using TimestampMs = uint32_t;
