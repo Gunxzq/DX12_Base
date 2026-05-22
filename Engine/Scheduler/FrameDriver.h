@@ -123,6 +123,8 @@ public:
     /// 设置目标帧率（0 = 不限制）
     void SetTargetFPS(uint32_t fps) { m_targetFPS = fps; }
 
+    uint32_t GetTargetFPS() const { return m_targetFPS; }
+
     /// 设置 D3D12 设备上下文（由 Bootstrap 在初始化时注入）
     void SetDeviceContext(Renderer::D3D12DeviceContext *deviceContext) { m_deviceContext = deviceContext; }
 

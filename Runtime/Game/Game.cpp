@@ -16,6 +16,7 @@
 #include <DirectXMath.h>
 
 using namespace DX12Engine;
+using namespace DX12Engine::DebugUI;
 using namespace DX12Engine::Scheduler;
 using namespace DX12Engine::ECS;
 using namespace DX12Engine::Renderer;
@@ -50,13 +51,42 @@ bool Game::Initialize() {
     m_opaqueRenderer->SetDeviceContext(m_context->DeviceContext);
     m_opaqueRenderer->Initialize();
 
+    DebugUIManager::Get().RegisterPanel(
+        {.name = "Performance", .group = "Performance", .drawFunc = [this](float dt, uint32_t frame) {
+             static int targetFPS = 60;
+             if (ImGui::SliderInt("Target FPS", &targetFPS, 0, 240)) {
+                 m_context->FrameDriver->SetTargetFPS(targetFPS);
+             }
+
+             static bool fullscreen = false;
+             if (ImGui::Checkbox("Fullscreen", &fullscreen)) {
+                 auto *dispatcher = Event::MessageDispatcher::GetInstance();
+                 if (dispatcher) {
+                     dispatcher->PostEvent(Event::FullscreenToggleEvent::StaticTypeHash,
+                                           0,                    // senderId
+                                           fullscreen ? 1u : 0u, // payload: 1 = 全屏, 0 = 窗口
+                                           Event::EventPriority::P1_High);
+                 }
+             }
+
+             // 显示各种时间值
+             ImGui::Text("Game Delta Time: %.3f ms", dt * 1000.0f);
+             ImGui::Text("Raw Delta Time: %.3f ms", m_context->MainTimer->GetRawDeltaTime() * 1000.0f);
+
+             // 计算理论 FPS
+             float rawFPS = 1.0f / m_context->MainTimer->GetRawDeltaTime();
+             ImGui::Text("Raw FPS (unlimited): %.1f", rawFPS);
+
+             // 显示限制来源
+             ImGui::Text("FrameDriver Target: %d FPS", m_context->FrameDriver->GetTargetFPS());
+
+             // 如果原始帧率 > 60 但游戏帧率 = 60，说明是 DWM 限制
+             if (rawFPS > 62.0f && dt * 1000.0f > 15.5f) {
+                 ImGui::TextColored(ImVec4(1, 1, 0, 1), "⚠️ Limited by DWM (windowed mode)");
+             }
+         }});
     // 创建测试立方体
     CreateTestCube();
-
-    if (m_context->FrameDriver) {
-        m_context->FrameDriver->SetTargetFPS(60); // Limit to 60 FPS
-        m_context->Logging->Info("[Game] Target FPS set to 60");
-    }
 
     m_isInitialized = true;
     m_context->Logging->Info("[Game] Game initialized successfully");
@@ -306,6 +336,24 @@ void Game::InitializeGameModules() {
         .dependencies = {},
         .interestedMessages = {},
         .alwaysRun = true // 常驻任务
+    });
+
+    // 在 WindowResizeSystem 注册代码之后添加
+
+    SystemRegistry::Register({
+        .name = "FullscreenSystem",
+        .func =
+            [this](Registry &, const MessageContext &ctx) {
+                bool bRequestFullscreen = ctx.GetLow32() != 0;
+                // 调用 Window 的全屏切换方法（你已经实现好的）
+                m_context->Window->SetFullscreen(bRequestFullscreen);
+                // 切换后，窗口大小改变会触发 WM_SIZE → PostWindowResizeEvent
+                // 从而自动调用 WindowResizeSystem 重建交换链和相机
+            },
+        .phase = TaskPhase::EarlyUpdate, // 安全时机
+        .threadType = ThreadType::Main,
+        .priority = TaskPriority::High,
+        .interestedMessages = {Event::FullscreenToggleEvent::StaticTypeHash},
     });
 
     // 验证注册

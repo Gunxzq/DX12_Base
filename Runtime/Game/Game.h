@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Boot/GameContext.h"
+#include "DebugUI/DebugUIManager.h"
 #include "ECS/Core/Entity.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/RHI/PassConstants.h"
