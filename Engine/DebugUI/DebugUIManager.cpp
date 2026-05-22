@@ -61,7 +61,9 @@ void DebugUIManager::Initialize(HWND hwnd) {
     // 初始化 ImGui 配置
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // 键盘导航
-    io.IniFilename = "imgui.ini";                         // 保存布局
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    io.IniFilename = "imgui.ini"; // 保存布局
 
     // 应用默认样式
     ApplyDarkTheme();
@@ -389,6 +391,15 @@ void DebugUIManager::RenderAndSubmit(ID3D12GraphicsCommandList *commandList, flo
 
     // 渲染
     ImGui::Render();
+    
+
+
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+    }
+    
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
 }
 
