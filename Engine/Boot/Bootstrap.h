@@ -8,7 +8,6 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 
 namespace DX12Engine {
-void RegisterTestPanel();
 
 namespace Scheduler {
 class FrameDriver;

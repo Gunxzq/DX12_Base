@@ -32,31 +32,6 @@ void EarlyLog(const std::string &msg) {
 
 namespace DX12Engine {
 
-void RegisterTestPanel() {
-    DebugUI::PanelConfig config;
-    config.name = "Debug Info";
-    config.group = "Debug";
-    config.drawFunc = [](float deltaTime, uint32_t frameNumber) {
-        ImGui::Text("FPS: %.1f", 1.0f / deltaTime);
-        ImGui::Text("Delta Time: %.3f ms", deltaTime * 1000.0f);
-        ImGui::Text("Frame: %u", frameNumber);
-
-        if (ImGui::CollapsingHeader("Performance")) {
-            ImGui::Text("CPU Time: %.2f ms", deltaTime * 1000.0f);
-            // 可以添加更多性能指标
-        }
-
-        if (ImGui::Button("ImGui Demo")) {
-            // 打开 ImGui Demo 窗口
-            auto &ui = DebugUI::DebugUIManager::Get();
-            // 需要添加一个方法来切换 Demo 窗口
-        }
-    };
-    config.visibleByDefault = true;
-
-    DebugUI::DebugUIManager::Get().RegisterPanel(config);
-}
-
 namespace Boot {
 
 Bootstrap::~Bootstrap() { Shutdown(); }
@@ -325,8 +300,6 @@ GameContext *Bootstrap::CreateContext() {
     auto &debugUI = DebugUI::DebugUIManager::Get();
     debugUI.SetGameContext(m_context.get());
     debugUI.AutoRegisterToFrameDriver(m_context.get());
-
-    RegisterTestPanel();
 
     return m_context.get();
 }
