@@ -39,6 +39,8 @@ public:
 
     // 显示窗口
     void Show();
+    void SetFullscreen(bool fullscreen);
+    bool IsFullscreen() const { return m_IsFullscreen; }
 
 private:
     // 静态 WndProc，用于接收 Windows 消息
@@ -63,6 +65,9 @@ private:
     uint32_t m_Width = 0;
     uint32_t m_Height = 0;
     bool m_ShouldClose = false;
+
+    bool m_IsFullscreen = false;
+    RECT m_WindowedRect = {0}; // 保存窗口模式时的位置和大小
 
     bool m_cursorCaptured = false;
 

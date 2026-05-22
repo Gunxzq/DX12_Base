@@ -1,8 +1,14 @@
 #include "Window.h"
 #include "Boot/WindowConfig.h"
 #include "Event/MessageDispatcher.h"
+#include "ThirdParty/imgui/backends/imgui_impl_dx12.h"
+#include "ThirdParty/imgui/backends/imgui_impl_win32.h"
+#include "ThirdParty/imgui/imgui.h"
 #include <Windows.h>
 #include <Windowsx.h>
+
+// 外部声明
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 using namespace DX12Engine::Boot;
 using namespace DX12Engine::Event;
@@ -44,16 +50,29 @@ bool Window::Create() {
 
     // 指定样式
     DWORD style = WS_OVERLAPPEDWINDOW;
-    if (!m_IsResizable) {
-        style &= ~WS_THICKFRAME;
-        style &= ~WS_MAXIMIZEBOX;
+    if (m_IsFullscreen) {
+        // 无边框窗口模式
+        style = WS_POPUP;
+        // 获取显示器实际的宽高
+        m_InitWidth = GetSystemMetrics(SM_CXSCREEN);
+        m_InitHeight = GetSystemMetrics(SM_CYSCREEN);
+    } else {
+        // 普通窗口模式：可调整大小
+        style = WS_OVERLAPPEDWINDOW;
+        if (!m_IsResizable) {
+            style &= ~WS_THICKFRAME;
+            style &= ~WS_MAXIMIZEBOX;
+        }
     }
 
     RECT rect = {0, 0, static_cast<LONG>(m_InitWidth), static_cast<LONG>(m_InitHeight)};
     AdjustWindowRect(&rect, style, FALSE);
 
-    m_hWnd = CreateWindowExW(0, L"DX12WindowClass", m_Title.c_str(), style, CW_USEDEFAULT, CW_USEDEFAULT,
-                             rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, m_hInstance, this);
+    m_hWnd = CreateWindowExW(m_IsFullscreen ? WS_EX_TOPMOST : 0, // 全屏时可置于顶层
+                             L"DX12WindowClass", m_Title.c_str(), style,
+                             m_IsFullscreen ? 0 : CW_USEDEFAULT, // 全屏时左上角在 (0,0)
+                             m_IsFullscreen ? 0 : CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top,
+                             nullptr, nullptr, m_hInstance, this);
     if (!m_hWnd)
         return false;
 
@@ -150,6 +169,10 @@ void Window::SetCursorCapture(bool capture) {
 }
 
 LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) {
+        return 1; // ImGui 已处理该消息
+    }
 
     auto &buffer = m_rawInputBuffer;
 
@@ -291,6 +314,36 @@ void Window::PostWindowResizeEvent(uint32_t width, uint32_t height) {
     }
 
     dispatcher->PostEvent(Event::WindowResizeEvent::StaticTypeHash, 0, width, height, Event::EventPriority::P1_High);
+}
+void Window::SetFullscreen(bool fullscreen) {
+    if (m_IsFullscreen == fullscreen)
+        return;
+
+    m_IsFullscreen = fullscreen;
+
+    if (fullscreen) {
+        // 保存当前窗口的位置和大小，以便恢复
+        GetWindowRect(m_hWnd, &m_WindowedRect);
+
+        // 获取屏幕大小
+        int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+        int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+
+        // 移除边框样式
+        SetWindowLong(m_hWnd, GWL_STYLE, WS_POPUP);
+        // 设置窗口位置和大小覆盖整个屏幕
+        SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, screenWidth, screenHeight, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    } else {
+        // 恢复边框样式
+        SetWindowLong(m_hWnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
+        // 恢复到窗口模式时的位置和大小
+        SetWindowPos(m_hWnd, HWND_NOTOPMOST, m_WindowedRect.left, m_WindowedRect.top,
+                     m_WindowedRect.right - m_WindowedRect.left, m_WindowedRect.bottom - m_WindowedRect.top,
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+
+    // 通知渲染系统：窗口大小已改变，需要重建交换链
+    PostWindowResizeEvent(m_Width, m_Height);
 }
 
 } // namespace DX12Engine::Platform
