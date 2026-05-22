@@ -208,6 +208,28 @@ struct NetworkPacketEvent {
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
 
+struct FullscreenToggleEvent {
+    EVENT_HEADER_FIELDS
+
+    // 使用自动生成的枚举值作为 Hash
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::FullscreenToggleEvent);
+
+    bool bFullscreen; // true = 切换至全屏, false = 切换至窗口
+    uint32_t Padding; // 对齐填充
+
+    /**
+     * @brief 构造函数
+     * @param bFull 是否切换到全屏模式
+     */
+    FullscreenToggleEvent(bool bFull) : INIT_EVENT_HEADER(EventPriority::P1_High), bFullscreen(bFull), Padding(0) {}
+
+    // 禁用默认构造
+    FullscreenToggleEvent() = delete;
+
+    // 提供实例方法获取类型哈希
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
 } // namespace Event
 
 } // namespace DX12Engine
