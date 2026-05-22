@@ -189,26 +189,6 @@ public:
                             ctx.EnabledActions.push_back(HashString(actName.get<std::string>()));
                         }
                     }
-
-                    // 2.2 局部覆盖 (Overrides)
-                    if (ctxData.contains("overrides") && ctxData["overrides"].is_object()) {
-                        for (auto &[overActionName, overData] : ctxData["overrides"].items()) {
-                            ActionId overId = HashString(overActionName);
-                            ActionBinding overBinding;
-                            overBinding.Id = overId;
-
-                            if (overData.is_array()) {
-                                for (const auto &item : overData) {
-                                    auto sources = ExtractSourcesFromComplexItem(item);
-                                    overBinding.Sources.insert(overBinding.Sources.end(), sources.begin(),
-                                                               sources.end());
-                                }
-                            }
-
-                            ctx.Overrides[overId] = overBinding;
-                        }
-                    }
-
                     outContexts[ctxName] = ctx;
                 }
             }

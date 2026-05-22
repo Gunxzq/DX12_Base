@@ -145,9 +145,6 @@ struct InputContextConfig {
     std::string Name;
     int Priority = 0;
     std::vector<ActionId> EnabledActions;
-
-    // 局部覆盖：Key 是 ActionId, Value 是该动作在此上下文中的新绑定
-    std::unordered_map<ActionId, ActionBinding> Overrides;
 };
 
 } // namespace Input
