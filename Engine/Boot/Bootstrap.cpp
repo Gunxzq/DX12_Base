@@ -310,7 +310,6 @@ GameContext *Bootstrap::CreateContext() {
     m_context->Registry = m_registry.get();
     m_context->FrameDriver = m_frameDriver;
     m_context->DeviceContext = m_deviceContext.get();
-    m_context->CommandManager = &m_deviceContext->GetCommandManager();
 
     m_context->CameraMgr = &DX12Engine::Renderer::CameraManager::GetInstance();
     uint32_t width = m_window ? m_window->GetWidth() : 1280;

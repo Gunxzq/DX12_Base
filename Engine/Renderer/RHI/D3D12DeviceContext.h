@@ -97,12 +97,11 @@ public:
     void FlushCommandQueue();
 
     // ── 描述符访问 ──
-
-    ID3D12Device *GetDevice() const { return md3dDevice; }
     ID3D12CommandQueue *GetCommandQueue() const;
 
-    UINT GetCurrentBackBufferIndex() const { return m_swapChainManager.GetCurrentBackBufferIndex(); }
-    ID3D12Resource *GetCurrentBackBuffer() const { return m_swapChainManager.GetCurrentBackBuffer(); }
+    // Get子模块
+    SwapChainManager &GetSwapChainManager() { return m_swapChainManager; }
+    ID3D12Device *GetDevice() const { return md3dDevice; }
 
     D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentBackBufferView() const {
         return m_swapChainManager.GetCurrentBackBufferView();
@@ -129,13 +128,6 @@ public:
     bool Is4xMsaaEnabled() const { return m4xMsaaState; }
     UINT Get4xMsaaQuality() const { return m4xMsaaQuality; }
 
-    // ── 命令管理器 ──
-
-    /**
-     * @brief 获取命令管理器
-     * @return CommandManager& 命令管理器引用
-     * @note 用于工作线程提交命令，主线程控制帧同步
-     */
     CommandManager &GetCommandManager() { return m_commandManager; }
     const CommandManager &GetCommandManager() const { return m_commandManager; }
 

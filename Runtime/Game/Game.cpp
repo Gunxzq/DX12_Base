@@ -107,14 +107,14 @@ void Game::Shutdown() {
 
     m_isRunning = false;
 
-    if (m_context && m_context->CommandManager) {
-        m_context->CommandManager->FlushAllQueues();
+    if (m_context) {
+        m_context->FlushAllQueues();
     }
 
     ShutdownGameModules();
 
-    if (m_context && m_context->CommandManager) {
-        Resource::GpuResourceManager::GetInstance().Update(m_context->CommandManager->GetCompletedFenceValue());
+    if (m_context) {
+        Resource::GpuResourceManager::GetInstance().Update(m_context->GetFenceValue());
     }
 
     // 5. 最后关闭 GpuResourceManager
@@ -153,7 +153,7 @@ void Game::InitializeGameModules() {
                 m_context->CameraMgr->UpdateMainCamera();
 
                 // 2. 获取当前帧索引
-                uint32_t frameIndex = m_context->DeviceContext->GetCurrentBackBufferIndex();
+                uint32_t frameIndex = m_context->GetBackBufferIndex();
 
                 // 3. 构建 PassConstants
                 PassConstants passData;
@@ -203,16 +203,15 @@ void Game::InitializeGameModules() {
         {.name = "MainRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
-                 auto &cmdMgr = m_context->CommandManager;
-                 uint64_t completedFence = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
 
-                 auto allocatorHandle = cmdMgr->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
-                 auto allocator = cmdMgr->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
-                 auto cmdListHandle = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-                 auto cmdList = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
-                 auto backBufferIndex = m_context->DeviceContext->GetCurrentBackBufferIndex();
-                 auto backBuffer = m_context->DeviceContext->GetCurrentBackBuffer();
+                 auto backBufferIndex = m_context->GetBackBufferIndex();
+                 auto backBuffer = m_context->GetBackBuffer();
 
                  // 1. 屏障：Present -> RenderTarget
                  D3D12_RESOURCE_BARRIER beginBarrier = {};
@@ -264,9 +263,9 @@ void Game::InitializeGameModules() {
 
                  m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdListHandle);
 
-                 uint64_t sequence = cmdMgr->GetNextSequence();
+                 uint64_t sequence = m_context->GetNextSequence();
                  // 释放分配器（传入 sequence，不是立即释放）
-                 cmdMgr->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Main,
@@ -464,7 +463,7 @@ void Game::InitializePassConstantBuffers() {
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS Game::GetCurrentPassCBAddress() const {
-    uint32_t frameIndex = m_context->DeviceContext->GetCurrentBackBufferIndex();
+    uint32_t frameIndex = m_context->GetBackBufferIndex();
     return m_passCBResources[frameIndex].resource->GetGPUVirtualAddress();
 }
 

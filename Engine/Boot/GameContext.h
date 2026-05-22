@@ -3,15 +3,19 @@
 #include "GameTimer.h"
 #include "Logger/Logger.h"
 
+// 前向声明 Renderer 命名空间中的类型
+namespace DX12Engine::Renderer {
+class D3D12DeviceContext;
+class CameraManager;
+template <D3D12_COMMAND_LIST_TYPE Type> class CommandAllocatorPool;
+template <D3D12_COMMAND_LIST_TYPE Type> class CommandListPool;
+class CommandList;
+} // namespace DX12Engine::Renderer
+
 namespace DX12Engine {
 namespace Input {
 class InputSystem;
 }
-namespace Renderer {
-class D3D12DeviceContext;
-class CommandManager;
-class CameraManager;
-} // namespace Renderer
 
 namespace Event {
 class MessageDispatcher;
@@ -44,7 +48,6 @@ class GameTimer;
 
 // ========================================================================
 // GameContext - 依赖注入容器
-// 持有所有基础设施子系统的指针，通过依赖注入提供给各系统使用
 // ========================================================================
 
 class GameContext {
@@ -52,47 +55,65 @@ public:
     GameContext() = default;
     ~GameContext() = default;
 
-    // 禁止拷贝和移动（Context 应该通过指针传递）
+    // 禁止拷贝和移动
     GameContext(const GameContext &) = delete;
     GameContext &operator=(const GameContext &) = delete;
     GameContext(GameContext &&) = delete;
     GameContext &operator=(GameContext &&) = delete;
 
     // ── 基础设施子系统指针 ──
-
-    Platform::Window *Window = nullptr;             // 窗口管理
-    ConfigManager *Config = nullptr;                // 配置管理
-    Logger::Logger *Logging = nullptr;              // 日志系统
-    GameTimer *MainTimer = nullptr;                 // 主计时器
-    Event::MessageDispatcher *Dispatcher = nullptr; // 消息分发器（单例）
+    Platform::Window *Window = nullptr;
+    ConfigManager *Config = nullptr;
+    Logger::Logger *Logging = nullptr;
+    GameTimer *MainTimer = nullptr;
+    Event::MessageDispatcher *Dispatcher = nullptr;
 
     // ── 调度与数据层指针 ──
-
-    Scheduler::FrameDriver *FrameDriver = nullptr; // 帧驱动器
-    ECS::Registry *Registry = nullptr;             // ECS 注册表
+    Scheduler::FrameDriver *FrameDriver = nullptr;
+    ECS::Registry *Registry = nullptr;
 
     // ── 渲染子系统指针 ──
+    Renderer::D3D12DeviceContext *DeviceContext = nullptr;
+    Renderer::CameraManager *CameraMgr = nullptr;
 
-    Renderer::D3D12DeviceContext *DeviceContext = nullptr; // D3D12 设备上下文
-    Renderer::CommandManager *CommandManager = nullptr;    // 命令管理器（由 DeviceContext 管理）
-    Renderer::CameraManager *CameraMgr = nullptr;          // 相机管理器
-
-    Input::InputSystem *InputSys = nullptr; // 输入系统
+    Input::InputSystem *InputSys = nullptr;
 
     // ── 便捷访问方法 ──
-
-    /**
-     * @brief 检查 Context 是否有效（所有必需字段都已填充）
-     */
     bool IsValid() const;
-
-    /**
-     * @brief 获取验证失败的第一个原因（用于调试）
-     */
     const char *GetInvalidReason() const;
 
     mutable const char *m_invalidReason = nullptr;
+
+    UINT GetBackBufferIndex() const;
+    ID3D12Resource *GetBackBuffer() const;
+    uint64_t GetFenceValue(D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+    void FlushAllQueues();
+
+    // ── 命令系统便捷方法（单一声明）──
+    template <D3D12_COMMAND_LIST_TYPE Type>
+    typename Renderer::CommandAllocatorPool<Type>::Handle GetAllocatorHandle(uint64_t currentCompleted);
+
+    template <D3D12_COMMAND_LIST_TYPE Type>
+    typename ID3D12CommandAllocator *GetAllocator(const typename Renderer::CommandAllocatorPool<Type>::Handle &handle);
+
+    template <D3D12_COMMAND_LIST_TYPE Type>
+    typename Renderer::CommandListPool<Type>::Handle AcquireCommandListHandle(ID3D12CommandAllocator *allocator);
+
+    template <D3D12_COMMAND_LIST_TYPE Type>
+    Renderer::CommandList GetCommandList(const typename Renderer::CommandListPool<Type>::Handle &handle);
+
+    template <D3D12_COMMAND_LIST_TYPE Type>
+    void ReleaseCommandList(const typename Renderer::CommandListPool<Type>::Handle &handle);
+
+    template <D3D12_COMMAND_LIST_TYPE Type>
+    void ReleaseAllocator(const typename Renderer::CommandAllocatorPool<Type>::Handle &handle, uint64_t fenceValue);
+
+    uint64_t GetNextSequence();
 };
 
 } // namespace Boot
 } // namespace DX12Engine
+
+// 注意：模板实现已经在 GameContext.cpp 中通过显式实例化完成
+// 不需要 .inl 文件，因为所有使用的类型都已经显式实例化了

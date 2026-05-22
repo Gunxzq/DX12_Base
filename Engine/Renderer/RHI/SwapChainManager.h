@@ -34,10 +34,10 @@ public:
     // 获取当前后台缓冲区资源
     ID3D12Resource *GetCurrentBackBuffer() const;
 
-    ID3D12Resource *GetBackBuffer(UINT index) const;
+    ID3D12Resource *GetIndexBackBuffer(UINT index) const;
 
     // 获取当前后台缓冲区的索引
-    UINT GetCurrentBackBufferIndex() const { return m_currBackBuffer; }
+    UINT GetCurrentIndex() const { return m_currBackBuffer; }
 
     // 呈现下一帧
     void Present(bool vsync = true);

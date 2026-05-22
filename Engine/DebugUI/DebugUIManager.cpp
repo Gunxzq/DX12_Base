@@ -406,15 +406,15 @@ void DebugUIManager::AutoRegisterToFrameDriver(Boot::GameContext *context) {
                  if (!m_initialized || !m_gameContext)
                      return;
 
-                 auto &cmdMgr = m_gameContext->CommandManager;
-                 uint64_t completed = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-                 auto allocHandle = cmdMgr->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(completed);
-                 auto allocator = cmdMgr->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
-                 auto cmdListHandle = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-                 auto cmdList = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+                 uint64_t completed = m_gameContext->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocHandle = m_gameContext->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completed);
+                 auto allocator = m_gameContext->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
+                 auto cmdListHandle =
+                     m_gameContext->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_gameContext->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
                  // ✅ 关键：设置渲染目标和视口
-                 auto backBuffer = m_gameContext->DeviceContext->GetCurrentBackBuffer();
+                 auto backBuffer = m_gameContext->GetBackBuffer();
 
                  // 1. 资源状态转换：PRESENT -> RENDER_TARGET
                  D3D12_RESOURCE_BARRIER barrier = {};
@@ -450,8 +450,8 @@ void DebugUIManager::AutoRegisterToFrameDriver(Boot::GameContext *context) {
                  cmdList.Close();
                  m_gameContext->FrameDriver->SubmitRenderCommand(RenderPhase::UI, cmdListHandle);
 
-                 uint64_t sequence = cmdMgr->GetNextSequence();
-                 cmdMgr->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, sequence);
+                 uint64_t sequence = m_gameContext->GetNextSequence();
+                 m_gameContext->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, sequence);
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Main,

@@ -170,9 +170,20 @@ D3D12_CPU_DESCRIPTOR_HANDLE SwapChainManager::GetDepthStencilView() const {
     return m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
 }
 
+/**
+ * @brief 获取当前帧的 back buffer 资源指针
+ * @return ID3D12Resource*
+ * @date 2026-05-22
+ */
 ID3D12Resource *SwapChainManager::GetCurrentBackBuffer() const { return m_backBuffers[m_currBackBuffer].Get(); }
 
-ID3D12Resource *SwapChainManager::GetBackBuffer(UINT index) const {
+/**
+ * @brief 获取指定索引的 back buffer 资源指针
+ * @param index
+ * @return ID3D12Resource*
+ * @date 2026-05-22
+ */
+ID3D12Resource *SwapChainManager::GetIndexBackBuffer(UINT index) const {
     if (index >= m_backBuffers.size()) {
         return nullptr;
     }
