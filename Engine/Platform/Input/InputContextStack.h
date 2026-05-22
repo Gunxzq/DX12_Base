@@ -1,7 +1,9 @@
 #pragma once
+#include "Core/InputActionId.h"
 #include "Core/InputBinding.h"
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace DX12Engine {
@@ -9,45 +11,78 @@ namespace Input {
 
 class InputContextStack {
 public:
-    // 注册所有可用的上下文配置（从 JSON 加载后调用）
-    void RegisterContexts(const std::unordered_map<std::string, InputContextConfig> &configs) {
-        m_contextConfigs = configs;
-    }
+    void RegisterContexts(const std::unordered_map<std::string, InputContextConfig> &configs);
 
-    // 压入一个新上下文（例如打开 UI 时 Push("UI")）
-    void PushContext(const std::string &contextName) {
-        if (m_contextConfigs.find(contextName) != m_contextConfigs.end()) {
-            m_activeStack.push_back(contextName);
+    void PushContext(const std::string &contextName);
+    void PopContext();
+    void Clear();
+
+    const std::unordered_set<ActionId> &GetEnabledActions();
+
+    bool IsActionEnabled(ActionId actionId);
+
+    size_t GetStackDepth() const { return m_activeStack.size(); }
+
+    std::string GetTopContext() const { return m_activeStack.empty() ? "" : m_activeStack.back(); }
+
+#if defined(_DEBUG) || defined(DEVELOPMENT)
+    // ========================================================================
+    // 调试信息结构体
+    // ========================================================================
+    struct ContextDebugInfo {
+        std::string Name;
+        int Priority = 0;
+        size_t EnabledActionCount = 0;
+        bool IsActive = false; // 是否是当前栈顶
+    };
+
+    struct StackDebugInfo {
+        std::vector<ContextDebugInfo> Contexts; // 所有上下文（从底到顶）
+        std::vector<ActionId> EnabledActions;   // 当前启用的动作
+        size_t TotalActionCount = 0;            // 总注册动作数
+        size_t StackDepth = 0;
+    };
+
+    /// @brief 获取完整的调试信息（一次调用获取所有数据）
+    StackDebugInfo GetDebugInfo() const {
+
+        if (m_cacheDirty) {
+            const_cast<InputContextStack *>(this)->RebuildCache();
         }
-    }
 
-    // 弹出当前上下文
-    void PopContext() {
-        if (!m_activeStack.empty()) {
-            m_activeStack.pop_back();
-        }
-    }
+        StackDebugInfo info;
+        info.StackDepth = m_activeStack.size();
+        info.EnabledActions.assign(m_cachedEnabledActions.begin(), m_cachedEnabledActions.end());
 
-    // 获取当前所有活跃上下文的合并配置
-    // 返回一个有序的列表，优先级从高到低
-    std::vector<const InputContextConfig *> GetActiveContexts() const {
-        std::vector<const InputContextConfig *> result;
-        // 从栈顶往栈底遍历，确保高优先级在前
-        for (auto it = m_activeStack.rbegin(); it != m_activeStack.rend(); ++it) {
-            auto found = m_contextConfigs.find(*it);
-            if (found != m_contextConfigs.end()) {
-                result.push_back(&found->second);
+        for (size_t i = 0; i < m_activeStack.size(); ++i) {
+            const auto &ctxName = m_activeStack[i];
+            auto it = m_contextConfigs.find(ctxName);
+            if (it != m_contextConfigs.end()) {
+                ContextDebugInfo ctxInfo;
+                ctxInfo.Name = ctxName;
+                ctxInfo.Priority = it->second.Priority;
+                ctxInfo.EnabledActionCount = it->second.EnabledActions.size();
+                ctxInfo.IsActive = (i == m_activeStack.size() - 1);
+                info.Contexts.push_back(ctxInfo);
+                info.TotalActionCount += ctxInfo.EnabledActionCount;
             }
         }
-        return result;
+
+        return info;
     }
 
-    // 清空栈（例如游戏结束时）
-    void Clear() { m_activeStack.clear(); }
+    /// @brief 简单获取栈内容（仅名称）
+    std::vector<std::string> GetStackNames() const { return m_activeStack; }
+#endif
 
 private:
+    void MarkDirty() { m_cacheDirty = true; }
+    void RebuildCache();
+
     std::unordered_map<std::string, InputContextConfig> m_contextConfigs;
-    std::vector<std::string> m_activeStack; // 栈底是 Gameplay，栈顶是 UI
+    std::vector<std::string> m_activeStack;
+    std::unordered_set<ActionId> m_cachedEnabledActions;
+    bool m_cacheDirty = true;
 };
 
 } // namespace Input
