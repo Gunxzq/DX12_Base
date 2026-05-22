@@ -38,6 +38,7 @@ public:
 
     // 获取当前后台缓冲区的索引
     UINT GetCurrentIndex() const { return m_currBackBuffer; }
+    IDXGISwapChain3 *GetSwapChain() const { return m_swapChain.Get(); }
 
     // 呈现下一帧
     void Present(bool vsync = true);
