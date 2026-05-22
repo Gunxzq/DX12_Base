@@ -1,14 +1,10 @@
 #pragma once
 
 #include "Boot/GameContext.h"
-#include "DebugUI/DebugUIManager.h"
-#include "ECS/Core/Entity.h"
+#include "Input/GameInputHandler.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
-#include "Renderer/RHI/PassConstants.h"
-#include <DirectXMath.h>
-#include <array>
+#include "Scene/GameWorld.h"
 #include <memory>
-#include <wrl/client.h>
 
 // ========================================================================
 // Game - 游戏主逻辑层，负责运行主循环和组合游戏模块
@@ -24,47 +20,22 @@ public:
     Game(Game &&) = delete;
     Game &operator=(Game &&) = delete;
 
-    // ── 生命周期 ──
     bool Initialize();
     int Run();
     void Shutdown();
 
-    // ── 主循环组件 ──
-    void Update(float deltaTime);
-
-    // ── 状态查询 ──
     bool IsRunning() const { return m_isRunning; }
 
 private:
-    void InitializeGameModules();
-    void ShutdownGameModules();
-    void CreateTestCube();
+    void RegisterEngineSystems(); // WindowResizeSystem, FullscreenSystem 等引擎级系统
 
-    void HandleCameraInput();
-
-    // ── 成员变量 ──
+private:
     DX12Engine::Boot::GameContext *m_context;
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderer> m_opaqueRenderer;
 
-    DX12Engine::ECS::Entity m_cubeEntity;
+    GameWorld m_world;
+    GameInputHandler m_inputHandler;
+
     bool m_isRunning = false;
     bool m_isInitialized = false;
-    bool m_skipLookInputThisFrame = false;
-
-    // 环形缓冲区：存储每帧的 PassConstants 数据
-    struct PassCBResource {
-        Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-        void *mappedData = nullptr;
-    };
-    std::array<PassCBResource, 3> m_passCBResources;
-
-    /**
-     * @brief 初始化 Pass Constant Buffers
-     */
-    void InitializePassConstantBuffers();
-
-    /**
-     * @brief 获取当前帧 Pass Constant Buffer 的 GPU 虚拟地址
-     */
-    D3D12_GPU_VIRTUAL_ADDRESS GetCurrentPassCBAddress() const;
 };
