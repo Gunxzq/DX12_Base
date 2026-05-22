@@ -1,7 +1,6 @@
 #pragma once
 #include "Common/Common.h"
 #include "Event/EventTypes.h"
-#include "Platform/Input/RawInputBuffer.h"
 #include "Resource.h"
 #include <string>
 
@@ -9,6 +8,10 @@ namespace DX12Engine {
 
 namespace Boot {
 struct WindowConfig;
+}
+
+namespace Input {
+class InputManager;
 }
 
 namespace Platform {
@@ -31,8 +34,6 @@ public:
     HWND GetHandle() const { return m_hWnd; }
     uint32_t GetWidth() const { return m_Width; }
     uint32_t GetHeight() const { return m_Height; }
-    Input::RawInputBuffer &GetRawInputBuffer() { return m_rawInputBuffer; }
-    const Input::RawInputBuffer &GetRawInputBuffer() const { return m_rawInputBuffer; }
 
     void SetCursorCapture(bool capture);
     bool IsCursorCaptured() const { return m_cursorCaptured; }
@@ -41,6 +42,8 @@ public:
     void Show();
     void SetFullscreen(bool fullscreen);
     bool IsFullscreen() const { return m_IsFullscreen; }
+
+    void SetInputManager(Input::InputManager *inputMgr);
 
 private:
     // 静态 WndProc，用于接收 Windows 消息
@@ -76,7 +79,7 @@ private:
     // 拖拽期间尺寸是否真正变化（用于减少 WM_EXITSIZEMOVE 时的不必要事件）
     bool m_SizeChangedDuringMove = false;
 
-    Input::RawInputBuffer m_rawInputBuffer;
+    Input::InputManager *m_inputMgr = nullptr;
 };
 
 } // namespace Platform

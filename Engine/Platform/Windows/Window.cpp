@@ -1,6 +1,8 @@
 #include "Window.h"
 #include "Boot/WindowConfig.h"
 #include "Event/MessageDispatcher.h"
+#include "Platform/Input/InputManager.h"
+#include "Platform/Input/RawInputBuffer.h"
 #include "ThirdParty/imgui/backends/imgui_impl_dx12.h"
 #include "ThirdParty/imgui/backends/imgui_impl_win32.h"
 #include "ThirdParty/imgui/imgui.h"
@@ -12,6 +14,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 using namespace DX12Engine::Boot;
 using namespace DX12Engine::Event;
+using DX12Engine::Input::RawInputBuffer;
 
 namespace DX12Engine::Platform {
 
@@ -101,6 +104,8 @@ void Window::ProcessMessages() {
     }
 }
 
+void Window::SetInputManager(Input::InputManager *inputMgr) { m_inputMgr = inputMgr; }
+
 /**
  * @brief 窗口处理函数
  * @param hWnd 句柄
@@ -142,7 +147,9 @@ void Window::SetCursorCapture(bool capture) {
 
     if (capture) {
 
-        m_rawInputBuffer.Reset();
+        if (m_inputMgr) {
+            m_inputMgr->ResetAllStates();
+        }
 
         SetCapture(m_hWnd);
 
@@ -158,7 +165,6 @@ void Window::SetCursorCapture(bool capture) {
         ClientToScreen(m_hWnd, &center);
         SetCursorPos(center.x, center.y);
 
-        m_rawInputBuffer.Reset();
     } else {
         // 1. 释放捕获
         ReleaseCapture();
@@ -173,8 +179,6 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) {
         return 1; // ImGui 已处理该消息
     }
-
-    auto &buffer = m_rawInputBuffer;
 
     switch (msg) {
     case WM_ENTERSIZEMOVE:
@@ -226,13 +230,17 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
-        buffer.OnKeyDown(static_cast<Input::EKeyCode>(wParam));
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnKeyDown(static_cast<Input::EKeyCode>(wParam));
+        }
         return 0;
     }
 
     case WM_KEYUP:
     case WM_SYSKEYUP: {
-        buffer.OnKeyUp(static_cast<Input::EKeyCode>(wParam));
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnKeyUp(static_cast<Input::EKeyCode>(wParam));
+        }
         return 0;
     }
 
@@ -242,51 +250,77 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
     case WM_MOUSEMOVE: {
         int x = GET_X_LPARAM(lParam);
         int y = GET_Y_LPARAM(lParam);
-        buffer.OnMouseMove(x, y);
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnMouseMove(x, y);
+        }
         return 0;
     }
 
     case WM_MOUSEWHEEL: {
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-        buffer.OnMouseWheel(delta);
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnMouseWheel(delta);
+        }
         return 0;
     }
 
     case WM_LBUTTONDOWN:
-        buffer.OnKeyDown(Input::EKeyCode::Mouse_Left);
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnKeyDown(Input::EKeyCode::Mouse_Left);
+        }
         return 0;
     case WM_LBUTTONUP:
-        buffer.OnKeyUp(Input::EKeyCode::Mouse_Left);
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnKeyUp(Input::EKeyCode::Mouse_Left);
+        }
         return 0;
 
     case WM_RBUTTONDOWN:
-        buffer.OnKeyDown(Input::EKeyCode::Mouse_Right);
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnKeyDown(Input::EKeyCode::Mouse_Right);
+        }
         return 0;
     case WM_RBUTTONUP:
-        buffer.OnKeyUp(Input::EKeyCode::Mouse_Right);
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnKeyUp(Input::EKeyCode::Mouse_Right);
+        }
         return 0;
 
     case WM_MBUTTONDOWN:
-        buffer.OnKeyDown(Input::EKeyCode::Mouse_Middle);
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnKeyDown(Input::EKeyCode::Mouse_Middle);
+        }
         return 0;
     case WM_MBUTTONUP:
-        buffer.OnKeyUp(Input::EKeyCode::Mouse_Middle);
+        if (m_inputMgr) {
+            m_inputMgr->GetRawBuffer()->OnKeyUp(Input::EKeyCode::Mouse_Middle);
+        }
         return 0;
 
     case WM_XBUTTONDOWN: {
         WORD xButton = HIWORD(wParam);
-        if (xButton == XBUTTON1)
-            buffer.OnKeyDown(Input::EKeyCode::Mouse_X1);
-        else if (xButton == XBUTTON2)
-            buffer.OnKeyDown(Input::EKeyCode::Mouse_X2);
-        return TRUE;
+        if (xButton == XBUTTON1) {
+            if (m_inputMgr) {
+                m_inputMgr->GetRawBuffer()->OnKeyDown(Input::EKeyCode::Mouse_X1);
+            }
+        } else if (xButton == XBUTTON2) {
+            if (m_inputMgr) {
+                m_inputMgr->GetRawBuffer()->OnKeyDown(Input::EKeyCode::Mouse_X2);
+            }
+
+            return TRUE;
+        }
     }
     case WM_XBUTTONUP: {
         WORD xButton = HIWORD(wParam);
         if (xButton == XBUTTON1)
-            buffer.OnKeyUp(Input::EKeyCode::Mouse_X1);
-        else if (xButton == XBUTTON2)
-            buffer.OnKeyUp(Input::EKeyCode::Mouse_X2);
+            if (m_inputMgr) {
+                m_inputMgr->GetRawBuffer()->OnKeyUp(Input::EKeyCode::Mouse_X1);
+            } else if (xButton == XBUTTON2) {
+                if (m_inputMgr) {
+                    m_inputMgr->GetRawBuffer()->OnKeyUp(Input::EKeyCode::Mouse_X2);
+                }
+            }
         return TRUE;
     }
 
@@ -299,7 +333,7 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             if (m_cursorCaptured) {
                 SetCursorCapture(false);
             }
-            m_rawInputBuffer.Reset();
+            m_inputMgr->GetRawBuffer()->Reset();
         }
         return 0;
     }

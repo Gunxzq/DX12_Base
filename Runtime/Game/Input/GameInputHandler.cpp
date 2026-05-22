@@ -4,6 +4,7 @@
 #include "Common/ThrowHelper.h"
 #include "Framework/SystemRegistry.h"
 #include "Math/MathTypes.h"
+#include "Platform/Input/InputManager.h"
 #include "Platform/Input/InputSystem.h"
 #include "Platform/Windows/Window.h"
 #include "Renderer/Scene/CameraManager.h"
@@ -16,7 +17,9 @@ using namespace DX12Engine::Boot;
 using namespace DX12Engine::ECS;
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Scheduler;
+using namespace DX12Engine::Input;
 using namespace DX12Engine;
+using DX12Engine::Input::InputSystem;
 
 GameInputHandler::GameInputHandler() = default;
 GameInputHandler::~GameInputHandler() = default;
@@ -63,10 +66,10 @@ void GameInputHandler::ResetCamera() {
 }
 
 void GameInputHandler::HandleCursorCapture() {
-    if (!m_context || !m_context->InputSys || !m_context->Window)
+    if (!m_context || !m_context->InputMgr || !m_context->Window)
         return;
 
-    auto &inputSys = *m_context->InputSys;
+    auto &inputSys = *m_context->InputMgr->GetInputSystem();
     auto &window = *m_context->Window;
 
     bool wasCaptured = window.IsCursorCaptured();
@@ -84,11 +87,11 @@ void GameInputHandler::HandleCursorCapture() {
 }
 
 void GameInputHandler::HandleCameraInput(float deltaTime) {
-    if (!m_context || !m_context->InputSys || !m_context->CameraMgr || !m_context->Window) {
+    if (!m_context || !m_context->InputMgr || !m_context->CameraMgr || !m_context->Window) {
         return;
     }
 
-    auto &inputSys = *m_context->InputSys;
+    auto &inputSys = *m_context->InputMgr->GetInputSystem();
     auto &cameraMgr = *m_context->CameraMgr;
     auto &mainCamera = cameraMgr.GetMainCamera();
     auto &window = *m_context->Window;

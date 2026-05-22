@@ -14,7 +14,7 @@ class CommandList;
 
 namespace DX12Engine {
 namespace Input {
-class InputSystem;
+class InputManager;
 }
 
 namespace Event {
@@ -76,7 +76,7 @@ public:
     Renderer::D3D12DeviceContext *DeviceContext = nullptr;
     Renderer::CameraManager *CameraMgr = nullptr;
 
-    Input::InputSystem *InputSys = nullptr;
+    Input::InputManager *InputMgr = nullptr;
 
     // ── 便捷访问方法 ──
     bool IsValid() const;

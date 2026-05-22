@@ -38,12 +38,6 @@ bool Game::Initialize() {
     m_opaqueRenderer->SetDeviceContext(m_context->DeviceContext);
     m_opaqueRenderer->Initialize();
 
-    // 3. 初始化输入系统
-    if (!m_context->InputSys) {
-        m_context->InputSys = &Input::InputSystem::Get();
-        m_context->InputSys->Initialize("Config/default_input.json");
-    }
-
     // 4. 初始化相机
     if (m_context->CameraMgr) {
         auto &mainCamera = m_context->CameraMgr->GetMainCamera();

@@ -1,7 +1,7 @@
 #include "Scheduler/FrameDriver.h"
 #include "Boot/GameContext.h"
 #include "Event/MessageDispatcher.h"
-#include "Platform/Input/InputSystem.h"
+#include "Platform/Input/InputManager.h"
 #include "Platform/Windows/Window.h"
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
 #include "Renderer/RHI/Command/CommandManager.h"
@@ -191,30 +191,25 @@ bool FrameDriver::Tick() {
     // 帧统计
     m_stats.frameNumber++;
 
+    if (!m_gameContext || !m_gameContext->InputMgr || !m_gameContext->Window)
+        return false;
+
     // ========================================================================
     // 0. 帧开始：清空上一帧的增量数据
-    // ========================================================================
-    if (m_gameContext && m_gameContext->Window) {
-        auto &rawBuffer = m_gameContext->Window->GetRawInputBuffer();
-        rawBuffer.BeginFrame(); // ← 先清空，为接收本帧的新消息做准备
-    }
+    // =======================================================================
+    m_gameContext->InputMgr->BeginFrame(); // ← 先清空，为接收本帧的新消息做准备
 
     // ========================================================================
     // 1. 消息处理（需要移到 Tick 内部，或者确保在 BeginFrame 之后）
     // ========================================================================
-    if (m_gameContext && m_gameContext->Window) {
-        m_gameContext->Window->ProcessMessages(); // ← 现在填充的是本帧的新数据
-    }
+    m_gameContext->Window->ProcessMessages(); // ← 现在填充的是本帧的新数据
 
     // ========================================================================
     // 2. 更新输入系统
     // ========================================================================
-    if (m_gameContext && m_gameContext->InputSys && m_gameContext->Window) {
-        auto &rawBuffer = m_gameContext->Window->GetRawInputBuffer();
-        float deltaTime = m_gameContext->MainTimer->GetDeltaTime();
-        float currentTime = static_cast<float>(m_gameContext->MainTimer->GetGameTime());
-        m_gameContext->InputSys->Update(rawBuffer, deltaTime, currentTime);
-    }
+    float deltaTime = m_gameContext->MainTimer->GetDeltaTime();
+    float currentTime = static_cast<float>(m_gameContext->MainTimer->GetGameTime());
+    m_gameContext->InputMgr->Update(deltaTime, currentTime);
 
     // ========================================================================
     // 阶段 0: Message -> DAG 编译器 (关键新增：消息驱动动态构建)

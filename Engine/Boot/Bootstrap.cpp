@@ -5,7 +5,7 @@
 #include "GameContext.h"
 #include "Logger/DebugOverlay.h"
 #include "Logger/Logger.h"
-#include "Platform/Input/InputSystem.h"
+#include "Platform/Input/InputManager.h"
 #include "Platform/Windows/Window.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
@@ -208,6 +208,18 @@ void Bootstrap::InitializeModules() {
             throw std::runtime_error("[Bootstrap] CreateMainWindow returned false.");
         }
 
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing InputManager...");
+        auto &inputMgr = DX12Engine::Input::InputManager::Get();
+        // 假设配置文件路径为 "Config/input_bindings.json" 或在 ConfigManager 中获取
+        std::string inputConfigPath = "Config/default_input.json";
+
+        if (inputMgr.Initialize(inputConfigPath)) {
+            m_window->SetInputManager(&inputMgr); // ← 添加这行
+        } else {
+            EngineLogger::GetInstance()->Warn(
+                "[Bootstrap] InputManager initialization failed or config not found. Using defaults.");
+        }
+
         // 4. D3D12 设备上下文 (依赖窗口句柄)
         if (!InitializeD3DDeviceContext()) {
             throw std::runtime_error("[Bootstrap] InitializeD3DDeviceContext returned false.");
@@ -219,16 +231,6 @@ void Bootstrap::InitializeModules() {
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing MessageDispatcher...");
         Event::MessageDispatcher::Init();
         EngineLogger::GetInstance()->Info("[Bootstrap] MessageDispatcher initialized.");
-
-        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing InputSystem...");
-        auto &inputSys = DX12Engine::Input::InputSystem::Get();
-        // 假设配置文件路径为 "Config/input_bindings.json" 或在 ConfigManager 中获取
-        std::string inputConfigPath = "Config/default_input.json";
-        if (!inputSys.Initialize(inputConfigPath)) {
-            EngineLogger::GetInstance()->Warn(
-                "[Bootstrap] InputSystem initialization failed or config not found. Using defaults.");
-            // 根据需求决定是抛出异常还是继续
-        }
 
         // 6. ECS Registry (调度系统需要)
         InitializeRegistry();
@@ -291,7 +293,7 @@ GameContext *Bootstrap::CreateContext() {
     uint32_t height = m_window ? m_window->GetHeight() : 720;
     m_context->CameraMgr->Initialize(width, height);
 
-    m_context->InputSys = &DX12Engine::Input::InputSystem::Get();
+    m_context->InputMgr = &DX12Engine::Input::InputManager::Get();
 
     if (m_frameDriver) {
         m_frameDriver->SetGameContext(m_context.get());

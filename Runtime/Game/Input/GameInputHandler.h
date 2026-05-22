@@ -12,7 +12,7 @@ namespace Platform {
 class Window;
 }
 namespace Input {
-class InputSystem;
+class InputManager;
 }
 namespace Renderer {
 class CameraManager;
