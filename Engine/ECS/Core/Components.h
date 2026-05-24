@@ -1,9 +1,14 @@
 #pragma once
-#include "Resource/ResourceHandle.h"
+#include "Resource/Struct/ResourceHandle.h"
 #include <DirectXMath.h>
 #include <d3d12.h>
 
 namespace DX12Engine {
+
+namespace Resource {
+struct CpuResourceHandle;
+struct GpuResourceHandle;
+} // namespace Resource
 namespace ECS {
 
 // 变换组件（位置、旋转、缩放）
@@ -22,8 +27,8 @@ struct TransformComponent {
 
 // 网格组件（GPU 资源句柄）
 struct MeshComponent {
-    Resource::ResourceHandle vertexBuffer; // 通过 ResourceManager 管理
-    Resource::ResourceHandle indexBuffer;
+    Resource::GpuResourceHandle vertexBuffer; // 通过 ResourceManager 管理
+    Resource::GpuResourceHandle indexBuffer;
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
 

@@ -1,4 +1,4 @@
-#include "CpuResourceManager.h"
+#include "AssetDataManager.h"
 #include <algorithm>
 #include <cassert>
 #include <iostream>
@@ -11,18 +11,18 @@ namespace DX12Engine::Resource {
 // In production, this should reference Engine::GetFrameCount()
 static uint64_t s_globalFrameCount = 0;
 
-CpuResourceManager &CpuResourceManager::GetInstance() {
-    static CpuResourceManager instance;
+AssetDataManager &AssetDataManager::GetInstance() {
+    static AssetDataManager instance;
     return instance;
 }
 
-void CpuResourceManager::Initialize(const ResourceSystemConfig &config) {
+void AssetDataManager::Initialize(const ResourceSystemConfig &config) {
     if (m_initialized) {
         Shutdown();
     }
 
     // HandlePool 内部会根据配置预分配容量
-    HandlePool::InitConfig handleConfig;
+    CpuHandlePool::InitConfig handleConfig;
     handleConfig.maxTotalHandles = config.HandlePoolConfig.MaxTotalHandles;
     handleConfig.initialFreeListReserve = config.HandlePoolConfig.InitialFreeListReserve;
     m_handlePool.Initialize(handleConfig);
@@ -34,10 +34,7 @@ void CpuResourceManager::Initialize(const ResourceSystemConfig &config) {
     m_initialized = true;
 }
 
-void CpuResourceManager::Shutdown() {
-#ifdef _DEBUG
-    ForceCleanupForTesting();
-#endif
+void AssetDataManager::Shutdown() {
 
     for (auto &pair : m_dataPools) {
         if (pair.second) {
@@ -57,7 +54,7 @@ void CpuResourceManager::Shutdown() {
     m_initialized = false;
 }
 
-void CpuResourceManager::InitializeDataPoolsFromConfig(const ResourceSystemConfig &config) {
+void AssetDataManager::InitializeDataPoolsFromConfig(const ResourceSystemConfig &config) {
     for (const auto &poolCfg : config.MemoryPools) {
         // 检查 Tag 是否有效 (0-15)
         if (poolCfg.HandleTag > 15) {
@@ -91,58 +88,23 @@ void CpuResourceManager::InitializeDataPoolsFromConfig(const ResourceSystemConfi
     }
 }
 
-#ifdef _DEBUG
-void CpuResourceManager::ForceCleanupForTesting() {
-    // 在清理 Pending 队列之前，先强制收割 TLS 缓存
-    // 这确保了测试线程缓存的索引能正确归还到全局池
-    m_handlePool.HarvestTLSCaches();
-
-    std::vector<PendingRelease> pending;
-    {
-        std::lock_guard<std::mutex> lock(m_pendingMutex);
-        pending = std::move(m_pendingReleases);
-        m_pendingReleases.clear();
-        m_pendingReleases.shrink_to_fit();
-    }
-
-    for (auto &pr : pending) {
-        void *ptr = m_handlePool.GetDataPtr(pr.handle);
-        if (ptr) {
-            DataPool *pool = GetDataPoolForHandle(pr.handle);
-            if (pool) {
-                pool->Free(ptr);
-            }
-        }
-        m_handlePool.FreeSlot(pr.handle);
-    }
-
-    // 【终极修复】强制重置池子状态，确保 GetActiveCount() 返回 0
-    // 这处理了 TLS 收割未能覆盖的所有边界情况
-    uint32_t currentActive = m_handlePool.GetActiveCount();
-    if (currentActive != 0) {
-        std::cerr << "[CpuResourceManager] ForceResetForTesting triggered. Active: " << currentActive << std::endl;
-        m_handlePool.ForceResetForTesting();
-    }
-}
-#endif
-
-ResourceHandle CpuResourceManager::AllocateSlot(ResourceType type) {
-    // 根据 ResourceType 确定池ID（简单映射）
+CpuResourceHandle AssetDataManager::AllocateSlot(CpuResourceType type) {
+    // 根据 CpuResourceType 确定池ID（简单映射）
     uint8_t poolId = static_cast<uint8_t>(type) % MAX_POOL_COUNT;
     return m_handlePool.AllocateSlot(type, poolId);
 }
 
-void CpuResourceManager::Preallocate(uint32_t targetCapacity) { m_handlePool.Preallocate(targetCapacity); }
+void AssetDataManager::Preallocate(uint32_t targetCapacity) { m_handlePool.Preallocate(targetCapacity); }
 
-void CpuResourceManager::RegisterData(ResourceHandle handle, void *dataPtr, size_t size) {
+void AssetDataManager::RegisterData(CpuResourceHandle handle, void *dataPtr, size_t size) {
     if (!m_handlePool.Validate(handle)) {
         assert(false && "RegisterData: Invalid Handle");
         return;
     }
 
-    ResourceState currentState = m_handlePool.GetState(handle);
-    if (currentState != ResourceState::Loading) {
-        if (currentState == ResourceState::Ready) {
+    CpuResourceState currentState = m_handlePool.GetState(handle);
+    if (currentState != CpuResourceState::Loading) {
+        if (currentState == CpuResourceState::Ready) {
             return;
         }
         assert(false && "RegisterData: Handle is not in Loading state");
@@ -160,29 +122,29 @@ void CpuResourceManager::RegisterData(ResourceHandle handle, void *dataPtr, size
 #endif
 
     m_handlePool.SetDataPtr(handle, dataPtr);
-    m_handlePool.SetState(handle, ResourceState::Ready);
+    m_handlePool.SetState(handle, CpuResourceState::Ready);
 }
 
-void *CpuResourceManager::GetData(ResourceHandle handle) const {
+void *AssetDataManager::GetData(CpuResourceHandle handle) const {
     if (!m_handlePool.Validate(handle)) {
         return nullptr;
     }
 
-    if (m_handlePool.GetState(handle) != ResourceState::Ready) {
+    if (m_handlePool.GetState(handle) != CpuResourceState::Ready) {
         return nullptr;
     }
 
     return m_handlePool.GetDataPtr(handle);
 }
 
-void CpuResourceManager::Release(ResourceHandle handle) {
+void AssetDataManager::Release(CpuResourceHandle handle) {
     if (!m_handlePool.Validate(handle)) {
         return;
     }
 
-    ResourceState state = m_handlePool.GetState(handle);
+    CpuResourceState state = m_handlePool.GetState(handle);
 
-    if (state == ResourceState::PendingRelease || state == ResourceState::Empty) {
+    if (state == CpuResourceState::PendingRelease || state == CpuResourceState::Empty) {
         return;
     }
 
@@ -195,10 +157,10 @@ void CpuResourceManager::Release(ResourceHandle handle) {
         m_pendingReleases.push_back(pr);
     }
 
-    m_handlePool.SetState(handle, ResourceState::PendingRelease);
+    m_handlePool.SetState(handle, CpuResourceState::PendingRelease);
 }
 
-void CpuResourceManager::Update(float deltaTime) {
+void AssetDataManager::Update(float deltaTime) {
     s_globalFrameCount++;
     uint64_t currentFrame = GetCurrentFrame();
 
@@ -252,9 +214,9 @@ void CpuResourceManager::Update(float deltaTime) {
     }
 }
 
-uint32_t CpuResourceManager::GetActiveCount() const { return m_handlePool.GetActiveCount(); }
+uint32_t AssetDataManager::GetActiveCount() const { return m_handlePool.GetActiveCount(); }
 
-size_t CpuResourceManager::GetMemoryUsage() const {
+size_t AssetDataManager::GetMemoryUsage() const {
     size_t total = 0;
     for (const auto &pair : m_dataPools) {
         if (pair.second) {
@@ -264,9 +226,9 @@ size_t CpuResourceManager::GetMemoryUsage() const {
     return total;
 }
 
-uint64_t CpuResourceManager::GetCurrentFrame() const { return s_globalFrameCount; }
+uint64_t AssetDataManager::GetCurrentFrame() const { return s_globalFrameCount; }
 
-DataPool *CpuResourceManager::GetDataPoolForHandle(ResourceHandle handle) const {
+DataPool *AssetDataManager::GetDataPoolForHandle(CpuResourceHandle handle) const {
     auto it = m_dataPools.find(handle.poolId);
     if (it != m_dataPools.end()) {
         return it->second.get();
@@ -279,40 +241,40 @@ DataPool *CpuResourceManager::GetDataPoolForHandle(ResourceHandle handle) const 
 // 状态直接通过 HandlePool 查询，不重复存储
 // ========================================================================
 
-ResourceHandle CpuResourceManager::GetHandle(const std::string &path) const {
+CpuResourceHandle AssetDataManager::GetHandle(const std::string &path) const {
     std::shared_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end() && it->second.handle.IsValid()) {
         return it->second.handle;
     }
-    return ResourceHandle::Invalid();
+    return CpuResourceHandle::Invalid();
 }
 
-bool CpuResourceManager::IsLoaded(const std::string &path) const {
-    ResourceHandle handle = GetHandle(path);
+bool AssetDataManager::IsLoaded(const std::string &path) const {
+    CpuResourceHandle handle = GetHandle(path);
     if (!handle.IsValid()) {
         return false;
     }
-    return m_handlePool.GetState(handle) == ResourceState::Ready;
+    return m_handlePool.GetState(handle) == CpuResourceState::Ready;
 }
 
-bool CpuResourceManager::IsLoading(const std::string &path) const {
-    ResourceHandle handle = GetHandle(path);
+bool AssetDataManager::IsLoading(const std::string &path) const {
+    CpuResourceHandle handle = GetHandle(path);
     if (!handle.IsValid()) {
         return false;
     }
-    return m_handlePool.GetState(handle) == ResourceState::Loading;
+    return m_handlePool.GetState(handle) == CpuResourceState::Loading;
 }
 
-ResourceState CpuResourceManager::GetStatus(const std::string &path) const {
-    ResourceHandle handle = GetHandle(path);
+CpuResourceState AssetDataManager::GetStatus(const std::string &path) const {
+    CpuResourceHandle handle = GetHandle(path);
     if (!handle.IsValid()) {
-        return ResourceState::Empty;
+        return CpuResourceState::Empty;
     }
     return m_handlePool.GetState(handle);
 }
 
-ResourceHandle CpuResourceManager::RegisterPath(const std::string &path, ResourceType type) {
+CpuResourceHandle AssetDataManager::RegisterPath(const std::string &path, CpuResourceType type) {
     std::unique_lock lock(m_assetMutex);
 
     // 已存在则直接返回
@@ -322,7 +284,7 @@ ResourceHandle CpuResourceManager::RegisterPath(const std::string &path, Resourc
     }
 
     // 分配新句柄（HandlePool 会设置状态为 Loading）
-    ResourceHandle handle = AllocateSlot(type);
+    CpuResourceHandle handle = AllocateSlot(type);
 
     // 注册映射
     AssetInfo info;
@@ -333,7 +295,7 @@ ResourceHandle CpuResourceManager::RegisterPath(const std::string &path, Resourc
     return handle;
 }
 
-void CpuResourceManager::UnregisterPath(const std::string &path) {
+void AssetDataManager::UnregisterPath(const std::string &path) {
     std::unique_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end()) {
@@ -343,19 +305,19 @@ void CpuResourceManager::UnregisterPath(const std::string &path) {
     }
 }
 
-std::vector<std::string> CpuResourceManager::GetPendingPaths() const {
+std::vector<std::string> AssetDataManager::GetPendingPaths() const {
     std::shared_lock lock(m_assetMutex);
     std::vector<std::string> result;
     for (const auto &pair : m_assetMap) {
-        ResourceState state = m_handlePool.GetState(pair.second.handle);
-        if (state == ResourceState::Loading || state == ResourceState::Empty) {
+        CpuResourceState state = m_handlePool.GetState(pair.second.handle);
+        if (state == CpuResourceState::Loading || state == CpuResourceState::Empty) {
             result.push_back(pair.first);
         }
     }
     return result;
 }
 
-void CpuResourceManager::AddRef(const std::string &path) {
+void AssetDataManager::AddRef(const std::string &path) {
     std::shared_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end()) {
@@ -363,7 +325,7 @@ void CpuResourceManager::AddRef(const std::string &path) {
     }
 }
 
-void CpuResourceManager::ReleaseRef(const std::string &path) {
+void AssetDataManager::ReleaseRef(const std::string &path) {
     std::unique_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end()) {
@@ -372,15 +334,15 @@ void CpuResourceManager::ReleaseRef(const std::string &path) {
         }
         // 引用归零且已加载，可以延迟释放
         if (it->second.refCount == 0) {
-            ResourceState state = m_handlePool.GetState(it->second.handle);
-            if (state == ResourceState::Ready) {
+            CpuResourceState state = m_handlePool.GetState(it->second.handle);
+            if (state == CpuResourceState::Ready) {
                 Release(it->second.handle);
             }
         }
     }
 }
 
-uint32_t CpuResourceManager::GetRefCount(const std::string &path) const {
+uint32_t AssetDataManager::GetRefCount(const std::string &path) const {
     std::shared_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end()) {
@@ -389,17 +351,17 @@ uint32_t CpuResourceManager::GetRefCount(const std::string &path) const {
     return 0;
 }
 
-size_t CpuResourceManager::GetAssetCount() const {
+size_t AssetDataManager::GetAssetCount() const {
     std::shared_lock lock(m_assetMutex);
     return m_assetMap.size();
 }
 
-void CpuResourceManager::CleanupUnused() {
+void AssetDataManager::CleanupUnused() {
     std::unique_lock lock(m_assetMutex);
     for (auto it = m_assetMap.begin(); it != m_assetMap.end();) {
         if (it->second.refCount == 0) {
-            ResourceState state = m_handlePool.GetState(it->second.handle);
-            if (state == ResourceState::Ready) {
+            CpuResourceState state = m_handlePool.GetState(it->second.handle);
+            if (state == CpuResourceState::Ready) {
                 Release(it->second.handle);
             }
             it = m_assetMap.erase(it);

@@ -15,7 +15,7 @@ void GpuResourceManager::Initialize() {
         return;
 
     // 初始化 HandlePool，预分配一定容量
-    HandlePool::InitConfig config;
+    GpuHandlePool::InitConfig config;
     config.maxTotalHandles = 8192;
     m_handlePool.Initialize(config);
 
@@ -38,14 +38,14 @@ void GpuResourceManager::Shutdown() {
     m_initialized = false;
 }
 
-ResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t size, D3D12_HEAP_TYPE heapType,
-                                                D3D12_RESOURCE_STATES initialState) {
+GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t size, D3D12_HEAP_TYPE heapType,
+                                                   D3D12_RESOURCE_STATES initialState) {
     if (!m_initialized || !device) {
-        return ResourceHandle::Invalid();
+        return GpuResourceHandle::Invalid();
     }
 
     // 1. 分配句柄
-    ResourceHandle handle = m_handlePool.AllocateSlot(ResourceType::Mesh, 0);
+    GpuResourceHandle handle = m_handlePool.AllocateSlot(GpuResourceType::Buffer, 0);
 
     // 2. 创建 D3D12 资源
     CD3DX12_HEAP_PROPERTIES heapProps(heapType);
@@ -58,12 +58,12 @@ ResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t siz
     if (FAILED(hr) || !resource) {
         ENGINE_ASSERT_FMT("GpuResourceManager: Failed to create buffer. Size: %zu, HR: 0x%X", size, hr);
         m_handlePool.FreeSlot(handle);
-        return ResourceHandle::Invalid();
+        return GpuResourceHandle::Invalid();
     }
 
     // 3. 存储指针并标记为 Ready
     m_handlePool.SetDataPtr(handle, resource);
-    m_handlePool.SetState(handle, ResourceState::Ready);
+    m_handlePool.SetState(handle, GpuResourceState::Ready);
 
     // 4. 更新内存统计
     {
@@ -74,13 +74,13 @@ ResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t siz
     return handle;
 }
 
-ResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, uint32_t width, uint32_t height,
-                                                   DXGI_FORMAT format, D3D12_RESOURCE_STATES initialState) {
+GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, uint32_t width, uint32_t height,
+                                                      DXGI_FORMAT format, D3D12_RESOURCE_STATES initialState) {
     if (!m_initialized || !device) {
-        return ResourceHandle::Invalid();
+        return GpuResourceHandle::Invalid();
     }
 
-    ResourceHandle handle = m_handlePool.AllocateSlot(ResourceType::Texture, 0xFF);
+    GpuResourceHandle handle = m_handlePool.AllocateSlot(GpuResourceType::Texture2D, 0xFF);
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
     auto desc = CD3DX12_RESOURCE_DESC::Tex2D(format, width, height, 1, 1);
@@ -91,11 +91,11 @@ ResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, uint32_
 
     if (FAILED(hr) || !resource) {
         m_handlePool.FreeSlot(handle);
-        return ResourceHandle::Invalid();
+        return GpuResourceHandle::Invalid();
     }
 
     m_handlePool.SetDataPtr(handle, resource);
-    m_handlePool.SetState(handle, ResourceState::Ready);
+    m_handlePool.SetState(handle, GpuResourceState::Ready);
 
     // 估算内存占用 (简化计算)
     size_t memSize = width * height * 4; // 假设 RGBA8
@@ -107,23 +107,23 @@ ResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, uint32_
     return handle;
 }
 
-ID3D12Resource *GpuResourceManager::GetResource(ResourceHandle handle) const {
+ID3D12Resource *GpuResourceManager::GetResource(GpuResourceHandle handle) const {
     if (!m_handlePool.Validate(handle)) {
         return nullptr;
     }
-    if (m_handlePool.GetState(handle) != ResourceState::Ready) {
+    if (m_handlePool.GetState(handle) != GpuResourceState::Ready) {
         return nullptr;
     }
     return static_cast<ID3D12Resource *>(m_handlePool.GetDataPtr(handle));
 }
 
-void GpuResourceManager::Release(ResourceHandle handle, uint64_t fenceValue) {
+void GpuResourceManager::Release(GpuResourceHandle handle, uint64_t fenceValue) {
     if (!m_handlePool.Validate(handle)) {
         return;
     }
 
     // 标记为 PendingRelease，防止业务层再次使用
-    m_handlePool.SetState(handle, ResourceState::PendingRelease);
+    m_handlePool.SetState(handle, GpuResourceState::PendingRelease);
 
     PendingGpuRelease pr;
     pr.handle = handle;

@@ -1,9 +1,9 @@
 #pragma once
 #include "Boot/ResourceConfig.h"
+#include "Core/CpuHandlePool.h"
 #include "Core/DataPool.h"
 #include "Core/DataPoolContext.h"
-#include "Core/HandlePool.h"
-#include "ResourceHandle.h"
+#include "Struct/ResourceHandle.h"
 #include <cstdint>
 #include <mutex>
 #include <shared_mutex>
@@ -24,28 +24,19 @@ namespace Resource {
  * @brief 资产管理器
  *
  * 核心职责：
- * 1. 句柄管理 (HandlePool) - TLS 优化、Generation 防错
+ * 1. 句柄管理 (CpuHandlePool) - TLS 优化、Generation 防错
  * 2. 内存管理 (DataPool) - Linear/RingBuffer/FixedSizeBlock
  * 3. 延迟释放 - 3 帧延迟回收
  * 4. 路径映射 - Path -> Handle 的映射表（原 ResourceCache 功能）
  *
  * 状态管理：委托给 HandlePool，使用 ResourceState 枚举
  */
-class CpuResourceManager {
+class AssetDataManager {
 public:
-    static CpuResourceManager &GetInstance();
+    static AssetDataManager &GetInstance();
 
     void Initialize(const Boot::ResourceSystemConfig &config);
     void Shutdown();
-
-    /**
-     * @brief 强制清理所有延迟释放的资源（测试专用）
-     * @note 绕过帧延迟机制，立即处理 m_pendingReleases 中所有条目。
-     *       仅用于测试环境，生产代码不应调用此方法。
-     */
-#ifdef _DEBUG
-    void ForceCleanupForTesting();
-#endif
 
     // --- 被动调用接口 (由 TaskBucket 调用) ---
 
@@ -59,7 +50,7 @@ public:
      * @brief 分配一个资源槽位
      * @note 由 LoadingBucket 在开始加载前调用。返回的 Handle 状态为 Loading。
      */
-    ResourceHandle AllocateSlot(ResourceType type);
+    CpuResourceHandle AllocateSlot(CpuResourceType type);
 
     /**
      * @brief 注册已加载的数据
@@ -68,19 +59,19 @@ public:
      * @param dataPtr 指向 DataPool 中数据的指针
      * @param size 数据大小
      */
-    void RegisterData(ResourceHandle handle, void *dataPtr, size_t size);
+    void RegisterData(CpuResourceHandle handle, void *dataPtr, size_t size);
 
     /**
      * @brief 获取资源数据指针
      * @note 由 BindingBucket 或渲染线程调用。如果资源未就绪或无效，返回 nullptr。
      */
-    void *GetData(ResourceHandle handle) const;
+    void *GetData(CpuResourceHandle handle) const;
 
     /**
      * @brief 请求释放资源
      * @note 由 BindingBucket 或逻辑层调用。不立即释放，进入延迟回收队列。
      */
-    void Release(ResourceHandle handle);
+    void Release(CpuResourceHandle handle);
 
     /**
      * @brief 每帧更新
@@ -96,7 +87,7 @@ public:
      * @brief 通过路径获取资源句柄
      * @return 有效的句柄，或 Invalid() 如果不存在
      */
-    ResourceHandle GetHandle(const std::string &path) const;
+    CpuResourceHandle GetHandle(const std::string &path) const;
 
     /**
      * @brief 检查资源是否已加载
@@ -111,13 +102,13 @@ public:
     /**
      * @brief 获取资源加载状态
      */
-    ResourceState GetStatus(const std::string &path) const;
+    CpuResourceState GetStatus(const std::string &path) const;
 
     /**
      * @brief 注册路径映射（由异步加载系统调用）
      * @note 加载开始时调用，创建 Handle 并映射路径
      */
-    ResourceHandle RegisterPath(const std::string &path, ResourceType type);
+    CpuResourceHandle RegisterPath(const std::string &path, CpuResourceType type);
 
     /**
      * @brief 取消路径映射（加载失败时调用）
@@ -147,25 +138,25 @@ public:
     void CleanupUnused();
 
 private:
-    CpuResourceManager() = default;
-    ~CpuResourceManager() = default;
+    AssetDataManager() = default;
+    ~AssetDataManager() = default;
 
     // 禁止拷贝
-    CpuResourceManager(const CpuResourceManager &) = delete;
-    CpuResourceManager &operator=(const CpuResourceManager &) = delete;
+    AssetDataManager(const AssetDataManager &) = delete;
+    AssetDataManager &operator=(const AssetDataManager &) = delete;
 
     // 初始化状态
     bool m_initialized = false;
 
     // 句柄池
-    HandlePool m_handlePool;
+    CpuHandlePool m_handlePool;
 
     // 数据池
     std::map<uint8_t, std::unique_ptr<DataPool>> m_dataPools;
 
     // 延迟回收
     struct PendingRelease {
-        ResourceHandle handle;
+        CpuResourceHandle handle;
         uint64_t releaseFrame;
     };
     std::vector<PendingRelease> m_pendingReleases;
@@ -174,7 +165,7 @@ private:
     // 路径映射表（原 ResourceCache 核心功能）
     // 注意：状态信息直接通过 HandlePool 查询，这里只存储元数据
     struct AssetInfo {
-        ResourceHandle handle;
+        CpuResourceHandle handle;
         uint32_t refCount = 0;
     };
     mutable std::unordered_map<std::string, AssetInfo> m_assetMap;
@@ -183,7 +174,7 @@ private:
     uint64_t GetCurrentFrame() const;
     Boot::ResourceSystemConfig m_config;
     void InitializeDataPoolsFromConfig(const Boot::ResourceSystemConfig &config);
-    DataPool *GetDataPoolForHandle(ResourceHandle handle) const;
+    DataPool *GetDataPoolForHandle(CpuResourceHandle handle) const;
 };
 
 } // namespace Resource

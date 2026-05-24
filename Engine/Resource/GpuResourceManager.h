@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/HandlePool.h"
-#include "ResourceHandle.h"
+#include "Core/GpuHandlePool.h"
+#include "Struct/ResourceHandle.h"
 #include <d3d12.h>
 #include <mutex>
 #include <vector>
@@ -33,8 +33,9 @@ public:
      * @param initialState 初始资源状态
      * @return 有效的 ResourceHandle
      */
-    ResourceHandle CreateBuffer(ID3D12Device *device, size_t size, D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_DEFAULT,
-                                D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
+    GpuResourceHandle CreateBuffer(ID3D12Device *device, size_t size,
+                                   D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_DEFAULT,
+                                   D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
 
     /**
      * @brief 创建 GPU 纹理 (2D)
@@ -43,24 +44,24 @@ public:
      * @param height 高度
      * @param format DXGI 格式
      * @param initialState 初始资源状态
-     * @return 有效的 ResourceHandle
+     * @return 有效的 GpuResourceHandle
      */
-    ResourceHandle CreateTexture2D(ID3D12Device *device, uint32_t width, uint32_t height,
-                                   DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM,
-                                   D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
+    GpuResourceHandle CreateTexture2D(ID3D12Device *device, uint32_t width, uint32_t height,
+                                      DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM,
+                                      D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
 
     /**
      * @brief 获取 GPU 资源指针
      * @note 如果句柄无效或资源已释放，返回 nullptr
      */
-    ID3D12Resource *GetResource(ResourceHandle handle) const;
+    ID3D12Resource *GetResource(GpuResourceHandle handle) const;
 
     /**
      * @brief 请求释放 GPU 资源
      * @param handle 资源句柄
      * @param fenceValue 围栏值。当 GPU 完成到此围栏值时，资源才会被真正销毁
      */
-    void Release(ResourceHandle handle, uint64_t fenceValue);
+    void Release(GpuResourceHandle handle, uint64_t fenceValue);
 
     /**
      * @brief 每帧更新
@@ -83,10 +84,10 @@ private:
     GpuResourceManager &operator=(const GpuResourceManager &) = delete;
 
     bool m_initialized = false;
-    HandlePool m_handlePool;
+    GpuHandlePool m_handlePool;
 
     struct PendingGpuRelease {
-        ResourceHandle handle;
+        GpuResourceHandle handle;
         uint64_t fenceValue;
     };
     std::vector<PendingGpuRelease> m_pendingReleases;
