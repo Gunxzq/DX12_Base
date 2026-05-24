@@ -7,7 +7,7 @@ namespace Resource {
 
 // CPU 端资源状态
 enum class CpuResourceState : uint8_t { Empty, Loading, Ready, Error, PendingRelease };
-enum class CpuResourceType : uint8_t { Unknown, Mesh, Texture, Audio, Shader };
+enum class CpuResourceType : uint8_t { Unknown, Mesh, Texture, Audio, Shader, UploadBuffer, ReadbackBuffer };
 
 // GPU 端资源状态
 enum class GpuResourceState : uint8_t { Empty, Ready, PendingRelease };
