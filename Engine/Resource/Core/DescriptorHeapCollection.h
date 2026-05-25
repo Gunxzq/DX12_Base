@@ -1,4 +1,5 @@
 #pragma once
+#include "DescriptorSlotAllocator.h"
 #include "Resource/Struct/Descriptor.h"
 #include <d3d12.h>
 #include <memory>
@@ -8,7 +9,6 @@
 
 namespace DX12Engine::Resource {
 
-class DescriptorSlotAllocator;
 struct DescriptorHeapConfig;
 
 class DescriptorHeapCollection {

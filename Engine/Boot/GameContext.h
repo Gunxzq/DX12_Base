@@ -13,6 +13,13 @@ class CommandList;
 } // namespace DX12Engine::Renderer
 
 namespace DX12Engine {
+namespace Renderer {
+class FrameResourceManager;
+}
+
+namespace Resource {
+class DescriptorHeapCollection;
+}
 namespace Input {
 class InputManager;
 }
@@ -75,6 +82,8 @@ public:
     // ── 渲染子系统指针 ──
     Renderer::D3D12DeviceContext *DeviceContext = nullptr;
     Renderer::CameraManager *CameraMgr = nullptr;
+    Resource::DescriptorHeapCollection *DescriptorHeaps = nullptr;
+    Renderer::FrameResourceManager *FrameResourceManager = nullptr;
 
     Input::InputManager *InputMgr = nullptr;
 
@@ -87,6 +96,8 @@ public:
     UINT GetBackBufferIndex() const;
     ID3D12Resource *GetBackBuffer() const;
     uint64_t GetFenceValue(D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
+    uint64_t GetCompletedFence() const;
+    uint64_t GetNextFence() const;
 
     void FlushAllQueues();
 

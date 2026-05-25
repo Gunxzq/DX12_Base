@@ -5,7 +5,9 @@
 #include "ECS/Core/Registry.h"
 #include "GameTimer.h"
 #include "Platform/Windows/Window.h"
+#include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
+#include "Resource/Core/DescriptorHeapCollection.h"
 
 namespace DX12Engine {
 
@@ -112,7 +114,8 @@ private:
     std::unique_ptr<Renderer::D3D12DeviceContext> m_deviceContext; // D3D12 设备上下文
     std::unique_ptr<ECS::Registry> m_registry;                     // ECS Registry
     Scheduler::FrameDriver *m_frameDriver = nullptr;               // FrameDriver (由基础设施层创建)
-
+    Resource::DescriptorHeapCollection m_descriptorHeaps;
+    Renderer::FrameResourceManager m_frameResourceManager;
     // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问
 
     bool m_isInitialized = false;

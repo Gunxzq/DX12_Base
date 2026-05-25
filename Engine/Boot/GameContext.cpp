@@ -83,6 +83,14 @@ uint64_t GameContext::GetFenceValue(D3D12_COMMAND_LIST_TYPE type) {
 // 命令系统便捷方法实现
 // ========================================================================
 
+uint64_t GameContext::GetCompletedFence() const {
+    return DeviceContext ? DeviceContext->GetCommandManager().GetCompletedFenceValue() : 0;
+}
+
+uint64_t GameContext::GetNextFence() const {
+    return DeviceContext ? DeviceContext->GetCommandManager().GetNextSequence() : 0;
+}
+
 void GameContext::FlushAllQueues() {
     if (DeviceContext) {
         DeviceContext->GetCommandManager().FlushAllQueues();

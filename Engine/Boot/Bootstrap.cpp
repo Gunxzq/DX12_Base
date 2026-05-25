@@ -1,4 +1,5 @@
 #include "Bootstrap.h"
+#include "Boot/ResourceConfig.h"
 #include "ConfigManager.h"
 #include "ECS/Core/Registry.h"
 #include "Event/MessageDispatcher.h"
@@ -7,8 +8,10 @@
 #include "Logger/Logger.h"
 #include "Platform/Input/InputManager.h"
 #include "Platform/Windows/Window.h"
+#include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
+#include "Resource/Core/DescriptorHeapCollection.h"
 #include "Scheduler/FrameDriver.h"
 #include <steam/isteamnetworkingutils.h>
 #include <steam/steamnetworkingsockets.h>
@@ -21,6 +24,7 @@ using namespace DX12Engine::Event;
 using namespace DX12Engine::Renderer;
 using EngineLogger = DX12Engine::Logger::Logger;
 using namespace DX12Engine::Boot;
+using namespace DX12Engine::Resource;
 
 namespace {
 void EarlyLog(const std::string &msg) {
@@ -37,6 +41,12 @@ namespace Boot {
 Bootstrap::~Bootstrap() { Shutdown(); }
 
 void Bootstrap::Shutdown() {
+    // 1. 关闭帧资源管理器
+    m_frameResourceManager.Shutdown();
+
+    // 2. 关闭描述符堆集合
+    m_descriptorHeaps.Shutdown();
+
     // 1. 关闭调度器上下文 (FrameDriver)
     DX12Engine::Scheduler::ShutdownSchedulerContext();
     m_frameDriver = nullptr;
@@ -224,6 +234,38 @@ void Bootstrap::InitializeModules() {
         if (!InitializeD3DDeviceContext()) {
             throw std::runtime_error("[Bootstrap] InitializeD3DDeviceContext returned false.");
         }
+        // ====================================================================
+        // 初始化描述符堆集合
+        // ====================================================================
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing DescriptorHeapCollection...");
+
+        std::vector<Resource::DescriptorHeapConfig> heapConfigs = {
+            // CBV_SRV_UAV 堆（大型，GPU 可见）
+            {Resource::DescriptorHeapType::CbvSrvUav, 65536, 0,
+             Resource::DescriptorSlotFlags::EnableExpand | Resource::DescriptorSlotFlags::DelayRelease, true},
+
+            // RTV 堆（渲染目标，CPU 可见）
+            {Resource::DescriptorHeapType::Rtv, 1024, 0,
+             Resource::DescriptorSlotFlags::EnableExpand | Resource::DescriptorSlotFlags::DelayRelease, false},
+
+            // DSV 堆（深度模板，CPU 可见）
+            {Resource::DescriptorHeapType::Dsv, 512, 0,
+             Resource::DescriptorSlotFlags::EnableExpand | Resource::DescriptorSlotFlags::DelayRelease, false},
+
+            // Sampler 堆（固定 2048，GPU 可见）
+            {Resource::DescriptorHeapType::Sampler, 2048, 2048, Resource::DescriptorSlotFlags::LinearAlloc, true}};
+
+        m_descriptorHeaps.Initialize(m_deviceContext->GetDevice(), heapConfigs);
+        EngineLogger::GetInstance()->Info("[Bootstrap] DescriptorHeapCollection initialized.");
+
+        // ====================================================================
+        // 初始化帧资源管理器
+        // ====================================================================
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing FrameResourceManager...");
+
+        m_frameResourceManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
+
+        EngineLogger::GetInstance()->Info("[Bootstrap] FrameResourceManager initialized.");
 
         InitializeDebugUI();
 
@@ -292,6 +334,9 @@ GameContext *Bootstrap::CreateContext() {
     uint32_t width = m_window ? m_window->GetWidth() : 1280;
     uint32_t height = m_window ? m_window->GetHeight() : 720;
     m_context->CameraMgr->Initialize(width, height);
+
+    m_context->DescriptorHeaps = &m_descriptorHeaps;
+    m_context->FrameResourceManager = &m_frameResourceManager;
 
     m_context->InputMgr = &DX12Engine::Input::InputManager::Get();
 
