@@ -36,18 +36,6 @@ void OpaqueRenderer::Initialize() {
     CreateRootSignature();
     CreatePSO();
 
-    auto device = m_context->GetDevice();
-    m_objectCBAlignedSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-
-    for (uint32_t i = 0; i < 3; ++i) {
-        UINT numObjectsPerFrame = 1000;
-        UINT cbSize = m_objectCBAlignedSize * numObjectsPerFrame;
-
-        ThrowIfFailed(d3dUtil::CreateUploadBuffer(device, cbSize, D3D12_RESOURCE_STATE_GENERIC_READ,
-                                                  &m_frameResources[i].objectConstantBuffer));
-        m_frameResources[i].objectConstantBuffer->Map(0, nullptr, &m_frameResources[i].mappedData);
-    }
-
     const auto &viewport = m_context->GetViewport();
     OnResize(static_cast<uint32_t>(viewport.Width), static_cast<uint32_t>(viewport.Height));
 
@@ -71,25 +59,18 @@ void OpaqueRenderer::Update(float deltaTime) {
 // 渲染辅助接口实现
 // ========================================================================
 
-void OpaqueRenderer::BeginFrame(CommandList &cmdList, uint32_t backBufferIndex,
-                                D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress) {
+void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress) {
     if (!m_pso || !m_rootSignature)
         return;
 
-    // 重置当前帧的 Object CB 偏移量
-    m_currentObjectCBOffset = 0;
-
     cmdList.Get()->SetPipelineState(m_pso.Get());
     cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
-
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
 }
 
-void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, const TransformComponent &transform,
-                              uint32_t backBufferIndex) {
-
+void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, const TransformComponent &transform) {
     // 1. 获取 GPU 资源指针
-    auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
+    auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Resource *vb = gpuMgr.GetResource(mesh.vertexBuffer);
     ID3D12Resource *ib = gpuMgr.GetResource(mesh.indexBuffer);
 
@@ -98,46 +79,33 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, c
         return;
     }
 
-    // 2. 使用 MeshComponent 中存储的 VBV/IBV（包含正确的 stride）
+    // 2. 设置顶点/索引缓冲
     cmdList.Get()->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
     cmdList.Get()->IASetIndexBuffer(&mesh.indexBufferView);
     cmdList.Get()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    // 3. 构建 ObjectConstants (World Matrix)
+    // 3. 构建 ObjectConstants
     XMMATRIX translation = XMMatrixTranslation(transform.position.x, transform.position.y, transform.position.z);
     XMMATRIX rotation = XMMatrixRotationRollPitchYaw(transform.rotation.x, transform.rotation.y, transform.rotation.z);
     XMMATRIX scale = XMMatrixScaling(transform.scale.x, transform.scale.y, transform.scale.z);
     XMMATRIX world = scale * rotation * translation;
-
-    // 计算 WorldInvTranspose (用于法线，虽然当前 Shader 没用法线，但结构体里有)
     XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
 
     ObjectConstants objCB;
     XMStoreFloat4x4(&objCB.World, world);
     XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
 
-    // ==================================
+    // 4. 使用 FrameResourceManager 分配
+    if (!m_frameResourceManager) {
+        OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - FrameResourceManager not set!\n");
+        return;
+    }
 
-    // 4. 上传 ObjectConstants 到当前帧的环形缓冲区
-    // 计算当前物体的偏移地址
-    uint8_t *mappedBase = static_cast<uint8_t *>(m_frameResources[backBufferIndex].mappedData);
-    uint8_t *mappedCurrent = mappedBase + m_currentObjectCBOffset;
+    D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
 
-    // 拷贝数据
-    memcpy(mappedCurrent, &objCB, sizeof(ObjectConstants));
-
-    // 计算当前物体的 GPU 虚拟地址
-    D3D12_GPU_VIRTUAL_ADDRESS objCBAddress =
-        m_frameResources[backBufferIndex].objectConstantBuffer->GetGPUVirtualAddress() + m_currentObjectCBOffset;
-
-    // 5. 绑定 Object Constant Buffer (b0)
+    // 5. 绑定并绘制
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objCBAddress);
-
-    // 6. 绘制调用
     cmdList.Get()->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
-
-    // 7. 更新偏移量，为下一个物体做准备
-    m_currentObjectCBOffset += m_objectCBAlignedSize;
 }
 
 void OpaqueRenderer::EndFrame() {

@@ -2,8 +2,8 @@
 
 #include "Common/d3dUtil.h"
 #include "ECS/Core/Registry.h"
+#include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
-#include "Renderer/RHI/PassConstants.h"
 #include "Resource/GpuResourceManager.h"
 #include <array>
 #include <memory>
@@ -43,24 +43,24 @@ public:
     // 渲染辅助接口（供游戏层 System 调用）
     // ========================================================================
 
+    void SetFrameResourceManager(FrameResourceManager *manager) { m_frameResourceManager = manager; }
+
     /**
      * @brief 开始录制不透明物体的绘制命令
      * @param cmdList 当前命令列表
-     * @param backBufferIndex 当前帧索引
      * @param passConstantsAddress 由上层（Game/Immediate Callback）计算并上传好的 PassConstants GPU 地址
      * @note 设置 PSO、根签名，并绑定 Pass Constant Buffer (b1)
      */
-    void BeginFrame(CommandList &cmdList, uint32_t backBufferIndex, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress);
+    void BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress);
 
     /**
      * @brief 绘制单个 Mesh
      * @param cmdList 当前命令列表
      * @param mesh ECS 网格组件
      * @param transform ECS 变换组件
-     * @param backBufferIndex 当前帧索引
      */
     void DrawMesh(CommandList &cmdList, const DX12Engine::ECS::MeshComponent &mesh,
-                  const DX12Engine::ECS::TransformComponent &transform, uint32_t backBufferIndex);
+                  const DX12Engine::ECS::TransformComponent &transform);
 
     /**
      * @brief 结束录制
@@ -86,21 +86,11 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 
+    FrameResourceManager *m_frameResourceManager = nullptr;
+
     // 着色器字节码
     Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> m_psBlob;
-
-    // 常量缓冲区资源（每帧一个，用于三缓冲）
-    struct FrameResources {
-        Microsoft::WRL::ComPtr<ID3D12Resource> objectConstantBuffer;
-        void *mappedData = nullptr;
-        uint64_t fenceValue = 0;
-    };
-    std::array<FrameResources, 3> m_frameResources;
-
-    //  用于在单帧内为多个物体分配 Object CBV 空间的偏移量
-    uint32_t m_currentObjectCBOffset = 0;
-    uint32_t m_objectCBAlignedSize = 0;
 
     // 投影矩阵（窗口 Resize 时更新）
     DirectX::XMMATRIX m_projectionMatrix;

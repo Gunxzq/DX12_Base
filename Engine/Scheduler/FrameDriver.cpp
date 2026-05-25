@@ -3,6 +3,7 @@
 #include "Event/MessageDispatcher.h"
 #include "Platform/Input/InputManager.h"
 #include "Platform/Windows/Window.h"
+#include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
 #include "Renderer/RHI/Command/CommandManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
@@ -245,6 +246,12 @@ bool FrameDriver::Tick() {
     if (m_deviceContext) {
 
         m_deviceContext->BeginFrame();
+    }
+
+    if (m_gameContext && m_gameContext->FrameResourceManager) {
+        uint64_t completedFence = m_gameContext->GetCompletedFence();
+        uint64_t nextFence = m_gameContext->GetNextFence();
+        m_gameContext->FrameResourceManager->BeginFrame(completedFence, nextFence);
     }
 
     // ========================================================================

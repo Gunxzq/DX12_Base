@@ -97,15 +97,15 @@ void GameWorld::RegisterSystems() {
                                                       1.0f, 0, 0, nullptr);
 
                  // 获取 Pass Constant Buffer 地址
-                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = GetCurrentPassCBAddress(); // 需要传入或捕获
+                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
 
                  // 开始渲染
-                 m_renderer->BeginFrame(cmdList, backBufferIndex, passCBAddr);
+                 m_renderer->BeginFrame(cmdList, passCBAddr);
 
                  // 遍历所有带 MeshComponent 和 TransformComponent 的实体并渲染
                  auto view_entities = registry.view<MeshComponent, TransformComponent>();
                  for (const auto &[entity, mesh, transform] : view_entities.each()) {
-                     m_renderer->DrawMesh(cmdList, mesh, transform, backBufferIndex);
+                     m_renderer->DrawMesh(cmdList, mesh, transform);
                  }
                  m_renderer->EndFrame();
 
@@ -230,20 +230,4 @@ void GameWorld::CreateTestCube() {
     meshComp.indexBufferView.SizeInBytes = static_cast<UINT>(ibSize);
 
     m_registry->AddComponent<MeshComponent>(m_cubeEntity, std::move(meshComp));
-}
-
-void GameWorld::InitializePassConstantBuffers() {
-    auto device = m_context->DeviceContext->GetDevice();
-    UINT cbSize = d3dUtil::CalcConstantBufferByteSize(sizeof(PassConstants));
-
-    for (uint32_t i = 0; i < 3; ++i) {
-        ThrowIfFailed(d3dUtil::CreateUploadBuffer(device, cbSize, D3D12_RESOURCE_STATE_GENERIC_READ,
-                                                  &m_passCBResources[i].resource));
-        m_passCBResources[i].resource->Map(0, nullptr, &m_passCBResources[i].mappedData);
-    }
-}
-
-D3D12_GPU_VIRTUAL_ADDRESS GameWorld::GetCurrentPassCBAddress() const {
-    uint32_t frameIndex = m_context->GetBackBufferIndex();
-    return m_passCBResources[frameIndex].resource->GetGPUVirtualAddress();
 }

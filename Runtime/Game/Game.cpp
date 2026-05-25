@@ -36,8 +36,8 @@ bool Game::Initialize() {
     // 2. 创建渲染器
     m_opaqueRenderer = std::make_unique<OpaqueRenderer>();
     m_opaqueRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_opaqueRenderer->SetFrameResourceManager(m_context->FrameResourceManager); // 新增
     m_opaqueRenderer->Initialize();
-
     // 4. 初始化相机
     if (m_context->CameraMgr) {
         auto &mainCamera = m_context->CameraMgr->GetMainCamera();
@@ -51,7 +51,6 @@ bool Game::Initialize() {
 
     // 6. 初始化游戏模块（它们会自己注册游戏逻辑系统）
     m_world.Initialize(m_context, m_opaqueRenderer.get());
-    m_world.InitializePassConstantBuffers(); // Pass CB 初始化
     m_world.CreateTestCube();
 
     m_inputHandler.Initialize(m_context);
@@ -62,17 +61,25 @@ bool Game::Initialize() {
             [this]() {
                 m_context->CameraMgr->UpdateMainCamera();
 
-                uint32_t frameIndex = m_context->GetBackBufferIndex();
-                PassConstants passData;
                 const auto &camera = m_context->CameraMgr->GetMainCamera();
+                auto &passConstants = m_context->FrameResourceManager->GetPassConstants();
 
-                XMStoreFloat4x4(&passData.View, camera.ViewMatrix);
-                XMStoreFloat4x4(&passData.Proj, camera.ProjMatrix);
-                XMStoreFloat4x4(&passData.ViewProj, camera.ViewProjMatrix);
-                passData.CameraPos = camera.Position;
-                passData.TotalTime = static_cast<float>(m_context->MainTimer->GetGameTime());
+                // 存储矩阵
+                XMStoreFloat4x4(&passConstants.View, camera.ViewMatrix);
+                XMStoreFloat4x4(&passConstants.Proj, camera.ProjMatrix);
+                XMStoreFloat4x4(&passConstants.ViewProj, camera.ViewProjMatrix);
+                XMStoreFloat4x4(&passConstants.InvViewProj, camera.InverseViewProj);
 
-                memcpy(m_world.GetPassCBResource(frameIndex).mappedData, &passData, sizeof(PassConstants));
+                // 存储其他数据
+                passConstants.CameraPos = camera.Position;
+                passConstants.TotalTime = static_cast<float>(m_context->MainTimer->GetGameTime());
+                passConstants.DeltaTime = m_context->MainTimer->GetDeltaTime();
+                passConstants.NearPlane = camera.NearPlane;
+                passConstants.FarPlane = camera.FarPlane;
+                passConstants.AspectRatio = camera.AspectRatio;
+                passConstants.FrameCount = m_context->FrameDriver->GetFrameStats().frameNumber;
+
+                m_context->FrameResourceManager->UpdatePassConstants();
             },
             "CameraUpdate");
     }
