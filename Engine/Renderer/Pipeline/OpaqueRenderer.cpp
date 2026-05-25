@@ -3,6 +3,8 @@
 #include "ECS/Core/Components.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Utils/GeometryGenerator.h"
+#include "Resource/Geometry/GeometryResourceManager.h"
+#include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
@@ -68,23 +70,45 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
 }
 
-void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, const TransformComponent &transform) {
-    // 1. 获取 GPU 资源指针
-    auto &gpuMgr = GpuResourceManager::GetInstance();
-    ID3D12Resource *vb = gpuMgr.GetResource(mesh.vertexBuffer);
-    ID3D12Resource *ib = gpuMgr.GetResource(mesh.indexBuffer);
+void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
+                              const TransformComponent &transform) {
+    if (!m_geometryManager) {
+        OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - GeometryResourceManager not set!\n");
+        return;
+    }
 
-    if (!vb || !ib) {
+    // 1. 获取几何体数据
+    const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
+    if (!mesh || !mesh->isGpuReady) {
+        return;
+    }
+
+    // 2. 获取 GPU 资源
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    ID3D12Resource *vbResource = gpuMgr.GetResource(mesh->vertexBufferHandle);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
+
+    if (!vbResource || !ibResource) {
         OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - Invalid vertex or index buffer!\n");
         return;
     }
 
-    // 2. 设置顶点/索引缓冲
-    cmdList.Get()->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-    cmdList.Get()->IASetIndexBuffer(&mesh.indexBufferView);
-    cmdList.Get()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    // 3. 设置顶点/索引缓冲视图
+    D3D12_VERTEX_BUFFER_VIEW vbView;
+    vbView.BufferLocation = vbResource->GetGPUVirtualAddress();
+    vbView.StrideInBytes = mesh->vertexStride;
+    vbView.SizeInBytes = static_cast<UINT>(mesh->vertexCount * mesh->vertexStride);
 
-    // 3. 构建 ObjectConstants
+    D3D12_INDEX_BUFFER_VIEW ibView;
+    ibView.BufferLocation = ibResource->GetGPUVirtualAddress();
+    ibView.Format = mesh->indexFormat;
+    ibView.SizeInBytes = static_cast<UINT>(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2));
+
+    cmdList.Get()->IASetVertexBuffers(0, 1, &vbView);
+    cmdList.Get()->IASetIndexBuffer(&ibView);
+    cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
+
+    // 4. 构建 ObjectConstants
     XMMATRIX translation = XMMatrixTranslation(transform.position.x, transform.position.y, transform.position.z);
     XMMATRIX rotation = XMMatrixRotationRollPitchYaw(transform.rotation.x, transform.rotation.y, transform.rotation.z);
     XMMATRIX scale = XMMatrixScaling(transform.scale.x, transform.scale.y, transform.scale.z);
@@ -95,7 +119,7 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, c
     XMStoreFloat4x4(&objCB.World, world);
     XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
 
-    // 4. 使用 FrameResourceManager 分配
+    // 5. 分配常量缓冲
     if (!m_frameResourceManager) {
         OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - FrameResourceManager not set!\n");
         return;
@@ -103,9 +127,9 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, const MeshComponent &mesh, c
 
     D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
 
-    // 5. 绑定并绘制
+    // 6. 绑定并绘制
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objCBAddress);
-    cmdList.Get()->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+    cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
 }
 
 void OpaqueRenderer::EndFrame() {

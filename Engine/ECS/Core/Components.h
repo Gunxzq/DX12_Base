@@ -1,13 +1,13 @@
 #pragma once
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Struct/GeometryHandle.h"
 #include <DirectXMath.h>
 #include <d3d12.h>
 
 namespace DX12Engine {
 
 namespace Resource {
-struct CpuResourceHandle;
-struct GpuResourceHandle;
+
+struct GeometryHandle;
 } // namespace Resource
 namespace ECS {
 
@@ -25,17 +25,11 @@ struct TransformComponent {
     }
 };
 
-// 网格组件（GPU 资源句柄）
+// 网格组件 （GeometryHandle）
 struct MeshComponent {
-    Resource::GpuResourceHandle vertexBuffer; // 通过 ResourceManager 管理
-    Resource::GpuResourceHandle indexBuffer;
-    uint32_t vertexCount = 0;
-    uint32_t indexCount = 0;
+    Resource::GeometryHandle geometryHandle;
 
-    // 调试/临时：直接存储 D3D12 视图（简化版）
-    D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
-    D3D12_INDEX_BUFFER_VIEW indexBufferView = {};
+    bool IsValid() const { return geometryHandle.IsValid(); }
 };
-
 } // namespace ECS
 } // namespace DX12Engine

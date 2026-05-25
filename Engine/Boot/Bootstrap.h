@@ -8,6 +8,7 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
+#include "Resource/Geometry/GeometryResourceManager.h"
 
 namespace DX12Engine {
 
@@ -116,6 +117,8 @@ private:
     Scheduler::FrameDriver *m_frameDriver = nullptr;               // FrameDriver (由基础设施层创建)
     Resource::DescriptorHeapCollection m_descriptorHeaps;
     Renderer::FrameResourceManager m_frameResourceManager;
+    Resource::GeometryResourceManager m_geometryResourceManager;
+
     // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问
 
     bool m_isInitialized = false;

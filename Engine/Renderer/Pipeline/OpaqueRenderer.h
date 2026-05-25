@@ -5,6 +5,7 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
 #include "Resource/GpuResourceManager.h"
+#include "Resource/Struct/GeometryHandle.h"
 #include <array>
 #include <memory>
 #include <wrl/client.h>
@@ -13,6 +14,10 @@ namespace DX12Engine::ECS {
 struct MeshComponent;
 struct TransformComponent;
 } // namespace DX12Engine::ECS
+
+namespace DX12Engine::Resource {
+class GeometryResourceManager;
+} // namespace DX12Engine::Resource
 
 namespace DX12Engine::Renderer {
 
@@ -44,6 +49,7 @@ public:
     // ========================================================================
 
     void SetFrameResourceManager(FrameResourceManager *manager) { m_frameResourceManager = manager; }
+    void SetGeometryResourceManager(Resource::GeometryResourceManager *mgr) { m_geometryManager = mgr; }
 
     /**
      * @brief 开始录制不透明物体的绘制命令
@@ -59,7 +65,7 @@ public:
      * @param mesh ECS 网格组件
      * @param transform ECS 变换组件
      */
-    void DrawMesh(CommandList &cmdList, const DX12Engine::ECS::MeshComponent &mesh,
+    void DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
                   const DX12Engine::ECS::TransformComponent &transform);
 
     /**
@@ -87,6 +93,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 
     FrameResourceManager *m_frameResourceManager = nullptr;
+    Resource::GeometryResourceManager *m_geometryManager = nullptr;
 
     // 着色器字节码
     Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;

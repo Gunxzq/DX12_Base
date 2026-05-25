@@ -19,7 +19,8 @@ class FrameResourceManager;
 
 namespace Resource {
 class DescriptorHeapCollection;
-}
+class GeometryResourceManager;
+} // namespace Resource
 namespace Input {
 class InputManager;
 }
@@ -84,6 +85,7 @@ public:
     Renderer::CameraManager *CameraMgr = nullptr;
     Resource::DescriptorHeapCollection *DescriptorHeaps = nullptr;
     Renderer::FrameResourceManager *FrameResourceManager = nullptr;
+    Resource::GeometryResourceManager *GeometryResourceManager = nullptr;
 
     Input::InputManager *InputMgr = nullptr;
 
