@@ -8,6 +8,8 @@
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Utils/GeometryGenerator.h"
+#include "Resource/Geometry/GeometryResourceManager.h"
+#include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Scheduler/FrameDriver.h"
 #include <DirectXMath.h>
@@ -104,9 +106,14 @@ void GameWorld::RegisterSystems() {
 
                  // 遍历所有带 MeshComponent 和 TransformComponent 的实体并渲染
                  auto view_entities = registry.view<MeshComponent, TransformComponent>();
-                 for (const auto &[entity, mesh, transform] : view_entities.each()) {
-                     m_renderer->DrawMesh(cmdList, mesh, transform);
+                 for (const auto &[entity, meshComp, transform] : view_entities.each()) {
+                     if (!meshComp.IsValid()) {
+                         OutputDebugStringW(L"[WARN] Invalid geometry handle\n");
+                         continue; // 跳过无效几何体
+                     }
+                     m_renderer->DrawMesh(cmdList, meshComp.geometryHandle, transform);
                  }
+
                  m_renderer->EndFrame();
 
                  // 屏障：RenderTarget -> Present
@@ -207,6 +214,45 @@ void GameWorld::CreateTestCube() {
         ibResource->Unmap(0, nullptr);
     }
 
+    // 4. 构建 TriangleMesh
+    TriangleMesh triangleMesh;
+    triangleMesh.vertexBufferHandle = vbHandle;
+    triangleMesh.indexBufferHandle = ibHandle;
+    triangleMesh.vertexCount = static_cast<uint32_t>(simpleVertices.size());
+    triangleMesh.indexCount = static_cast<uint32_t>(meshData.Indices32.size());
+    triangleMesh.vertexStride = sizeof(SimpleVertex);
+    triangleMesh.indexFormat = DXGI_FORMAT_R32_UINT;
+    triangleMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    triangleMesh.isGpuReady = true;
+
+    // 计算包围盒
+    BoundingAABB bounds;
+    bounds.min = XMFLOAT3(-0.5f, -0.5f, -0.5f);
+    bounds.max = XMFLOAT3(0.5f, 0.5f, 0.5f);
+    triangleMesh.localBounds = bounds;
+
+    // 5. 注册到 GeometryResourceManager
+    auto &geoMgr = m_context->GeometryResourceManager;
+    GeometryHandle geoHandle = geoMgr->RegisterTriangleMesh(triangleMesh);
+
+    if (!geoHandle.IsValid()) {
+        OutputDebugStringW(L"[ERROR] RegisterTriangleMesh failed!\n");
+        return;
+    }
+
+    const TriangleMesh *testMesh = geoMgr->GetTriangleMesh(geoHandle);
+    if (!testMesh) {
+        OutputDebugStringW(L"[ERROR] GetTriangleMesh returned null!\n");
+        return;
+    }
+
+    // 格式化后再输出
+    wchar_t msg[256];
+    swprintf_s(msg, _countof(msg), L"[INFO] Cube registered: idx=%d, vtx=%d, idxCount=%d\n",
+               static_cast<int>(geoHandle.index), static_cast<int>(testMesh->vertexCount),
+               static_cast<int>(testMesh->indexCount));
+    OutputDebugStringW(msg);
+
     // 4. 创建实体并添加组件
     m_cubeEntity = m_registry->CreateEntity();
 
@@ -218,16 +264,6 @@ void GameWorld::CreateTestCube() {
 
     // Mesh 组件
     MeshComponent meshComp;
-    meshComp.vertexBuffer = vbHandle;
-    meshComp.indexBuffer = ibHandle;
-    meshComp.vertexCount = static_cast<uint32_t>(simpleVertices.size());
-    meshComp.indexCount = static_cast<uint32_t>(meshData.Indices32.size());
-    meshComp.vertexBufferView.BufferLocation = vbResource ? vbResource->GetGPUVirtualAddress() : 0;
-    meshComp.vertexBufferView.StrideInBytes = sizeof(SimpleVertex);
-    meshComp.vertexBufferView.SizeInBytes = static_cast<UINT>(vbSize);
-    meshComp.indexBufferView.BufferLocation = ibResource ? ibResource->GetGPUVirtualAddress() : 0;
-    meshComp.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
-    meshComp.indexBufferView.SizeInBytes = static_cast<UINT>(ibSize);
-
+    meshComp.geometryHandle = geoHandle;
     m_registry->AddComponent<MeshComponent>(m_cubeEntity, std::move(meshComp));
 }

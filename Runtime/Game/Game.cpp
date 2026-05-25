@@ -6,6 +6,7 @@
 #include "Platform/Windows/Window.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
+#include "Resource/Geometry/GeometryResourceManager.h"
 #include "Resource/GpuResourceManager.h"
 #include "Scheduler/FrameDriver.h"
 
@@ -37,6 +38,7 @@ bool Game::Initialize() {
     m_opaqueRenderer = std::make_unique<OpaqueRenderer>();
     m_opaqueRenderer->SetDeviceContext(m_context->DeviceContext);
     m_opaqueRenderer->SetFrameResourceManager(m_context->FrameResourceManager); // 新增
+    m_opaqueRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
     m_opaqueRenderer->Initialize();
     // 4. 初始化相机
     if (m_context->CameraMgr) {
