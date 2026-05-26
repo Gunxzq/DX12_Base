@@ -6,8 +6,8 @@
 #include "Platform/Windows/Window.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
-#include "Resource/Geometry/GeometryResourceManager.h"
 #include "Resource/GpuResourceManager.h"
+#include "Resource/Manager/GeometryResourceManager.h"
 #include "Scheduler/FrameDriver.h"
 
 using namespace DX12Engine;

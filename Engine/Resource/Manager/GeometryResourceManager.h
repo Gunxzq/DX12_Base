@@ -1,11 +1,19 @@
 #pragma once
 
+#include "Math/BoundingVolume.h"
+#include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/Struct/GeometryHandle.h"
-#include "TriangleMesh.h"
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
-namespace DX12Engine::Resource {
+namespace DX12Engine {
+
+namespace Math {
+using BoundingVolumeVariant = Math::BoundingVolumeVariant;
+}
+
+namespace Resource {
 
 // ============================================================================
 // 几何体资源管理器
@@ -38,7 +46,7 @@ public:
     TriangleMesh *GetTriangleMesh(GeometryHandle handle);
 
     bool IsValid(GeometryHandle handle) const;
-    const BoundingVolumeVariant *GetBounds(GeometryHandle handle) const;
+    const Math::BoundingVolumeVariant *GetBounds(GeometryHandle handle) const;
 
     // ========================================================================
     // 几何体释放
@@ -93,4 +101,6 @@ private:
     static constexpr uint32_t MAX_CAPACITY = 65536;
 };
 
-} // namespace DX12Engine::Resource
+} // namespace Resource
+
+} // namespace DX12Engine

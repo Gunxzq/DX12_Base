@@ -3,9 +3,9 @@
 #include "ECS/Core/Components.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Utils/GeometryGenerator.h"
-#include "Resource/Geometry/GeometryResourceManager.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
+#include "Resource/Manager/GeometryResourceManager.h"
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
 #include <entt/entt.hpp>

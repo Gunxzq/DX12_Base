@@ -104,7 +104,7 @@ bool GeometryResourceManager::IsValid(GeometryHandle handle) const {
     return entry.inUse && entry.generation == handle.generation;
 }
 
-const BoundingVolumeVariant *GeometryResourceManager::GetBounds(GeometryHandle handle) const {
+const Math::BoundingVolumeVariant *GeometryResourceManager::GetBounds(GeometryHandle handle) const {
     const TriangleMesh *mesh = GetTriangleMesh(handle);
     if (!mesh) {
         return nullptr;
