@@ -335,7 +335,10 @@ void FrameDriver::ExecutePhase(TaskPhase phase) {
         task();
     }
 
-    // 等待本阶段完成（屏障同步）
+    auto renderTasks = m_executor.StealRenderThreadTasks();
+    for (auto &task : renderTasks)
+        task();
+
     m_executor.WaitForCompletion();
 }
 

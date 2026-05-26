@@ -56,7 +56,7 @@ void GameWorld::RegisterSystems() {
                  view.each([deltaTime](TransformComponent &transform) { transform.rotation.y += deltaTime * 2.0f; });
              },
          .phase = TaskPhase::Update,
-         .threadType = ThreadType::Main,
+         .threadType = ThreadType::Worker,
          .priority = TaskPriority::Normal,
          .alwaysRun = true});
 
