@@ -7,6 +7,7 @@
 #include "Framework/SystemRegistry.h"
 #include "Math/BoundingVolume.h"
 #include "Renderer/Core/LODSystem.h"
+#include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Utils/GeometryGenerator.h"
@@ -67,6 +68,11 @@ void GameWorld::RegisterSystems() {
         {.name = "CubeRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
+                 if (m_context->renderQueue.Empty()) {
+                     ;
+                     return;
+                 }
+
                  // 获取命令列表等渲染资源
                  uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
                  auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
@@ -113,7 +119,7 @@ void GameWorld::RegisterSystems() {
                  for (const auto &item : renderQueue.GetItems()) {
                      if (!item.IsValid())
                          continue;
-                     m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix);
+                     m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress);
                  }
                  m_renderer->EndFrame();
 

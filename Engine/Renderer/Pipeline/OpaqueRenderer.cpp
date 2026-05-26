@@ -71,7 +71,7 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
 }
 
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
-                              const DirectX::XMMATRIX &worldMatrix) {
+                              const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress) {
     if (!m_geometryManager) {
         OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - GeometryResourceManager not set!\n");
         return;
@@ -106,24 +106,8 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
 
     cmdList.Get()->IASetVertexBuffers(0, 1, &vbView);
     cmdList.Get()->IASetIndexBuffer(&ibView);
-    cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
-
-    XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, worldMatrix));
-
-    ObjectConstants objCB;
-    XMStoreFloat4x4(&objCB.World, worldMatrix);
-    XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
-
-    // 5. 分配常量缓冲
-    if (!m_frameResourceManager) {
-        OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - FrameResourceManager not set!\n");
-        return;
-    }
-
-    D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
-
-    // 6. 绑定并绘制
-    cmdList.Get()->SetGraphicsRootConstantBufferView(0, objCBAddress);
+    cmdList.Get()->IASetPrimitiveTopology(mesh->topology); // 6. 绑定并绘制
+    cmdList.Get()->SetGraphicsRootConstantBufferView(0, objectCBAddress);
     cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
 }
 

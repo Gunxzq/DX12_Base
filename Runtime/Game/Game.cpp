@@ -39,13 +39,15 @@ bool Game::Initialize() {
     // 2. 创建渲染器
     m_opaqueRenderer = std::make_unique<OpaqueRenderer>();
     m_opaqueRenderer->SetDeviceContext(m_context->DeviceContext);
-    m_opaqueRenderer->SetFrameResourceManager(m_context->FrameResourceManager); // 新增
     m_opaqueRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
     m_opaqueRenderer->Initialize();
 
     m_context->CullingSystem = &m_cullingSystem;
     m_context->LODSystem = &m_lodSystem;
     m_context->RenderItemBuilder = &m_renderItemBuilder;
+
+    // 设置帧驱动器引用
+    m_context->RenderItemBuilder->SetFrameResourceManager(m_context->FrameResourceManager);
 
     // 4. 初始化相机
     if (m_context->CameraMgr) {

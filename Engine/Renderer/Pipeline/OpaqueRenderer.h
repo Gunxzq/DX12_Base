@@ -2,7 +2,6 @@
 
 #include "Common/d3dUtil.h"
 #include "ECS/Core/Registry.h"
-#include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Struct/GeometryHandle.h"
@@ -48,7 +47,6 @@ public:
     // 渲染辅助接口（供游戏层 System 调用）
     // ========================================================================
 
-    void SetFrameResourceManager(FrameResourceManager *manager) { m_frameResourceManager = manager; }
     void SetGeometryResourceManager(Resource::GeometryResourceManager *mgr) { m_geometryManager = mgr; }
 
     /**
@@ -66,7 +64,7 @@ public:
      * @param transform ECS 变换组件
      */
     void DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
-                  const DirectX::XMMATRIX &worldMatrix);
+                  const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress);
 
     /**
      * @brief 结束录制
@@ -92,7 +90,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 
-    FrameResourceManager *m_frameResourceManager = nullptr;
     Resource::GeometryResourceManager *m_geometryManager = nullptr;
 
     // 着色器字节码
