@@ -19,6 +19,9 @@ struct LODResult {
         auto it = handleMap.find(entity);
         return it != handleMap.end() ? it->second : Resource::GeometryHandle::Invalid();
     }
+
+    // size
+    size_t Size() const { return handleMap.size(); }
 };
 
 // ============================================================================
@@ -42,6 +45,7 @@ public:
     // LODMesh 管理（临时，后续可由 AssetManager 接管）
     // ========================================================================
 
+    Resource::LODMeshHandle RegisterLODMesh(const Resource::LODMesh &lodMesh);
     void RegisterLODMesh(Resource::LODMeshHandle handle, const Resource::LODMesh &lodMesh);
     void UnregisterLODMesh(Resource::LODMeshHandle handle);
     const Resource::LODMesh *GetLODMesh(Resource::LODMeshHandle handle) const;

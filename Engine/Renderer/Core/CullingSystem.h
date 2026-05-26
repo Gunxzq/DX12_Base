@@ -19,15 +19,15 @@ namespace Renderer {
 // 剔除结果
 // ============================================================================
 struct CullingResult {
-    std::unordered_map<ECS::Entity, bool> visibleMap;
+    std::vector<ECS::Entity> visibleEntities;
 
-    void Clear() { visibleMap.clear(); }
-    void SetVisible(ECS::Entity entity, bool visible) { visibleMap[entity] = visible; }
+    void Clear() { visibleEntities.clear(); }
+    void SetVisible(ECS::Entity entity) { visibleEntities.push_back(entity); }
     bool IsVisible(ECS::Entity entity) const {
-        auto it = visibleMap.find(entity);
-        return it != visibleMap.end() && it->second;
+        // 线性查找（小规模没问题）
+        return std::find(visibleEntities.begin(), visibleEntities.end(), entity) != visibleEntities.end();
     }
-    size_t Size() const { return visibleMap.size(); }
+    size_t Size() const { return visibleEntities.size(); }
 };
 
 // ============================================================================

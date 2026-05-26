@@ -31,6 +31,9 @@ struct LODConfig {
     uint32_t GetLODCount() const { return static_cast<uint32_t>(distanceThresholds.size()) + 1; }
 
     bool IsValid() const { return !distanceThresholds.empty(); }
+
+    // 默认GetDefault
+    static LODConfig GetDefault() { return LODConfig({10.0f, 30.0f, 60.0f}); }
 };
 
 } // namespace DX12Engine::Renderer

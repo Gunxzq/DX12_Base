@@ -4,15 +4,17 @@
 #include "Renderer/Scene/CameraManager.h"
 #include <cmath>
 
+using namespace DX12Engine::Renderer;
+
 namespace DX12Engine::Renderer {
 
 // ============================================================================
 // 执行
 // ============================================================================
 
-void RenderItemBuilder::Execute(ECS::Registry &registry, const std::unordered_map<ECS::Entity, bool> &visibleMap,
-                                const std::unordered_map<ECS::Entity, Resource::GeometryHandle> &lodMap,
+void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cullingResult, const LODResult &lodResult,
                                 RenderQueue &outQueue) {
+
     // 清空上一帧的队列
     outQueue.Clear();
 
@@ -23,23 +25,16 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const std::unordered_ma
         cameraPos = camera.Position;
     }
 
-    auto view = registry.view<ECS::TransformComponent>();
-
-    for (auto entity : view) {
-        // 1. 检查可见性
-        auto visibleIt = visibleMap.find(entity);
-        if (visibleIt == visibleMap.end() || !visibleIt->second) {
-            continue;
-        }
+    for (auto entity : cullingResult.visibleEntities) {
 
         // 2. 获取 LOD 结果
-        auto lodIt = lodMap.find(entity);
-        if (lodIt == lodMap.end() || !lodIt->second.IsValid()) {
+        Resource::GeometryHandle handle = lodResult.GetHandle(entity);
+        if (!handle.IsValid()) {
             continue;
         }
 
         // 3. 获取 Transform
-        const auto &transform = view.get<ECS::TransformComponent>(entity);
+        auto &transform = registry.GetComponent<ECS::TransformComponent>(entity);
 
         // 4. 计算深度
         float depth = CalculateDepth(transform.position, cameraPos);
@@ -51,7 +46,7 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const std::unordered_ma
 
         // 6. 构建 RenderItem
         RenderItem item;
-        item.geometryHandle = lodIt->second;
+        item.geometryHandle = handle;
         item.materialId = 0;
         item.worldMatrix = transform.GetMatrix();
         item.depth = depth;

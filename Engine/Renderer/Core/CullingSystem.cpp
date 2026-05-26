@@ -38,7 +38,7 @@ void CullingSystem::Execute(ECS::Registry &registry, CullingResult &outResult) {
     auto view = registry.view<ECS::MeshComponent, ECS::TransformComponent>();
     for (auto entity : view) {
         // 当前阶段：所有实体都可见
-        outResult.SetVisible(entity, true);
+        outResult.SetVisible(entity);
     }
 }
 

@@ -7,6 +7,14 @@ using namespace DX12Engine::Resource;
 
 namespace DX12Engine::Renderer {
 
+Resource::LODMeshHandle LODSystem::RegisterLODMesh(const Resource::LODMesh &lodMesh) {
+    Resource::LODMeshHandle handle;
+    handle.index = static_cast<uint32_t>(m_lodMeshes.size());
+    handle.generation = 1;
+    m_lodMeshes[handle] = lodMesh;
+    return handle;
+}
+
 /**
  * @brief 注册 LODMesh
  * @param handle LODMesh 句柄
