@@ -44,11 +44,24 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
         bool isTransparent = false; // 当前阶段无透明物体
         uint64_t sortKey = BuildSortKey(0, depth, isTransparent);
 
+        // 构建 ObjectConstants
+        XMMATRIX world = transform.GetMatrix();
+        XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+
+        ObjectConstants objCB;
+        XMStoreFloat4x4(&objCB.World, world);
+        XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
+
+        // 直接分配 GPU 地址
+        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
+            m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
+
         // 6. 构建 RenderItem
         RenderItem item;
         item.geometryHandle = handle;
         item.materialId = 0;
         item.worldMatrix = transform.GetMatrix();
+        item.objectCBAddress = objectCBAddress;
         item.depth = depth;
         item.sortKey = sortKey;
 

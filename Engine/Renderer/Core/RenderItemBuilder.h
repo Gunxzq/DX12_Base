@@ -5,6 +5,7 @@
 #include "Renderer/Core/LODSystem.h"
 #include "Renderer/Core/RenderItem.h"
 #include "Renderer/Core/RenderQueue.h"
+#include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include <unordered_map>
 
@@ -27,6 +28,7 @@ public:
     RenderItemBuilder &operator=(const RenderItemBuilder &) = delete;
 
     void SetCameraManager(CameraManager *mgr) { m_cameraManager = mgr; }
+    void SetFrameResourceManager(FrameResourceManager *manager) { m_frameResourceManager = manager; }
 
     void Execute(ECS::Registry &registry, const CullingResult &cullingResult, const LODResult &lodResult,
                  RenderQueue &outQueue);
@@ -36,6 +38,7 @@ private:
     uint64_t BuildSortKey(uint32_t materialId, float depth, bool isTransparent) const;
 
     CameraManager *m_cameraManager = nullptr;
+    FrameResourceManager *m_frameResourceManager = nullptr;
 };
 
 } // namespace DX12Engine::Renderer
