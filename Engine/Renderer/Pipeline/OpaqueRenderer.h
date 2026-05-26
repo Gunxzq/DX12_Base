@@ -66,7 +66,7 @@ public:
      * @param transform ECS 变换组件
      */
     void DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
-                  const DX12Engine::ECS::TransformComponent &transform);
+                  const DirectX::XMMATRIX &worldMatrix);
 
     /**
      * @brief 结束录制

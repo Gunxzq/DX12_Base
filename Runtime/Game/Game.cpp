@@ -15,6 +15,8 @@ using namespace DX12Engine::DebugUI;
 using namespace DX12Engine::Scheduler;
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Input;
+using namespace DX12Engine::Math;
+using namespace DX12Engine::ECS;
 
 Game::Game(Boot::GameContext *context) : m_context(context) {}
 
@@ -40,6 +42,11 @@ bool Game::Initialize() {
     m_opaqueRenderer->SetFrameResourceManager(m_context->FrameResourceManager); // 新增
     m_opaqueRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
     m_opaqueRenderer->Initialize();
+
+    m_context->CullingSystem = &m_cullingSystem;
+    m_context->LODSystem = &m_lodSystem;
+    m_context->RenderItemBuilder = &m_renderItemBuilder;
+
     // 4. 初始化相机
     if (m_context->CameraMgr) {
         auto &mainCamera = m_context->CameraMgr->GetMainCamera();
@@ -47,6 +54,14 @@ bool Game::Initialize() {
         mainCamera.Rotation = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f);
         m_context->CameraMgr->UpdateMainCamera();
     }
+
+    // 配置 LODSystem
+    m_lodSystem.SetLODConfig(LODConfig::GetDefault());
+    m_lodSystem.SetCameraManager(m_context->CameraMgr);
+    m_lodSystem.SetGeometryManager(m_context->GeometryResourceManager);
+
+    // 配置 RenderItemBuilder
+    m_renderItemBuilder.SetCameraManager(m_context->CameraMgr);
 
     // 5. 注册引擎级系统（窗口大小变化、全屏切换等）
     RegisterEngineSystems();
@@ -123,7 +138,7 @@ void Game::RegisterEngineSystems() {
     // WindowResizeSystem
     SystemRegistry::Register({.name = "WindowResizeSystem",
                               .func =
-                                  [this](ECS::Registry &, const MessageContext &ctx) {
+                                  [this](Registry &, const MessageContext &ctx) {
                                       uint32_t width = ctx.GetLow32();
                                       uint32_t height = ctx.GetHigh32();
                                       if (m_context && m_context->DeviceContext) {
@@ -143,7 +158,7 @@ void Game::RegisterEngineSystems() {
     // FullscreenSystem
     SystemRegistry::Register({.name = "FullscreenSystem",
                               .func =
-                                  [this](ECS::Registry &, const MessageContext &ctx) {
+                                  [this](Registry &, const MessageContext &ctx) {
                                       bool bRequestFullscreen = ctx.GetLow32() != 0;
                                       m_context->Window->SetFullscreen(bRequestFullscreen);
                                   },
@@ -151,6 +166,21 @@ void Game::RegisterEngineSystems() {
                               .threadType = ThreadType::Main,
                               .priority = TaskPriority::High,
                               .interestedMessages = {Event::FullscreenToggleEvent::StaticTypeHash}});
+
+    SystemRegistry::Register({.name = "PreRenderPipeline",
+                              .func =
+                                  [this](Registry &reg, const MessageContext &ctx) {
+                                      // 串行执行三个步骤
+                                      m_context->CullingSystem->Execute(reg, m_context->cullingResult);
+                                      m_context->LODSystem->Execute(reg, m_context->lodResult);
+                                      m_context->RenderItemBuilder->Execute(
+                                          reg, m_context->cullingResult, m_context->lodResult, m_context->renderQueue);
+
+                                      m_context->renderQueue.Sort();
+                                  },
+                              .phase = TaskPhase::PreRender,
+                              .threadType = ThreadType::Worker,
+                              .alwaysRun = true});
 }
 
 int Game::Run() {

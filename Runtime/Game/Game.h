@@ -2,6 +2,9 @@
 
 #include "Boot/GameContext.h"
 #include "Input/GameInputHandler.h"
+#include "Renderer/Core/CullingSystem.h"
+#include "Renderer/Core/LODSystem.h"
+#include "Renderer/Core/RenderItemBuilder.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Scene/GameWorld.h"
 #include <memory>
@@ -35,6 +38,10 @@ private:
 
     GameWorld m_world;
     GameInputHandler m_inputHandler;
+
+    DX12Engine::Renderer::CullingSystem m_cullingSystem;
+    DX12Engine::Renderer::LODSystem m_lodSystem;
+    DX12Engine::Renderer::RenderItemBuilder m_renderItemBuilder;
 
     bool m_isRunning = false;
     bool m_isInitialized = false;

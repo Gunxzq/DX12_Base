@@ -3,6 +3,8 @@
 #include "ECS/Core/Entity.h"
 #include "GameTimer.h"
 #include "Logger/Logger.h"
+#include "Renderer/Core/CullingSystem.h" // 包含 CullingResult
+#include "Renderer/Core/LODSystem.h"     // 包含 LODResult
 #include "Renderer/Core/RenderQueue.h"
 #include <unordered_map>
 
@@ -18,7 +20,8 @@ class CommandList;
 namespace DX12Engine {
 namespace Renderer {
 class FrameResourceManager;
-}
+class RenderItemBuilder;
+} // namespace Renderer
 
 namespace Resource {
 class DescriptorHeapCollection;
@@ -92,9 +95,13 @@ public:
     Input::InputManager *InputMgr = nullptr;
 
     // PreRender 阶段的临时结果（每帧重置）
-    std::unordered_map<ECS::Entity, bool> visibleResults;
-    std::unordered_map<ECS::Entity, Resource::GeometryHandle> lodResults;
+    Renderer::CullingResult cullingResult; // 改为 CullingResult 类型
+    Renderer::LODResult lodResult;         // 改为 LODResult 类型
     Renderer::RenderQueue renderQueue;
+
+    Renderer::CullingSystem *CullingSystem = nullptr;
+    Renderer::LODSystem *LODSystem = nullptr;
+    Renderer::RenderItemBuilder *RenderItemBuilder = nullptr;
 
     // ── 便捷访问方法 ──
     bool IsValid() const;

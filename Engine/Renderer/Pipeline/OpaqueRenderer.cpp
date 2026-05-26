@@ -71,7 +71,7 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
 }
 
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
-                              const TransformComponent &transform) {
+                              const DirectX::XMMATRIX &worldMatrix) {
     if (!m_geometryManager) {
         OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - GeometryResourceManager not set!\n");
         return;
@@ -108,15 +108,10 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
     cmdList.Get()->IASetIndexBuffer(&ibView);
     cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
 
-    // 4. 构建 ObjectConstants
-    XMMATRIX translation = XMMatrixTranslation(transform.position.x, transform.position.y, transform.position.z);
-    XMMATRIX rotation = XMMatrixRotationRollPitchYaw(transform.rotation.x, transform.rotation.y, transform.rotation.z);
-    XMMATRIX scale = XMMatrixScaling(transform.scale.x, transform.scale.y, transform.scale.z);
-    XMMATRIX world = scale * rotation * translation;
-    XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+    XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, worldMatrix));
 
     ObjectConstants objCB;
-    XMStoreFloat4x4(&objCB.World, world);
+    XMStoreFloat4x4(&objCB.World, worldMatrix);
     XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
 
     // 5. 分配常量缓冲

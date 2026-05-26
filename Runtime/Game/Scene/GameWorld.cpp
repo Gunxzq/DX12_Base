@@ -5,9 +5,12 @@
 #include "ECS/Core/Components.h"
 #include "ECS/Core/Registry.h"
 #include "Framework/SystemRegistry.h"
+#include "Math/BoundingVolume.h"
+#include "Renderer/Core/LODSystem.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Utils/GeometryGenerator.h"
+#include "Resource/Asset/LODMesh.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
@@ -22,6 +25,7 @@ using namespace DX12Engine::ECS;
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;
 using namespace DX12Engine::Scheduler;
+using namespace DX12Engine::Math;
 
 GameWorld::GameWorld() = default;
 GameWorld::~GameWorld() = default;
@@ -105,15 +109,12 @@ void GameWorld::RegisterSystems() {
                  m_renderer->BeginFrame(cmdList, passCBAddr);
 
                  // 遍历所有带 MeshComponent 和 TransformComponent 的实体并渲染
-                 auto view_entities = registry.view<MeshComponent, TransformComponent>();
-                 for (const auto &[entity, meshComp, transform] : view_entities.each()) {
-                     if (!meshComp.IsValid()) {
-                         OutputDebugStringW(L"[WARN] Invalid geometry handle\n");
-                         continue; // 跳过无效几何体
-                     }
-                     m_renderer->DrawMesh(cmdList, meshComp.geometryHandle, transform);
+                 const auto &renderQueue = m_context->renderQueue;
+                 for (const auto &item : renderQueue.GetItems()) {
+                     if (!item.IsValid())
+                         continue;
+                     m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix);
                  }
-
                  m_renderer->EndFrame();
 
                  // 屏障：RenderTarget -> Present
@@ -229,7 +230,6 @@ void GameWorld::CreateTestCube() {
     BoundingAABB bounds;
     bounds.min = XMFLOAT3(-0.5f, -0.5f, -0.5f);
     bounds.max = XMFLOAT3(0.5f, 0.5f, 0.5f);
-    triangleMesh.localBounds = bounds;
 
     // 5. 注册到 GeometryResourceManager
     auto &geoMgr = m_context->GeometryResourceManager;
@@ -264,6 +264,15 @@ void GameWorld::CreateTestCube() {
 
     // Mesh 组件
     MeshComponent meshComp;
-    meshComp.geometryHandle = geoHandle;
+
+    // 创建 LODMesh（包含 LOD 链）
+    LODMesh lodMesh;
+    lodMesh.lodChain = {geoHandle}; // 只有一个 LOD，后续可扩展
+
+    LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
+
+    // MeshComponent 存储 lodHandle
+    meshComp.lodMeshHandle = lodHandle;
+    meshComp.localBounds = bounds;
     m_registry->AddComponent<MeshComponent>(m_cubeEntity, std::move(meshComp));
 }
