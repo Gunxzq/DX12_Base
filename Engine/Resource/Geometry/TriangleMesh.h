@@ -1,19 +1,18 @@
-// TriangleMesh.h
 #pragma once
+
 #include "Common/Common.h"
-#include "Renderer/Scene/Struct/BoundingVolume.h"
+#include "Math/BoundingVolume.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/ResourceHandle.h"
 #include <cstdint>
 #include <variant>
 
-namespace DX12Engine::Resource {
+namespace DX12Engine {
 
-using BoundingVolumeVariant =
-    std::variant<DX12Engine::Renderer::BoundingSphere, DX12Engine::Renderer::BoundingAABB,
-                 DX12Engine::Renderer::BoundingOBB, DX12Engine::Renderer::BoundingCapsule,
-                 DX12Engine::Renderer::BoundingConvexHull, DX12Engine::Renderer::BoundingCompound>;
-
+namespace Math {
+using BoundingVolumeVariant = Math::BoundingVolumeVariant;
+}
+namespace Resource {
 // 三角形网格定义
 struct TriangleMesh {
     // GPU 资源句柄
@@ -27,9 +26,10 @@ struct TriangleMesh {
     DXGI_FORMAT indexFormat = DXGI_FORMAT_R32_UINT;
     D3D_PRIMITIVE_TOPOLOGY topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 
-    BoundingVolumeVariant localBounds;
+    Math::BoundingVolumeVariant localBounds;
 
     bool isGpuReady = false;
 };
 
-} // namespace DX12Engine::Resource
+} // namespace Resource
+} // namespace DX12Engine

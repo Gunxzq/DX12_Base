@@ -1,12 +1,20 @@
 #pragma once
+
+#include "Math/BoundingVolume.h"
+#include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/Struct/GeometryHandle.h"
+#include "Resource/Struct/LODMeshHandle.h"
 #include <DirectXMath.h>
 #include <d3d12.h>
 
 namespace DX12Engine {
+namespace Math {
+using BoundingVolumeVariant = Math::BoundingVolumeVariant;
+}
 
 namespace Resource {
 
+struct LODMeshHandle;
 struct GeometryHandle;
 } // namespace Resource
 namespace ECS {
@@ -26,10 +34,12 @@ struct TransformComponent {
 };
 
 // 网格组件 （GeometryHandle）
+// ECS/Core/Components.h
 struct MeshComponent {
-    Resource::GeometryHandle geometryHandle;
+    Resource::LODMeshHandle lodMeshHandle;
+    Math::BoundingVolumeVariant localBounds;
 
-    bool IsValid() const { return geometryHandle.IsValid(); }
+    bool IsValid() const { return lodMeshHandle.IsValid(); }
 };
 } // namespace ECS
 } // namespace DX12Engine

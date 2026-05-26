@@ -1,7 +1,10 @@
 #pragma once
 
+#include "ECS/Core/Entity.h"
 #include "GameTimer.h"
 #include "Logger/Logger.h"
+#include "Renderer/Core/RenderQueue.h"
+#include <unordered_map>
 
 // 前向声明 Renderer 命名空间中的类型
 namespace DX12Engine::Renderer {
@@ -86,8 +89,12 @@ public:
     Resource::DescriptorHeapCollection *DescriptorHeaps = nullptr;
     Renderer::FrameResourceManager *FrameResourceManager = nullptr;
     Resource::GeometryResourceManager *GeometryResourceManager = nullptr;
-
     Input::InputManager *InputMgr = nullptr;
+
+    // PreRender 阶段的临时结果（每帧重置）
+    std::unordered_map<ECS::Entity, bool> visibleResults;
+    std::unordered_map<ECS::Entity, Resource::GeometryHandle> lodResults;
+    Renderer::RenderQueue renderQueue;
 
     // ── 便捷访问方法 ──
     bool IsValid() const;

@@ -8,7 +8,7 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
-#include "Resource/Geometry/GeometryResourceManager.h"
+#include "Resource/Manager/GeometryResourceManager.h"
 
 namespace DX12Engine {
 

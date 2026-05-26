@@ -6,7 +6,7 @@
 #include <Jolt/Geometry/Sphere.h>
 #include <unordered_set>
 
-namespace DX12Engine::Renderer {
+namespace DX12Engine::Math {
 
 // ============================================================================
 // BoundingSphere
@@ -379,4 +379,4 @@ BoundingAABB BoundingCompound::ToAABB() const {
     return result;
 }
 
-} // namespace DX12Engine::Renderer
+} // namespace DX12Engine::Math

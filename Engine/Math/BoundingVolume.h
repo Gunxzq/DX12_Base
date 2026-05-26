@@ -3,9 +3,10 @@
 #include <DirectXMath.h>
 #include <cmath>
 #include <cstdint>
+#include <variant>
 #include <vector>
 
-namespace DX12Engine::Renderer {
+namespace DX12Engine::Math {
 
 // ============================================================================
 // 包围盒类型枚举
@@ -102,4 +103,11 @@ struct BoundingCompound {
     BoundingAABB ToAABB() const;
 };
 
-} // namespace DX12Engine::Renderer
+// ============================================================================
+// 包围盒类型擦除（用于组件存储）
+// ============================================================================
+
+using BoundingVolumeVariant =
+    std::variant<BoundingSphere, BoundingAABB, BoundingOBB, BoundingCapsule, BoundingConvexHull, BoundingCompound>;
+
+} // namespace DX12Engine::Math
