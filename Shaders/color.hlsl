@@ -40,10 +40,11 @@ cbuffer cbPass : register(b1)
 cbuffer cbMaterial : register(b2)
 {
     float4 gBaseColor;
-    float4 gEmissive;
     float gMetallic;
     float gRoughness;
+    float gAmbient;
     float gAlpha;
+    float4 gEmissive;
     float gAlphaCutoff;
     uint gBaseColorTextureIndex;
     uint gNormalTextureIndex;
@@ -101,21 +102,23 @@ VertexOut VS(VertexIn vin)
 }
 
 // =================================================================================================
-// 像素着色器
+// 像素着色器 - PBR 版本
 // =================================================================================================
 float4 PS(VertexOut pin) : SV_Target
 {
     float3 N = normalize(pin.WorldNormal);
     float3 V = normalize(gCameraPos - pin.WorldPos);
 
-    // 构建材质
+    // 构建 PBR 材质
     Material mat;
-    mat.DiffuseAlbedo = gBaseColor;
-    mat.FresnelR0 = float3(0.04f, 0.04f, 0.04f);
-    mat.Shininess = 1.0f - gRoughness;
+    mat.BaseColor = gBaseColor;
+    mat.Metallic = gMetallic;
+    mat.Roughness = gRoughness;
+    mat.Ambient = gAmbient; // 环境光遮蔽强度
+    mat.Emissive = gEmissive;
 
-    // 环境光
-    float3 ambient = gAmbientLight.xyz * gAmbientLight.w * gBaseColor.xyz;
+    // 环境光 (考虑 Ambient)
+    float3 ambient = gAmbientLight.xyz * gAmbientLight.w * mat.BaseColor.xyz * mat.Ambient;
 
     // 直接光照
     float3 directLight = float3(0.0f, 0.0f, 0.0f);
@@ -140,8 +143,11 @@ float4 PS(VertexOut pin) : SV_Target
         directLight += ComputeSpotLight(gLights[k], mat, pin.WorldPos, N, V);
     }
 
+    // 自发光
+    float3 emissive = mat.Emissive.xyz * mat.Emissive.w;
+
     // 合并光照并应用顶点颜色
-    float3 litColor = (ambient + directLight) * pin.Color.rgb;
+    float3 litColor = (ambient + directLight + emissive) * pin.Color.rgb;
 
     return float4(litColor, gBaseColor.a * pin.Color.a);
 }

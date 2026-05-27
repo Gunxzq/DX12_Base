@@ -17,14 +17,11 @@ struct MaterialData {
     float alpha = 1.0f;     // 透明度 (0 = 全透明, 1 = 不透明)
 
     // 自发光颜色
-    DirectX::XMFLOAT3 emissive = {0.0f, 0.0f, 0.0f};
-    float emissiveIntensity = 0.0f;
-
-    // 菲涅尔参数
-    DirectX::XMFLOAT3 fresnelR0 = {0.04f, 0.04f, 0.04f}; // 默认 4% 反射
-
-    // 法线强度（用于法线贴图）
+    DirectX::XMFLOAT4 emissive = {0.0f, 0.0f, 0.0f, 1.0f};
     float normalIntensity = 1.0f;
+
+    // Alpha 测试 (4 字节)
+    float alphaCutoff = 0.5f; // 透明度阈值
 
     // 渲染器标识（核心：绑定到具体的渲染管线）
     uint64_t rendererTypeHash = 0;

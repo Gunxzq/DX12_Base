@@ -299,6 +299,12 @@ void GameWorld::CreateTestCube() {
     material.baseColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
     material.metallic = 0.0f;
     material.roughness = 0.2f;
+    material.ambient = 0.0f;
+    material.alphaCutoff = 0.0f;
+    material.alpha = 1.0f;
+    material.emissive = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
+    material.normalIntensity = 1.0f;
+
     material.rendererTypeHash = TYPE_HASH("OpaquePBR"); // 需要定义
 
     MaterialHandle materialHandle = m_context->MaterialMgr->RegisterMaterial(material);

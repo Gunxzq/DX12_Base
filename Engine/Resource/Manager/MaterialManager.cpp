@@ -296,8 +296,7 @@ Renderer::MaterialConstants MaterialManager::ConvertToGPUConstants(const Materia
     gpu.BaseColor = data.baseColor;
 
     // 自发光（合并颜色和强度）
-    gpu.Emissive = DirectX::XMFLOAT4(data.emissive.x * data.emissiveIntensity, data.emissive.y * data.emissiveIntensity,
-                                     data.emissive.z * data.emissiveIntensity, 1.0f);
+    gpu.Emissive = data.emissive;
 
     // PBR 参数
     gpu.Metallic = data.metallic;
