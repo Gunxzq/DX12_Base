@@ -2,6 +2,7 @@
 #include "ECS/Core/Components.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Resource/Manager/MaterialManager.h"
+#include <iostream>
 
 #include <cmath>
 
@@ -37,8 +38,13 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
         }
         Resource::MaterialHandle materialHandle = meshComp.materialHandle;
         const Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
+        const Resource::TextureHandle textureHandle = meshComp.textureHandle;
 
         if (!materialHandle.IsValid()) {
+            continue;
+        }
+
+        if (!textureHandle.IsValid()) {
             continue;
         }
 
@@ -79,6 +85,7 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
         item.materialCBAddress = materialCBAddress;
         item.depth = depth;
         item.sortKey = sortKey;
+        item.textureSRV = m_textureManager->GetSRV(textureHandle);
 
         outQueue.Add(item);
     }

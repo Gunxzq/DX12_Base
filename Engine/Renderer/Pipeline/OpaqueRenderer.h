@@ -69,7 +69,7 @@ public:
      */
     void DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
                   const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-                  D3D12_GPU_VIRTUAL_ADDRESS matCBAddress);
+                  D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV);
 
     /**
      * @brief 结束录制

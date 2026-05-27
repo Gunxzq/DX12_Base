@@ -74,7 +74,7 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
 
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
                               const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-                              D3D12_GPU_VIRTUAL_ADDRESS matCBAddress) {
+                              D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV) {
     if (!m_geometryManager) {
         OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - GeometryResourceManager not set!\n");
         return;
@@ -110,9 +110,12 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
 
     cmdList.Get()->IASetVertexBuffers(0, 1, &vbView);
     cmdList.Get()->IASetIndexBuffer(&ibView);
-    cmdList.Get()->IASetPrimitiveTopology(mesh->topology); // 6. 绑定并绘制
+    cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objectCBAddress);
     cmdList.Get()->SetGraphicsRootConstantBufferView(2, matCBAddress);
+
+    cmdList.Get()->SetGraphicsRootDescriptorTable(4, textureSRV);
+
     cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
 }
 
@@ -167,13 +170,23 @@ void OpaqueRenderer::LoadShaders() {
 void OpaqueRenderer::CreateRootSignature() {
     auto device = m_context->GetDevice();
 
-    CD3DX12_ROOT_PARAMETER slotRootParameter[4];
-    slotRootParameter[0].InitAsConstantBufferView(0); // b0: cbPerObject
-    slotRootParameter[1].InitAsConstantBufferView(1); // b1: cbPass
-    slotRootParameter[2].InitAsConstantBufferView(2); // b2: cbMaterial
-    slotRootParameter[3].InitAsConstantBufferView(3); // b3: cbLights
+    CD3DX12_ROOT_PARAMETER slotRootParameter[5];
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(4, slotRootParameter, 0, nullptr,
+    // 只有纹理 SRV 范围
+    CD3DX12_DESCRIPTOR_RANGE texTable;
+    texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+
+    slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL);
+    slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
+    slotRootParameter[2].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL);
+    slotRootParameter[3].InitAsConstantBufferView(3, 0, D3D12_SHADER_VISIBILITY_ALL);
+    slotRootParameter[4].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
+
+    // 静态采样器
+    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1];
+    staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(5, slotRootParameter, 1, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -196,7 +209,9 @@ void OpaqueRenderer::CreatePSO() {
     D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 40, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0} // 添加
+    };
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = {inputLayout, _countof(inputLayout)};
     psoDesc.pRootSignature = m_rootSignature.Get();

@@ -171,36 +171,45 @@ D3D12_GPU_VIRTUAL_ADDRESS LightManager::UpdateAndUpload(FrameResourceManager *fr
 void LightManager::CreateTestLights() {
     Clear();
 
-    // 方向光 0（主光）
+    // 方向光 0（主光）- 增强强度
     Light dirLight;
-    dirLight.Strength = DirectX::XMFLOAT4(1.0f, 0.9f, 0.8f, 0.0f);
+    dirLight.Strength = DirectX::XMFLOAT4(1.5f, 1.2f, 1.0f, 0.0f); // 增强强度
     dirLight.Direction = DirectX::XMFLOAT4(0.57735f, -0.57735f, 0.57735f, 0.0f);
     SetDirectionalLight(dirLight, 0);
 
-    // 添加一个暖色点光源（右前方）
+    // 添加一个暖色点光源（右前方）- 增强
     Light pointLight0;
-    pointLight0.Strength = DirectX::XMFLOAT4(1.2f, 0.6f, 0.2f, 0.0f);
-    pointLight0.Position = DirectX::XMFLOAT4(5.0f, 2.0f, 5.0f, 0.0f);
+    pointLight0.Strength = DirectX::XMFLOAT4(2.0f, 1.0f, 0.5f, 0.0f); // 增强并变暖
+    pointLight0.Position = DirectX::XMFLOAT4(3.0f, 2.0f, 4.0f, 0.0f);
     pointLight0.FalloffStart = 1.0f;
-    pointLight0.FalloffEnd = 15.0f;
-    pointLight0.Range = 15.0f;
+    pointLight0.FalloffEnd = 20.0f;
+    pointLight0.Range = 20.0f;
     AddPointLight(pointLight0);
 
-    // 添加一个冷色点光源（左前方）
+    // 添加一个冷色点光源（左前方）- 增强
     Light pointLight1;
-    pointLight1.Strength = DirectX::XMFLOAT4(0.2f, 0.5f, 1.2f, 0.0f);
-    pointLight1.Position = DirectX::XMFLOAT4(-5.0f, 2.0f, 5.0f, 0.0f);
+    pointLight1.Strength = DirectX::XMFLOAT4(0.5f, 1.0f, 2.0f, 0.0f); // 增强并变冷
+    pointLight1.Position = DirectX::XMFLOAT4(-3.0f, 2.0f, 4.0f, 0.0f);
     pointLight1.FalloffStart = 1.0f;
-    pointLight1.FalloffEnd = 15.0f;
-    pointLight1.Range = 15.0f;
+    pointLight1.FalloffEnd = 20.0f;
+    pointLight1.Range = 20.0f;
     AddPointLight(pointLight1);
 
-    // 添加一个跟随相机位置的光源（需要在每帧更新位置）
+    // 添加一个背光补光（增强边缘光）
+    Light backLight;
+    backLight.Strength = DirectX::XMFLOAT4(1.0f, 1.0f, 1.5f, 0.0f);
+    backLight.Position = DirectX::XMFLOAT4(0.0f, 3.0f, -5.0f, 0.0f);
+    backLight.FalloffStart = 1.0f;
+    backLight.FalloffEnd = 15.0f;
+    backLight.Range = 15.0f;
+    AddPointLight(backLight);
+
+    // 跟随相机的光源（保持原有）
     Light followLight;
-    followLight.Strength = DirectX::XMFLOAT4(0.8f, 0.8f, 1.0f, 0.0f);
+    followLight.Strength = DirectX::XMFLOAT4(1.2f, 1.2f, 1.5f, 0.0f);
     followLight.FalloffStart = 0.5f;
-    followLight.FalloffEnd = 8.0f;
-    followLight.Range = 8.0f;
+    followLight.FalloffEnd = 10.0f;
+    followLight.Range = 10.0f;
     AddPointLight(followLight);
 }
 

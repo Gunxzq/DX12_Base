@@ -7,6 +7,7 @@
 #include "Renderer/Core/RenderQueue.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Resource/Struct/GeometryHandle.h"
+#include "Resource/Texture/TextureManager.h"
 #include <unordered_map>
 
 namespace DX12Engine {
@@ -36,6 +37,7 @@ public:
     void SetCameraManager(CameraManager *mgr) { m_cameraManager = mgr; }
     void SetFrameResourceManager(FrameResourceManager *manager) { m_frameResourceManager = manager; }
     void SetMaterialManager(Resource::MaterialManager *manager) { m_materialManager = manager; }
+    void SetTextureManager(Resource::TextureManager *manager) { m_textureManager = manager; }
 
     void Execute(ECS::Registry &registry, const CullingResult &cullingResult, const LODResult &lodResult,
                  RenderQueue &outQueue);
@@ -47,6 +49,7 @@ private:
     CameraManager *m_cameraManager = nullptr;
     FrameResourceManager *m_frameResourceManager = nullptr;
     Resource::MaterialManager *m_materialManager = nullptr;
+    Resource::TextureManager *m_textureManager = nullptr;
 };
 
 } // namespace Renderer
