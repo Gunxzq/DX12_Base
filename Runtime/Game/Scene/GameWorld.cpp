@@ -6,7 +6,9 @@
 #include "ECS/Core/Registry.h"
 #include "Framework/SystemRegistry.h"
 #include "Math/BoundingVolume.h"
+#include "Math/HashTypes.h"
 #include "Renderer/Core/LODSystem.h"
+#include "Renderer/Core/RendererRegistry.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
@@ -15,6 +17,8 @@
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
+#include "Resource/Manager/MaterialManager.h"
+#include "Resource/Material/MaterialResource.h"
 #include "Scheduler/FrameDriver.h"
 #include <DirectXMath.h>
 #include <wrl/client.h>
@@ -27,6 +31,9 @@ using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;
 using namespace DX12Engine::Scheduler;
 using namespace DX12Engine::Math;
+
+using RendererGroup = std::unordered_map<uint64_t, std::vector<const RenderItem *>>;
+RendererGroup groups;
 
 GameWorld::GameWorld() = default;
 GameWorld::~GameWorld() = default;
@@ -110,16 +117,26 @@ void GameWorld::RegisterSystems() {
 
                  // 获取 Pass Constant Buffer 地址
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
+                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = m_context->lightCBAddress;
+
+                 // 在 BeginFrame 之前
+                 OutputDebugStringW(L"[DEBUG] PassCBAddr = ");
+                 wchar_t buf[256];
+                 swprintf_s(buf, L"%llu\n", passCBAddr);
+                 OutputDebugStringW(buf);
+                 swprintf_s(buf, L"[DEBUG] LightCBAddr = %llu\n", lightCBAddr);
+                 OutputDebugStringW(buf);
 
                  // 开始渲染
-                 m_renderer->BeginFrame(cmdList, passCBAddr);
+                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr);
 
                  // 遍历所有带 MeshComponent 和 TransformComponent 的实体并渲染
                  const auto &renderQueue = m_context->renderQueue;
                  for (const auto &item : renderQueue.GetItems()) {
                      if (!item.IsValid())
                          continue;
-                     m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress);
+                     m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
+                                          item.materialCBAddress);
                  }
                  m_renderer->EndFrame();
 
@@ -170,25 +187,35 @@ void GameWorld::CreateTestCube() {
     struct SimpleVertex {
         XMFLOAT3 Position;
         XMFLOAT4 Color;
+        XMFLOAT3 Normal;
     };
 
     std::vector<SimpleVertex> simpleVertices(meshData.Vertices.size());
     for (size_t i = 0; i < meshData.Vertices.size(); ++i) {
         simpleVertices[i].Position = meshData.Vertices[i].Position;
+        simpleVertices[i].Normal = meshData.Vertices[i].Normal;
+        simpleVertices[i].Color = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 
         // 为每个面设置不同颜色
-        if (i < 4)
-            simpleVertices[i].Color = XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f); // 红色
-        else if (i < 8)
+        if (i < 4) {
+            simpleVertices[i].Color = XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f);
+            simpleVertices[i].Normal = XMFLOAT3(1.0f, 0.0f, 0.0f); // 红色
+        } else if (i < 8) {
             simpleVertices[i].Color = XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f); // 绿色
-        else if (i < 12)
+            simpleVertices[i].Normal = XMFLOAT3(0.0f, 1.0f, 0.0f);      // 绿色
+        } else if (i < 12) {
             simpleVertices[i].Color = XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色
-        else if (i < 16)
+            simpleVertices[i].Normal = XMFLOAT3(0.0f, 0.0f, 1.0f);      // 蓝色
+        } else if (i < 16) {
             simpleVertices[i].Color = XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f); // 黄色
-        else if (i < 20)
+            simpleVertices[i].Normal = XMFLOAT3(1.0f, 1.0f, 0.0f);      // 黄色
+        } else if (i < 20) {
             simpleVertices[i].Color = XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f); // 紫色
-        else
+            simpleVertices[i].Normal = XMFLOAT3(1.0f, 0.0f, 1.0f);      // 紫色
+        } else if (i < 24) {
             simpleVertices[i].Color = XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f); // 青色
+            simpleVertices[i].Normal = XMFLOAT3(0.0f, 1.0f, 1.0f);      // 青色
+        }
     }
 
     // 3. 创建 GPU 资源
@@ -252,13 +279,6 @@ void GameWorld::CreateTestCube() {
         return;
     }
 
-    // 格式化后再输出
-    wchar_t msg[256];
-    swprintf_s(msg, _countof(msg), L"[INFO] Cube registered: idx=%d, vtx=%d, idxCount=%d\n",
-               static_cast<int>(geoHandle.index), static_cast<int>(testMesh->vertexCount),
-               static_cast<int>(testMesh->indexCount));
-    OutputDebugStringW(msg);
-
     // 4. 创建实体并添加组件
     m_cubeEntity = m_registry->CreateEntity();
 
@@ -268,17 +288,35 @@ void GameWorld::CreateTestCube() {
     XMFLOAT3 scale(1.0f, 1.0f, 1.0f);
     m_registry->AddComponent<TransformComponent>(m_cubeEntity, position, rotation, scale);
 
-    // Mesh 组件
-    MeshComponent meshComp;
-
     // 创建 LODMesh（包含 LOD 链）
     LODMesh lodMesh;
     lodMesh.lodChain = {geoHandle}; // 只有一个 LOD，后续可扩展
 
     LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
 
-    // MeshComponent 存储 lodHandle
+    // 创建材质
+    MaterialData material;
+    material.baseColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+    material.metallic = 0.0f;
+    material.roughness = 0.2f;
+    material.rendererTypeHash = TYPE_HASH("OpaquePBR"); // 需要定义
+
+    MaterialHandle materialHandle = m_context->MaterialMgr->RegisterMaterial(material);
+
+    if (!materialHandle.IsValid()) {
+        OutputDebugStringW(L"[ERROR] RegisterMaterial failed!\n");
+    }
+
+    // 验证能否取回
+    const MaterialData *testMaterial = m_context->MaterialMgr->GetMaterial(materialHandle);
+    if (!testMaterial) {
+        OutputDebugStringW(L"[ERROR] GetMaterial returned null!\n");
+    }
+
+    // Mesh 组件
+    MeshComponent meshComp;
     meshComp.lodMeshHandle = lodHandle;
     meshComp.localBounds = bounds;
+    meshComp.materialHandle = materialHandle;
     m_registry->AddComponent<MeshComponent>(m_cubeEntity, std::move(meshComp));
 }

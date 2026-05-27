@@ -85,9 +85,6 @@ private:
     // 释放条目（内部，立即释放）
     void FreeEntry(uint32_t index);
 
-    // 扩展容量
-    void ExpandCapacity();
-
 private:
     std::vector<Entry> m_entries;                  // 几何体条目数组
     std::vector<uint32_t> m_freeList;              // 空闲索引列表
