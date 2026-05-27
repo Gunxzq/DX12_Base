@@ -17,7 +17,6 @@ struct DDSTextureInfo {
 
 class DDSLoader {
 public:
-    static bool LoadFromFile(const std::wstring &path, DDSTextureInfo &outInfo);
     static bool LoadFromMemory(const uint8_t *data, size_t dataSize, DDSTextureInfo &outInfo);
 
 private:

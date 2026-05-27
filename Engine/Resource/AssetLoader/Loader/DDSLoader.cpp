@@ -33,18 +33,11 @@ bool DDSLoader::FillSubresourceData(const uint8_t *bitData, size_t bitSize, cons
         for (size_t mipIdx = 0; mipIdx < info.desc.MipLevels; ++mipIdx) {
             GetSurfaceInfo(w, h, info.desc.Format, &NumBytes, &RowBytes, nullptr);
 
-            bool useMip =
-                (info.desc.MipLevels <= 1) || (maxsize == 0) || (w <= maxsize && h <= maxsize && d <= maxsize);
-
-            if (useMip) {
-                D3D12_SUBRESOURCE_DATA subData;
-                subData.pData = pSrcBits;
-                subData.RowPitch = static_cast<UINT>(RowBytes);
-                subData.SlicePitch = static_cast<UINT>(NumBytes * d);
-                outSubresources.push_back(subData);
-            } else if (arrayIdx == 0) {
-                ++outSkipMip;
-            }
+            D3D12_SUBRESOURCE_DATA subData;
+            subData.pData = pSrcBits;
+            subData.RowPitch = static_cast<UINT>(RowBytes);
+            subData.SlicePitch = static_cast<UINT>(NumBytes * d);
+            outSubresources.push_back(subData);
 
             if (pSrcBits + (NumBytes * d) > pEndBits) {
                 return false;
@@ -80,10 +73,27 @@ bool DDSLoader::ParseDDS(const uint8_t *fileData, size_t fileSize, DDSTextureInf
     if (header->size != sizeof(DDS_HEADER) || header->ddspf.size != sizeof(DDS_PIXELFORMAT))
         return false;
 
-    // 获取格式（传统 DDS，无 DX10 扩展）
     DXGI_FORMAT format = GetDXGIFormat(header->ddspf);
-    if (format == DXGI_FORMAT_UNKNOWN)
+
+    // 检查是否需要 DX10 扩展头
+    const DDS_HEADER_DXT10 *dxt10Header = nullptr;
+    size_t pixelDataOffset = sizeof(uint32_t) + sizeof(DDS_HEADER);
+
+    if (format == DXGI_FORMAT_UNKNOWN && (header->ddspf.flags & DDS_FOURCC) &&
+        header->ddspf.fourCC == MAKEFOURCC('D', 'X', '1', '0')) {
+
+        if (fileSize < pixelDataOffset + sizeof(DDS_HEADER_DXT10))
+            return false;
+
+        dxt10Header = reinterpret_cast<const DDS_HEADER_DXT10 *>(fileData + pixelDataOffset);
+        format = dxt10Header->dxgiFormat;
+        pixelDataOffset += sizeof(DDS_HEADER_DXT10);
+
+        if (format == DXGI_FORMAT_UNKNOWN)
+            return false;
+    } else if (format == DXGI_FORMAT_UNKNOWN) {
         return false;
+    }
 
     // 确定资源维度和数组大小
     UINT arraySize = 1;
@@ -93,11 +103,39 @@ bool DDSLoader::ParseDDS(const uint8_t *fileData, size_t fileSize, DDSTextureInf
     if (header->flags & DDS_HEADER_FLAGS_VOLUME) {
         resDim = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
     } else {
-        if ((header->caps2 & DDS_CUBEMAP) && (header->caps2 & DDS_CUBEMAP_ALLFACES) == DDS_CUBEMAP_ALLFACES) {
-            arraySize = 6;
-            isCubeMap = true;
+        if (dxt10Header) {
+            // 从 DX10 头获取维度和数组大小
+            switch (dxt10Header->resourceDimension) {
+            case 3: // D3D11_RESOURCE_DIMENSION_TEXTURE3D
+                resDim = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+                break;
+            case 4: // D3D11_RESOURCE_DIMENSION_TEXTURE2D
+            default:
+                resDim = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+                break;
+            }
+            arraySize = dxt10Header->arraySize;
+            isCubeMap = (dxt10Header->miscFlag & 0x4) != 0; // D3D11_RESOURCE_MISC_TEXTURECUBE
+        } else {
+            if ((header->caps2 & DDS_CUBEMAP) && (header->caps2 & DDS_CUBEMAP_ALLFACES) == DDS_CUBEMAP_ALLFACES) {
+                arraySize = 6;
+                isCubeMap = true;
+            }
         }
         resDim = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    }
+
+    // 计算实际 Mip 级别数
+    UINT mipLevels = (header->mipMapCount == 0) ? 1 : static_cast<UINT16>(header->mipMapCount);
+    if (mipLevels == 1 && header->mipMapCount == 0) {
+        // 完整 mip 链，计算实际数量
+        UINT w = header->width, h = header->height;
+        mipLevels = 1;
+        while (w > 1 || h > 1) {
+            w = std::max(1u, w >> 1);
+            h = std::max(1u, h >> 1);
+            mipLevels++;
+        }
     }
 
     // 填充 D3D12_RESOURCE_DESC
@@ -108,7 +146,7 @@ bool DDSLoader::ParseDDS(const uint8_t *fileData, size_t fileSize, DDSTextureInf
     outInfo.desc.Height = header->height;
     outInfo.desc.DepthOrArraySize = (resDim == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? static_cast<UINT16>(header->depth)
                                                                                    : static_cast<UINT16>(arraySize);
-    outInfo.desc.MipLevels = (header->mipMapCount == 0) ? 1 : static_cast<UINT16>(header->mipMapCount);
+    outInfo.desc.MipLevels = static_cast<UINT16>(mipLevels);
     outInfo.desc.Format = format;
     outInfo.desc.SampleDesc.Count = 1;
     outInfo.desc.SampleDesc.Quality = 0;
@@ -117,12 +155,11 @@ bool DDSLoader::ParseDDS(const uint8_t *fileData, size_t fileSize, DDSTextureInf
     outInfo.isCubeMap = isCubeMap;
 
     // 计算像素数据偏移（无 DX10 扩展，偏移固定）
-    size_t offset = sizeof(uint32_t) + sizeof(DDS_HEADER);
-    if (offset >= fileSize)
+    if (pixelDataOffset >= fileSize)
         return false;
 
-    outInfo.pixelData = fileData + offset;
-    outInfo.pixelDataSize = fileSize - offset;
+    outInfo.pixelData = fileData + pixelDataOffset;
+    outInfo.pixelDataSize = fileSize - pixelDataOffset;
 
     // 填充子资源数据
     uint32_t skipMip;
@@ -131,21 +168,6 @@ bool DDSLoader::ParseDDS(const uint8_t *fileData, size_t fileSize, DDSTextureInf
     }
 
     return true;
-}
-
-bool DDSLoader::LoadFromFile(const std::wstring &path, DDSTextureInfo &outInfo) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file.is_open())
-        return false;
-
-    size_t fileSize = file.tellg();
-    file.seekg(0, std::ios::beg);
-
-    std::vector<uint8_t> fileData(fileSize);
-    file.read(reinterpret_cast<char *>(fileData.data()), fileSize);
-    file.close();
-
-    return ParseDDS(fileData.data(), fileSize, outInfo);
 }
 
 bool DDSLoader::LoadFromMemory(const uint8_t *data, size_t dataSize, DDSTextureInfo &outInfo) {
