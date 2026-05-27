@@ -24,8 +24,9 @@ struct RenderItem {
     DirectX::XMMATRIX prevWorldMatrix = {}; // 上一帧世界矩阵（用于运动模糊）
 
     D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress = 0;       // 世界矩阵等常量缓冲
-    D3D12_GPU_VIRTUAL_ADDRESS materialCBAddress = 0;     // 材质参数缓冲（可选）
+    D3D12_GPU_VIRTUAL_ADDRESS materialCBAddress = 0;     // 材质参数缓冲
     D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = 0; // 实例化数据缓冲（可选）
+    D3D12_GPU_DESCRIPTOR_HANDLE textureSRV = {0};        // 纹理 SRV 处理符
 
     uint32_t objCBIndex = UINT32_MAX; // 常量缓冲区数组索引
     uint32_t materialCBIndex = UINT32_MAX;
