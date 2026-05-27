@@ -85,7 +85,8 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
         item.materialCBAddress = materialCBAddress;
         item.depth = depth;
         item.sortKey = sortKey;
-        item.textureSRV = m_textureManager->GetSRV(textureHandle);
+        // item.textureSRV = m_textureManager->GetSRV(textureHandle);
+        item.textureSRV = {0};
 
         outQueue.Add(item);
     }

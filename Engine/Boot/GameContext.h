@@ -7,6 +7,8 @@
 #include "Renderer/Core/CullingSystem.h"
 #include "Renderer/Core/LODSystem.h"
 #include "Renderer/Core/RenderQueue.h"
+#include "Resource/Struct/TextureHandle.h"
+#include "Resource/Texture/TextureManager.h"
 #include <unordered_map>
 
 // 前向声明 Renderer 命名空间中的类型
@@ -94,7 +96,10 @@ public:
     Resource::DescriptorHeapCollection *DescriptorHeaps = nullptr;
     Renderer::FrameResourceManager *FrameResourceManager = nullptr;
     Resource::GeometryResourceManager *GeometryResourceManager = nullptr;
+
     Resource::MaterialManager *MaterialMgr = nullptr;
+    Resource::TextureManager *TextureMgr = nullptr;
+
     Input::InputManager *InputMgr = nullptr;
 
     // PreRender 阶段的临时结果（每帧重置）
@@ -105,7 +110,10 @@ public:
     Renderer::CullingSystem *CullingSystem = nullptr;
     Renderer::LODSystem *LODSystem = nullptr;
     Renderer::RenderItemBuilder *RenderItemBuilder = nullptr;
+
     D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress = 0;
+    Resource::TextureHandle testTextureHandle; // 测试纹理句柄
+    D3D12_GPU_DESCRIPTOR_HANDLE testTextureSRVHandle = {0};
 
     // ── 便捷访问方法 ──
     bool IsValid() const;

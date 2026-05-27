@@ -74,16 +74,20 @@ GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t 
     return handle;
 }
 
-GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, uint32_t width, uint32_t height,
-                                                      DXGI_FORMAT format, D3D12_RESOURCE_STATES initialState) {
+GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
+                                                      D3D12_RESOURCE_STATES initialState) {
     if (!m_initialized || !device) {
+        return GpuResourceHandle::Invalid();
+    }
+
+    // 验证维度
+    if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D) {
         return GpuResourceHandle::Invalid();
     }
 
     GpuResourceHandle handle = m_handlePool.AllocateSlot(GpuResourceType::Texture2D, 0xFF);
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
-    auto desc = CD3DX12_RESOURCE_DESC::Tex2D(format, width, height, 1, 1);
 
     ID3D12Resource *resource = nullptr;
     HRESULT hr = device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc, initialState, nullptr,
@@ -97,8 +101,10 @@ GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, uint
     m_handlePool.SetDataPtr(handle, resource);
     m_handlePool.SetState(handle, GpuResourceState::Ready);
 
-    // 估算内存占用 (简化计算)
-    size_t memSize = width * height * 4; // 假设 RGBA8
+    // 获取真实内存大小
+    D3D12_RESOURCE_ALLOCATION_INFO allocationInfo = device->GetResourceAllocationInfo(0, 1, &desc);
+    size_t memSize = allocationInfo.SizeInBytes;
+
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_totalMemoryUsage += memSize;

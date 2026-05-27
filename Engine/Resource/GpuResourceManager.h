@@ -23,8 +23,8 @@ public:
     GpuResourceHandle CreateBuffer(ID3D12Device *device, size_t size,
                                    D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_DEFAULT,
                                    D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
-    GpuResourceHandle CreateTexture2D(ID3D12Device *device, uint32_t width, uint32_t height,
-                                      DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM,
+
+    GpuResourceHandle CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
                                       D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
     ID3D12Resource *GetResource(GpuResourceHandle handle) const;
 

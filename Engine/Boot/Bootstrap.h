@@ -10,6 +10,7 @@
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Manager/MaterialManager.h"
+#include "Resource/Texture/TextureManager.h"
 
 namespace DX12Engine {
 
@@ -119,7 +120,9 @@ private:
     Resource::DescriptorHeapCollection m_descriptorHeaps;
     Renderer::FrameResourceManager m_frameResourceManager;
     Resource::GeometryResourceManager m_geometryResourceManager;
+
     Resource::MaterialManager m_materialManager;
+    Resource::TextureManager m_textureManager;
 
     // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问
 

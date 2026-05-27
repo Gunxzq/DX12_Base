@@ -8,7 +8,6 @@
 
 #include "Common/MathHelper.h"
 #include "Common/ThrowHelper.h"
-#include "Renderer/Utils/DDSTextureLoader.h"
 #include "d3dx12.h"
 #include <D3Dcompiler.h>
 #include <DirectXCollision.h>

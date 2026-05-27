@@ -14,6 +14,7 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Utils/GeometryGenerator.h"
 #include "Resource/Asset/LODMesh.h"
+#include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
@@ -119,13 +120,11 @@ void GameWorld::RegisterSystems() {
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = m_context->lightCBAddress;
 
-                 // 在 BeginFrame 之前
-                 OutputDebugStringW(L"[DEBUG] PassCBAddr = ");
-                 wchar_t buf[256];
-                 swprintf_s(buf, L"%llu\n", passCBAddr);
-                 OutputDebugStringW(buf);
-                 swprintf_s(buf, L"[DEBUG] LightCBAddr = %llu\n", lightCBAddr);
-                 OutputDebugStringW(buf);
+                 ID3D12DescriptorHeap *descriptorHeaps[] = {
+                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+
+                 //  一个堆
+                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
                  // 开始渲染
                  m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr);
@@ -136,7 +135,7 @@ void GameWorld::RegisterSystems() {
                      if (!item.IsValid())
                          continue;
                      m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
-                                          item.materialCBAddress);
+                                          item.materialCBAddress, m_context->testTextureSRVHandle);
                  }
                  m_renderer->EndFrame();
 

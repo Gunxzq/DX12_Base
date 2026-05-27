@@ -353,6 +353,7 @@ GameContext *Bootstrap::CreateContext() {
     m_context->InputMgr = &DX12Engine::Input::InputManager::Get();
     m_context->GeometryResourceManager = &m_geometryResourceManager;
     m_context->MaterialMgr = &m_materialManager;
+    m_context->TextureMgr = &m_textureManager;
 
     if (m_frameDriver) {
         m_frameDriver->SetGameContext(m_context.get());
