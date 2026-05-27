@@ -4,7 +4,7 @@
 #include "LightingUtil.hlsl"
 
 // =================================================================================================
-// cbPerObject: 每物体常量缓冲
+// cbPerObject: 每物体常量缓冲 (b0)
 // =================================================================================================
 cbuffer cbPerObject : register(b0)
 {
@@ -13,7 +13,7 @@ cbuffer cbPerObject : register(b0)
 };
 
 // =================================================================================================
-// cbPass: 每帧常量缓冲
+// cbPass: 每帧常量缓冲 (b1)
 // =================================================================================================
 cbuffer cbPass : register(b1)
 {
@@ -35,7 +35,7 @@ cbuffer cbPass : register(b1)
 };
 
 // =================================================================================================
-// cbMaterial: 材质常量缓冲
+// cbMaterial: 材质常量缓冲 (b2)
 // =================================================================================================
 cbuffer cbMaterial : register(b2)
 {
@@ -46,16 +46,11 @@ cbuffer cbMaterial : register(b2)
     float gAlpha;
     float4 gEmissive;
     float gAlphaCutoff;
-    uint gBaseColorTextureIndex;
-    uint gNormalTextureIndex;
-    uint gMetallicRoughnessTextureIndex;
-    uint gEmissiveTextureIndex;
-    uint gOcclusionTextureIndex;
     float gPad2[3];
 };
 
 // =================================================================================================
-// cbLights: 光源常量缓冲
+// cbLights: 光源常量缓冲 (b3)
 // =================================================================================================
 cbuffer cbLights : register(b3)
 {
@@ -67,6 +62,12 @@ cbuffer cbLights : register(b3)
 };
 
 // =================================================================================================
+// 纹理和采样器 (描述符表，根参数索引 4)
+// =================================================================================================
+Texture2D gTexture : register(t0);
+SamplerState gSampler : register(s0);
+
+// =================================================================================================
 // 顶点输入/输出
 // =================================================================================================
 struct VertexIn
@@ -74,6 +75,7 @@ struct VertexIn
     float3 PosL : POSITION;
     float4 ColorL : COLOR;
     float3 NormalL : NORMAL;
+    float2 TexCoord : TEXCOORD; // 添加纹理坐标
 };
 
 struct VertexOut
@@ -82,6 +84,7 @@ struct VertexOut
     float3 WorldPos : POSITION;
     float3 WorldNormal : NORMAL;
     float4 Color : COLOR;
+    float2 TexCoord : TEXCOORD; // 传递纹理坐标
 };
 
 // =================================================================================================
@@ -97,27 +100,32 @@ VertexOut VS(VertexIn vin)
 
     vout.WorldNormal = normalize(mul(vin.NormalL, (float3x3)gWorldInvTrans));
     vout.Color = vin.ColorL;
+    vout.TexCoord = vin.TexCoord; // 传递纹理坐标
 
     return vout;
 }
 
 // =================================================================================================
-// 像素着色器 - PBR 版本
+// 像素着色器 - PBR 版本（带纹理）
 // =================================================================================================
 float4 PS(VertexOut pin) : SV_Target
 {
     float3 N = normalize(pin.WorldNormal);
     float3 V = normalize(gCameraPos - pin.WorldPos);
 
+    // 采样纹理
+    float4 texColor = gTexture.Sample(gSampler, pin.TexCoord);
+
     // 构建 PBR 材质
     Material mat;
-    mat.BaseColor = gBaseColor;
+    // 将纹理颜色与材质基础颜色相乘
+    mat.BaseColor = gBaseColor * texColor;
     mat.Metallic = gMetallic;
     mat.Roughness = gRoughness;
-    mat.Ambient = gAmbient; // 环境光遮蔽强度
+    mat.Ambient = gAmbient;
     mat.Emissive = gEmissive;
 
-    // 环境光 (考虑 Ambient)
+    // 环境光
     float3 ambient = gAmbientLight.xyz * gAmbientLight.w * mat.BaseColor.xyz * mat.Ambient;
 
     // 直接光照
@@ -146,7 +154,7 @@ float4 PS(VertexOut pin) : SV_Target
     // 自发光
     float3 emissive = mat.Emissive.xyz * mat.Emissive.w;
 
-    // 合并光照并应用顶点颜色
+    // 合并光照
     float3 litColor = (ambient + directLight + emissive) * pin.Color.rgb;
 
     return float4(litColor, gBaseColor.a * pin.Color.a);
