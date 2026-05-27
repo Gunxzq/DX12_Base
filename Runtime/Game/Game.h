@@ -6,6 +6,7 @@
 #include "Renderer/Core/LODSystem.h"
 #include "Renderer/Core/RenderItemBuilder.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
+#include "Renderer/Scene/LightManager.h"
 #include "Scene/GameWorld.h"
 #include <memory>
 
@@ -42,6 +43,7 @@ private:
     DX12Engine::Renderer::CullingSystem m_cullingSystem;
     DX12Engine::Renderer::LODSystem m_lodSystem;
     DX12Engine::Renderer::RenderItemBuilder m_renderItemBuilder;
+    DX12Engine::Renderer::LightManager m_lightManager;
 
     bool m_isRunning = false;
     bool m_isInitialized = false;

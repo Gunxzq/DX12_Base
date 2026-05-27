@@ -67,6 +67,10 @@ bool Game::Initialize() {
     // 配置 RenderItemBuilder
     m_renderItemBuilder.SetCameraManager(m_context->CameraMgr);
 
+    // 初始化 LightManager
+    m_lightManager.Initialize();
+    m_lightManager.CreateTestLights(); // 创建测试光源
+
     // 5. 注册引擎级系统（窗口大小变化、全屏切换等）
     RegisterEngineSystems();
 
@@ -101,72 +105,20 @@ bool Game::Initialize() {
                 passConstants.FrameCount = m_context->FrameDriver->GetFrameStats().frameNumber;
                 passConstants.AmbientLight = {0.5f, 0.5f, 0.5f, 0.8f}; // 提高环境光强度
 
-                // 在相机更新回调中
-                static float time = 0.0f;
-                time += m_context->MainTimer->GetDeltaTime();
-                float angle = time * 0.5f;
-                float x = cosf(angle);
-                float z = sinf(angle);
-
-                LightConstants lightConstants = {};
-                lightConstants.NumDirLights = 1;   // 本例不使用方向光
-                lightConstants.NumPointLights = 3; // 使用3个点光源
-                lightConstants.NumSpotLights = 0;  // 不使用聚光灯
+                // ========================================================================
+                // 更新跟随相机的光源位置（点光源索引 2）
+                // ========================================================================
+                Light *followLight = m_lightManager.GetPointLight(2);
+                if (followLight) {
+                    followLight->Position =
+                        DirectX::XMFLOAT4(camera.Position.x, camera.Position.y + 1.0f, camera.Position.z, 0.0f);
+                }
 
                 // ========================================================================
-                // 点光源 0：暖色光源（红色/橙色），位于场景右前方
+                // 上传光源数据到 GPU
                 // ========================================================================
-                lightConstants.Lights[0].Strength = DirectX::XMFLOAT4(1.2f, 0.6f, 0.2f, 0.0f); // 橙红色光
-                lightConstants.Lights[0].Direction = DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f); // 点光源不使用方向
-                lightConstants.Lights[0].Position = DirectX::XMFLOAT4(5.0f, 2.0f, 5.0f, 0.0f);
-                lightConstants.Lights[0].FalloffStart = 1.0f; // 1米开始衰减
-                lightConstants.Lights[0].FalloffEnd = 15.0f;  // 15米处完全衰减
-                lightConstants.Lights[0].SpotPower = 0.0f;    // 点光源不使用聚光灯指数
-                lightConstants.Lights[0].Range = 15.0f;
-                lightConstants.Lights[0].CastShadow = 1;
-                lightConstants.Lights[0].ShadowBias = 0.001f;
-                lightConstants.Lights[0].ShadowMapIndex = 0;
-
-                // ========================================================================
-                // 点光源 1：冷色光源（蓝色/青色），位于场景左前方
-                // ========================================================================
-                lightConstants.Lights[1].Strength = DirectX::XMFLOAT4(0.2f, 0.5f, 1.2f, 0.0f); // 蓝色光
-                lightConstants.Lights[1].Direction = DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
-                lightConstants.Lights[1].Position = DirectX::XMFLOAT4(-5.0f, 2.0f, 5.0f, 0.0f);
-                lightConstants.Lights[1].FalloffStart = 1.0f;
-                lightConstants.Lights[1].FalloffEnd = 15.0f;
-                lightConstants.Lights[1].SpotPower = 0.0f;
-                lightConstants.Lights[1].Range = 15.0f;
-                lightConstants.Lights[1].CastShadow = 0; // 不投射阴影
-                lightConstants.Lights[1].ShadowBias = 0.001f;
-                lightConstants.Lights[1].ShadowMapIndex = 1;
-
-                // ========================================================================
-                // 点光源 2：跟随相机/玩家的光源（手电筒效果）
-                // ========================================================================
-                lightConstants.Lights[2].Strength = DirectX::XMFLOAT4(0.8f, 0.8f, 1.0f, 0.0f); // 冷白光
-                lightConstants.Lights[2].Direction = DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
-                // Position 需要在每帧更新为相机位置
-                lightConstants.Lights[2].Position = DirectX::XMFLOAT4(0.0f, 3.0f, 0.0f, 0.0f);
-                lightConstants.Lights[2].FalloffStart = 0.5f;
-                lightConstants.Lights[2].FalloffEnd = 8.0f;
-                lightConstants.Lights[2].SpotPower = 0.0f;
-                lightConstants.Lights[2].Range = 8.0f;
-                lightConstants.Lights[2].CastShadow = 0;
-                lightConstants.Lights[2].ShadowBias = 0.0005f;
-                lightConstants.Lights[2].ShadowMapIndex = 2;
-
-                lightConstants.Lights[3].Position = DirectX::XMFLOAT4(0.0f, 0.0f, 5.0f, 0.0f);
-                lightConstants.Lights[3].Strength = DirectX::XMFLOAT4(0.5f, 0.5f, 0.5f, 0.0f);
-                lightConstants.Lights[3].FalloffStart = 0.1f;
-                lightConstants.Lights[3].FalloffEnd = 2.0f;
-                lightConstants.NumPointLights = 4;
-
-                // 上传到 GPU
                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress =
-                    m_context->FrameResourceManager->AllocateLight(&lightConstants, sizeof(LightConstants));
-
-                // 存储到 GameContext 或 PassConstants 中，供 BeginFrame 使用
+                    m_lightManager.UpdateAndUpload(m_context->FrameResourceManager);
                 m_context->lightCBAddress = lightCBAddress;
 
                 m_context->FrameResourceManager->UpdatePassConstants();
