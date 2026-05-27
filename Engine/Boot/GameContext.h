@@ -1,10 +1,11 @@
 #pragma once
 
+#include "Common/Common.h"
 #include "ECS/Core/Entity.h"
 #include "GameTimer.h"
 #include "Logger/Logger.h"
-#include "Renderer/Core/CullingSystem.h" // 包含 CullingResult
-#include "Renderer/Core/LODSystem.h"     // 包含 LODResult
+#include "Renderer/Core/CullingSystem.h"
+#include "Renderer/Core/LODSystem.h"
 #include "Renderer/Core/RenderQueue.h"
 #include <unordered_map>
 
@@ -26,6 +27,7 @@ class RenderItemBuilder;
 namespace Resource {
 class DescriptorHeapCollection;
 class GeometryResourceManager;
+class MaterialManager;
 } // namespace Resource
 namespace Input {
 class InputManager;
@@ -92,6 +94,7 @@ public:
     Resource::DescriptorHeapCollection *DescriptorHeaps = nullptr;
     Renderer::FrameResourceManager *FrameResourceManager = nullptr;
     Resource::GeometryResourceManager *GeometryResourceManager = nullptr;
+    Resource::MaterialManager *MaterialMgr = nullptr;
     Input::InputManager *InputMgr = nullptr;
 
     // PreRender 阶段的临时结果（每帧重置）
@@ -102,6 +105,7 @@ public:
     Renderer::CullingSystem *CullingSystem = nullptr;
     Renderer::LODSystem *LODSystem = nullptr;
     Renderer::RenderItemBuilder *RenderItemBuilder = nullptr;
+    D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress = 0;
 
     // ── 便捷访问方法 ──
     bool IsValid() const;

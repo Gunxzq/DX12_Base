@@ -83,42 +83,50 @@ void RingBuffer::Reclaim(uint64_t completedFence) {
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS RingBuffer::Allocate(uint32_t size, uint64_t fence, uint32_t alignment) {
-    if (!m_initialized || size == 0) {
+    if (!m_initialized || size == 0 || size > m_size) {
         return 0;
     }
 
     // 对齐当前写指针
     uint32_t alignedHead = (m_head + alignment - 1) & ~(alignment - 1);
-    uint32_t padding = alignedHead - m_head;
+    uint32_t alignedSize = size + (alignedHead - m_head);
 
-    // 计算可用连续空间
-    uint32_t freeSpace;
-    if (m_head >= m_tail) {
-        freeSpace = m_size - m_head + m_tail;
+    // 检查是否需要回绕
+    bool needsWrap = (alignedHead + alignedSize > m_size);
+
+    if (needsWrap) {
+        // 需要回绕到开头
+        if (alignedSize > m_tail) {
+            return 0; // 空间不足
+        }
+
+        // 记录尾部的浪费空间
+        uint32_t wastedSpace = m_size - m_head;
+        if (wastedSpace > 0) {
+            m_pending.push({wastedSpace, fence});
+            m_allocatedSize += wastedSpace;
+        }
+
+        // 在开头分配
+        D3D12_GPU_VIRTUAL_ADDRESS result = m_gpuAddress;
+        m_pending.push({size, fence});
+        m_head = size;
+        m_allocatedSize += size;
+
+        return result;
     } else {
-        freeSpace = m_tail - m_head;
-    }
-
-    // 空间不足，尝试回绕
-    if (freeSpace < padding + size) {
-        if (m_tail == 0) {
+        // 正常在尾部分配
+        if (alignedHead + alignedSize > m_size) {
             return 0;
         }
-        // 回绕到开头
-        alignedHead = 0;
-        padding = (m_size - m_head) % m_size;
-        freeSpace = m_tail;
-        if (freeSpace < size) {
-            return 0;
-        }
+
+        D3D12_GPU_VIRTUAL_ADDRESS result = m_gpuAddress + alignedHead;
+        m_pending.push({alignedSize, fence});
+        m_head = alignedHead + size;
+        m_allocatedSize += alignedSize;
+
+        return result;
     }
-
-    D3D12_GPU_VIRTUAL_ADDRESS result = m_gpuAddress + alignedHead;
-    m_head = alignedHead + size;
-    m_allocatedSize += padding + size;
-    m_pending.push({padding + size, fence});
-
-    return result;
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS RingBuffer::AllocateUpload(const void *data, uint32_t size, uint64_t fence,

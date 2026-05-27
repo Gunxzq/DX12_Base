@@ -43,13 +43,14 @@ void FrameResourceManager::Initialize(ID3D12Device *device, DescriptorHeapCollec
     // 创建 PassCB
     CreatePassCB(device);
 
-    // 初始化每帧的环形缓冲区（预分配 16MB 每类型）
-    const uint32_t DEFAULT_BUFFER_SIZE = 16 * 1024 * 1024; // 16MB
+    // 初始化每帧的环形缓冲区（预分配 64MB 每类型）
+    const uint32_t DEFAULT_BUFFER_SIZE = 64 * 1024 * 1024; // 64MB
 
     m_objectCB.Initialize(device, DEFAULT_BUFFER_SIZE);
     m_skinning.Initialize(device, DEFAULT_BUFFER_SIZE);
     m_instance.Initialize(device, DEFAULT_BUFFER_SIZE);
     m_light.Initialize(device, DEFAULT_BUFFER_SIZE);
+    m_materialCB.Initialize(device, DEFAULT_BUFFER_SIZE);
 
     m_passConstants = {};
     UpdatePassConstants();
@@ -66,6 +67,7 @@ void FrameResourceManager::Shutdown() {
     m_skinning.Shutdown();
     m_instance.Shutdown();
     m_light.Shutdown();
+    m_materialCB.Shutdown();
 
     if (m_passCBResource) {
         if (m_passCBMapped) {
@@ -89,6 +91,7 @@ void FrameResourceManager::BeginFrame(uint64_t completedFence, uint64_t nextFenc
     m_skinning.Reclaim(completedFence);
     m_instance.Reclaim(completedFence);
     m_light.Reclaim(completedFence);
+    m_materialCB.Reclaim(completedFence);
 
     m_currentFence = nextFence;
 }
@@ -148,6 +151,12 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateLight(const void *data, 
     if (!m_initialized)
         return 0;
     return AllocateWithRetry(m_light, data, size, m_currentFence);
+}
+
+D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateMaterialCB(const void *data, uint32_t size) {
+    if (!m_initialized)
+        return 0;
+    return AllocateWithRetry(m_materialCB, data, size, m_currentFence);
 }
 
 void *FrameResourceManager::GetCPUAddress(uint32_t offset) {

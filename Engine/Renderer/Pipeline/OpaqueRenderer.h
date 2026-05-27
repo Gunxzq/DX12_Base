@@ -2,6 +2,7 @@
 
 #include "Common/d3dUtil.h"
 #include "ECS/Core/Registry.h"
+#include "IRenderer.h"
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Struct/GeometryHandle.h"
@@ -16,6 +17,7 @@ struct TransformComponent;
 
 namespace DX12Engine::Resource {
 class GeometryResourceManager;
+class MaterialManager;
 } // namespace DX12Engine::Resource
 
 namespace DX12Engine::Renderer {
@@ -29,7 +31,7 @@ class D3D12DeviceContext;
  * 1. 管理底层 D3D12 状态（PSO, RootSignature, CBV）
  * 2. 提供细粒度的渲染辅助方法供游戏层 System 调用
  */
-class OpaqueRenderer {
+class OpaqueRenderer : public IRenderer {
 public:
     OpaqueRenderer() = default;
     ~OpaqueRenderer() = default;
@@ -48,6 +50,7 @@ public:
     // ========================================================================
 
     void SetGeometryResourceManager(Resource::GeometryResourceManager *mgr) { m_geometryManager = mgr; }
+    void SetMaterialManager(Resource::MaterialManager *mgr) { m_materialManager = mgr; }
 
     /**
      * @brief 开始录制不透明物体的绘制命令
@@ -55,7 +58,8 @@ public:
      * @param passConstantsAddress 由上层（Game/Immediate Callback）计算并上传好的 PassConstants GPU 地址
      * @note 设置 PSO、根签名，并绑定 Pass Constant Buffer (b1)
      */
-    void BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress);
+    void BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
+                    D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress);
 
     /**
      * @brief 绘制单个 Mesh
@@ -64,7 +68,8 @@ public:
      * @param transform ECS 变换组件
      */
     void DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
-                  const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress);
+                  const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
+                  D3D12_GPU_VIRTUAL_ADDRESS matCBAddress);
 
     /**
      * @brief 结束录制
@@ -91,6 +96,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 
     Resource::GeometryResourceManager *m_geometryManager = nullptr;
+    Resource::MaterialManager *m_materialManager = nullptr;
 
     // 着色器字节码
     Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;

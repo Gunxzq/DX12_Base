@@ -11,6 +11,11 @@ namespace DX12Engine::ECS {
 class Registry; // 前向声明
 }
 
+namespace DX12Engine::Resource {
+struct GeometryHandle;
+struct MaterialHandle;
+} // namespace DX12Engine::Resource
+
 namespace DX12Engine::Renderer {
 
 class D3D12DeviceContext;
@@ -26,47 +31,22 @@ public:
     // 1. 生命周期与依赖注入
     // ----------------------------------------------------------------------
 
-    /**
-     * @brief 注入 D3D12 设备上下文
-     * @param context D3D12 核心上下文指针，用于访问 CommandManager、交换链等资源
-     * @note 在 Initialize 之前调用
-     */
     virtual void SetDeviceContext(D3D12DeviceContext *context) = 0;
-
-    /**
-     * @brief 初始化渲染资源
-     * @note 在此处创建 PSO、RootSignature 以及静态几何体缓冲区等一次性资源
-     */
     virtual void Initialize() = 0;
-
-    /**
-     * @brief 处理窗口大小改变
-     * @param width 新宽度
-     * @param height 新高度
-     * @note 用于更新视口、投影矩阵及依赖屏幕尺寸的动态缓冲区
-     */
     virtual void OnResize(uint32_t width, uint32_t height) = 0;
+    virtual void BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
+                            D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress) = 0;
+    virtual void EndFrame() = 0;
 
     // ----------------------------------------------------------------------
     // 2. 帧循环逻辑
     // ----------------------------------------------------------------------
 
-    /**
-     * @brief 逻辑更新
-     * @param deltaTime 帧间隔时间（秒）
-     * @note 用于更新摄像机、动画状态等非图形逻辑
-     */
     virtual void Update(float deltaTime) = 0;
 
-    /**
-     * @brief 录制渲染命令
-     * @param registry ECS 注册表，用于查询实体组件数据
-     * @param cmdList 命令列表封装对象，用于录制 GPU 命令
-     * @param backBufferIndex 当前后缓冲区索引，用于多缓冲资源选择
-     * @note 实现类应在此处遍历 ECS 实体并录制绘制命令
-     */
-    virtual void RecordDrawCalls(DX12Engine::ECS::Registry &registry, DX12Engine::Renderer::CommandList &cmdList,
-                                 uint32_t backBufferIndex) = 0;
+    virtual void DrawMesh(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
+                          const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
+                          D3D12_GPU_VIRTUAL_ADDRESS matCBAddress) = 0;
 };
 
 } // namespace DX12Engine::Renderer

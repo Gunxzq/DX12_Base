@@ -1,10 +1,12 @@
-// Renderer/Core/RenderItemBuilder.cpp
 #include "RenderItemBuilder.h"
 #include "ECS/Core/Components.h"
 #include "Renderer/Scene/CameraManager.h"
+#include "Resource/Manager/MaterialManager.h"
+
 #include <cmath>
 
 using namespace DX12Engine::Renderer;
+using namespace DX12Engine::Resource;
 
 namespace DX12Engine::Renderer {
 
@@ -27,9 +29,16 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
 
     for (auto entity : cullingResult.visibleEntities) {
 
-        // 2. 获取 LOD 结果
+        auto &meshComp = registry.GetComponent<ECS::MeshComponent>(entity);
+
         Resource::GeometryHandle handle = lodResult.GetHandle(entity);
         if (!handle.IsValid()) {
+            continue;
+        }
+        Resource::MaterialHandle materialHandle = meshComp.materialHandle;
+        const Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
+
+        if (!materialHandle.IsValid()) {
             continue;
         }
 
@@ -56,12 +65,18 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
         D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
             m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
 
+        MaterialConstants matCB = m_materialManager->GetGPUConstants(materialHandle);
+
+        D3D12_GPU_VIRTUAL_ADDRESS materialCBAddress =
+            m_frameResourceManager->AllocateMaterialCB(&matCB, sizeof(MaterialConstants));
+
         // 6. 构建 RenderItem
         RenderItem item;
         item.geometryHandle = handle;
-        item.materialId = 0;
+        item.materialHandle = materialHandle;
         item.worldMatrix = transform.GetMatrix();
         item.objectCBAddress = objectCBAddress;
+        item.materialCBAddress = materialCBAddress;
         item.depth = depth;
         item.sortKey = sortKey;
 

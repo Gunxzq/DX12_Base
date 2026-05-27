@@ -4,6 +4,7 @@
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/LODMeshHandle.h"
+#include "Resource/Struct/MaterialHandle.h"
 #include <DirectXMath.h>
 #include <d3d12.h>
 
@@ -37,8 +38,9 @@ struct TransformComponent {
 // ECS/Core/Components.h
 struct MeshComponent {
     Resource::LODMeshHandle lodMeshHandle;
-    Math::BoundingVolumeVariant localBounds;
+    Resource::MaterialHandle materialHandle;
 
+    Math::BoundingVolumeVariant localBounds;
     bool IsValid() const { return lodMeshHandle.IsValid(); }
 };
 } // namespace ECS

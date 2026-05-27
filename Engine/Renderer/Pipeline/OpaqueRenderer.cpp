@@ -61,17 +61,20 @@ void OpaqueRenderer::Update(float deltaTime) {
 // 渲染辅助接口实现
 // ========================================================================
 
-void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress) {
+void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
+                                D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress) {
     if (!m_pso || !m_rootSignature)
         return;
 
     cmdList.Get()->SetPipelineState(m_pso.Get());
     cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
+    cmdList.Get()->SetGraphicsRootConstantBufferView(3, lightCBAddress);
 }
 
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
-                              const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress) {
+                              const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
+                              D3D12_GPU_VIRTUAL_ADDRESS matCBAddress) {
     if (!m_geometryManager) {
         OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - GeometryResourceManager not set!\n");
         return;
@@ -79,6 +82,7 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
 
     // 1. 获取几何体数据
     const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
+
     if (!mesh || !mesh->isGpuReady) {
         return;
     }
@@ -108,6 +112,7 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
     cmdList.Get()->IASetIndexBuffer(&ibView);
     cmdList.Get()->IASetPrimitiveTopology(mesh->topology); // 6. 绑定并绘制
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objectCBAddress);
+    cmdList.Get()->SetGraphicsRootConstantBufferView(2, matCBAddress);
     cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
 }
 
@@ -126,15 +131,15 @@ void OpaqueRenderer::LoadShaders() {
     Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
     HRESULT hr;
 
-    hr = D3DCompileFromFile(L"Shaders/color.hlsl", // 文件名
-                            nullptr,               // defines
-                            nullptr,               // includes
-                            "VS",                  // entry point
-                            "vs_5_1",              // target profile
-                            compileFlags,          // flags1
-                            0,                     // flags2
-                            &m_vsBlob,             // output shader blob
-                            &errors                // error messages
+    hr = D3DCompileFromFile(L"Shaders/color.hlsl",             // 文件名
+                            nullptr,                           // defines
+                            D3D_COMPILE_STANDARD_FILE_INCLUDE, // includes
+                            "VS",                              // entry point
+                            "vs_5_1",                          // target profile
+                            compileFlags,                      // flags1
+                            0,                                 // flags2
+                            &m_vsBlob,                         // output shader blob
+                            &errors                            // error messages
     );
 
     if (FAILED(hr)) {
@@ -146,8 +151,8 @@ void OpaqueRenderer::LoadShaders() {
 
     // 2. 编译像素着色器
     errors = nullptr; // 重置错误 Blob
-    hr = D3DCompileFromFile(L"Shaders/color.hlsl", nullptr, nullptr, "PS", "ps_5_1", compileFlags, 0, &m_psBlob,
-                            &errors);
+    hr = D3DCompileFromFile(L"Shaders/color.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1",
+                            compileFlags, 0, &m_psBlob, &errors);
 
     if (FAILED(hr)) {
         if (errors) {
@@ -162,11 +167,13 @@ void OpaqueRenderer::LoadShaders() {
 void OpaqueRenderer::CreateRootSignature() {
     auto device = m_context->GetDevice();
 
-    CD3DX12_ROOT_PARAMETER slotRootParameter[2];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[4];
     slotRootParameter[0].InitAsConstantBufferView(0); // b0: cbPerObject
     slotRootParameter[1].InitAsConstantBufferView(1); // b1: cbPass
+    slotRootParameter[2].InitAsConstantBufferView(2); // b2: cbMaterial
+    slotRootParameter[3].InitAsConstantBufferView(3); // b3: cbLights
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(2, slotRootParameter, 0, nullptr,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(4, slotRootParameter, 0, nullptr,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -188,8 +195,8 @@ void OpaqueRenderer::CreatePSO() {
 
     D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
-
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = {inputLayout, _countof(inputLayout)};
     psoDesc.pRootSignature = m_rootSignature.Get();

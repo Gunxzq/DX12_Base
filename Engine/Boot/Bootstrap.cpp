@@ -274,6 +274,11 @@ void Bootstrap::InitializeModules() {
         m_geometryResourceManager.Initialize(1024);
         EngineLogger::GetInstance()->Info("[Bootstrap] GeometryResourceManager initialized.");
 
+        // 初始化材质管理器
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing MaterialManager...");
+        m_materialManager.Initialize(1024);
+        EngineLogger::GetInstance()->Info("[Bootstrap] MaterialManager initialized.");
+
         InitializeDebugUI();
 
         // 5. MessageDispatcher 单例 (Event 层，调度系统需要)
@@ -347,6 +352,7 @@ GameContext *Bootstrap::CreateContext() {
 
     m_context->InputMgr = &DX12Engine::Input::InputManager::Get();
     m_context->GeometryResourceManager = &m_geometryResourceManager;
+    m_context->MaterialMgr = &m_materialManager;
 
     if (m_frameDriver) {
         m_frameDriver->SetGameContext(m_context.get());

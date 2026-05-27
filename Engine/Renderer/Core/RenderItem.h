@@ -2,7 +2,7 @@
 
 #include "Math/BoundingVolume.h"
 #include "Resource/Struct/GeometryHandle.h"
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Struct/MaterialHandle.h"
 #include <DirectXMath.h>
 #include <cstdint>
 #include <d3d12.h>
@@ -18,7 +18,7 @@ namespace Renderer {
 struct RenderItem {
 
     Resource::GeometryHandle geometryHandle;
-    uint32_t materialId = UINT32_MAX;
+    Resource::MaterialHandle materialHandle;
 
     DirectX::XMMATRIX worldMatrix = {};     // 世界矩阵
     DirectX::XMMATRIX prevWorldMatrix = {}; // 上一帧世界矩阵（用于运动模糊）
@@ -61,12 +61,12 @@ struct RenderItem {
     // 辅助方法
     // ========================================================================
 
-    bool IsValid() const { return geometryHandle.IsValid() && materialId != UINT32_MAX; }
+    bool IsValid() const { return geometryHandle.IsValid() && materialHandle.IsValid(); }
     bool IsInstanced() const { return instanceCount > 1; }
     bool NeedSubMeshOverride() const { return indexCount > 0; }
-    void BuildSortKey(uint8_t queueType, uint32_t materialId, float depth) {
+    void BuildSortKey(uint8_t queueType, float depth) {
         uint64_t typePart = (static_cast<uint64_t>(queueType) & 0xFF) << 56;
-        uint64_t materialPart = (static_cast<uint64_t>(materialId) & 0xFFFF) << 32;
+        uint64_t materialPart = (static_cast<uint64_t>(materialHandle.GetHash()) & 0xFFFF) << 32;
         uint32_t depthInt = static_cast<uint32_t>(depth * 1000000.0f);
         sortKey = typePart | materialPart | depthInt;
     }

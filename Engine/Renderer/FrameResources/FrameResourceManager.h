@@ -55,6 +55,7 @@ public:
     D3D12_GPU_VIRTUAL_ADDRESS AllocateSkinning(const void *data, uint32_t size);
     D3D12_GPU_VIRTUAL_ADDRESS AllocateInstance(const void *data, uint32_t size);
     D3D12_GPU_VIRTUAL_ADDRESS AllocateLight(const void *data, uint32_t size);
+    D3D12_GPU_VIRTUAL_ADDRESS AllocateMaterialCB(const void *data, uint32_t size);
 
     void *GetCPUAddress(uint32_t offset);
 
@@ -76,6 +77,7 @@ private:
     RingBuffer m_skinning;
     RingBuffer m_instance;
     RingBuffer m_light;
+    RingBuffer m_materialCB;
 
     D3D12_GPU_VIRTUAL_ADDRESS AllocateWithRetry(RingBuffer &buffer, const void *data, uint32_t size, uint64_t fence);
 
