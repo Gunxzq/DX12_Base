@@ -24,9 +24,8 @@ struct PassConstants {
     float FarPlane;                  // 远裁剪平面
     float AspectRatio;               // 屏幕宽高比
     uint32_t FrameCount;             // 帧计数
-    uint32_t LightCount;             // 光源计数
-    float AmbientIntensity;          // 环境光强度
-    float Pad[3];
+    DirectX::XMFLOAT4 AmbientLight;  // 环境光 (RGB, Intensity)
+    float Pad[2];                    // 确保 256 字节对齐
 };
 
 // ============================================================================
@@ -76,49 +75,26 @@ struct MaterialConstants {
 // 5. Light Constants（光源）
 // ============================================================================
 
-enum class LightType : uint32_t { Directional, Point, Spot };
-
 struct Light {
-    LightType Type;
-    float Intensity;
-    DirectX::XMFLOAT3 Color;
-
-    uint32_t CastShadow;
+    DirectX::XMFLOAT4 Strength;
+    DirectX::XMFLOAT4 Direction;
+    DirectX::XMFLOAT4 Position;
+    float FalloffStart;
+    float FalloffEnd;
+    float SpotPower;
+    float Range;
+    float CastShadow;
     float ShadowBias;
     float ShadowMapIndex;
-
-    union {
-        // 方向光
-        struct {
-            DirectX::XMFLOAT3 Direction;
-        } Dir;
-
-        // 点光源
-        struct {
-            DirectX::XMFLOAT3 Position;
-            float Range;
-            float Falloff;
-        } Point;
-
-        // 聚光灯
-        struct {
-            DirectX::XMFLOAT3 Position;
-            float Range;
-            DirectX::XMFLOAT3 Direction;
-            float SpotAngle;
-            float Falloff;
-        } Spot;
-    };
+    float Pad;
 };
 
 struct LightConstants {
-    Light Lights[256];              // 光源数组
-    uint32_t DirectionalLightCount; // 方向光计数
-    uint32_t PointLightCount;       // 点光源计数
-    uint32_t SpotLightCount;        // 聚光灯计数
-    float AmbientIntensity;         // 环境光强度
-    DirectX::XMFLOAT3 AmbientColor; // 环境光颜色
-    float Pad;
+    Light Lights[256];
+    uint32_t NumDirLights;
+    uint32_t NumPointLights;
+    uint32_t NumSpotLights;
+    float Pad[5];
 };
 
 // ============================================================================
