@@ -37,8 +37,9 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
             continue;
         }
         Resource::MaterialHandle materialHandle = meshComp.materialHandle;
-        const Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
-        const Resource::TextureHandle textureHandle = meshComp.textureHandle;
+         Resource::TextureHandle textureHandle = meshComp.textureHandle;
+         Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
+        
 
         if (!materialHandle.IsValid()) {
             continue;
@@ -85,8 +86,7 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
         item.materialCBAddress = materialCBAddress;
         item.depth = depth;
         item.sortKey = sortKey;
-        // item.textureSRV = m_textureManager->GetSRV(textureHandle);
-        item.textureSRV = {0};
+        item.textureSRV = m_textureManager->GetSRV(textureHandle);
 
         outQueue.Add(item);
     }

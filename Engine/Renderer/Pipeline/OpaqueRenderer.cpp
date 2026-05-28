@@ -147,7 +147,10 @@ void OpaqueRenderer::LoadShaders() {
 
     if (FAILED(hr)) {
         if (errors) {
-            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+            const char *errMsg = reinterpret_cast<const char *>(errors->GetBufferPointer());
+            OutputDebugStringA("=== VS COMPILATION ERROR ===\n");
+            OutputDebugStringA(errMsg);
+            OutputDebugStringA("============================\n");
         }
         throw std::runtime_error("OpaqueRenderer: Failed to compile Vertex Shader");
     }
@@ -159,7 +162,10 @@ void OpaqueRenderer::LoadShaders() {
 
     if (FAILED(hr)) {
         if (errors) {
-            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+            const char *errMsg = reinterpret_cast<const char *>(errors->GetBufferPointer());
+            OutputDebugStringA("=== PS COMPILATION ERROR ===\n");
+            OutputDebugStringA(errMsg);
+            OutputDebugStringA("============================\n");
         }
         throw std::runtime_error("OpaqueRenderer: Failed to compile Pixel Shader");
     }

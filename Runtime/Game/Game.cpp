@@ -45,6 +45,7 @@ bool Game::Initialize() {
     m_opaqueRenderer->SetDeviceContext(m_context->DeviceContext);
     m_opaqueRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
     m_opaqueRenderer->SetMaterialManager(m_context->MaterialMgr);
+
     m_opaqueRenderer->Initialize();
 
     m_context->CullingSystem = &m_cullingSystem;
@@ -54,6 +55,7 @@ bool Game::Initialize() {
     // 设置帧驱动器引用
     m_context->RenderItemBuilder->SetFrameResourceManager(m_context->FrameResourceManager);
     m_context->RenderItemBuilder->SetMaterialManager(m_context->MaterialMgr);
+    m_context->RenderItemBuilder->SetTextureManager(m_context->TextureMgr);
 
     // 4. 初始化相机
     if (m_context->CameraMgr) {
@@ -80,7 +82,6 @@ bool Game::Initialize() {
 
     // 6. 初始化游戏模块（它们会自己注册游戏逻辑系统）
     m_world.Initialize(m_context, m_opaqueRenderer.get());
-    m_world.CreateTestCube();
 
     m_inputHandler.Initialize(m_context);
 
@@ -207,16 +208,9 @@ bool Game::Initialize() {
                         descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
                     device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
 
-                    // 保存 GPU 句柄
-                    m_context->testTextureSRVHandle =
-                        descriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+                    Resource::TextureManager *texMgr = m_context->TextureMgr;
 
-                    OutputDebugString(
-                        (L"GPU Handle ptr: " + std::to_wstring(m_context->testTextureSRVHandle.ptr) + L"\n").c_str());
-
-                    // 5. 注册到 TextureManager
-                    auto &texMgr = TextureManager::GetInstance();
-                    m_context->testTextureHandle = texMgr.RegisterTexture(gpuHandle, srvIndex);
+                    m_context->testTextureHandle = texMgr->RegisterTexture(gpuHandle, srvIndex);
 
                     // ========== 6. 同步上传纹理数据 ==========
                     uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
@@ -279,6 +273,10 @@ bool Game::Initialize() {
             OutputDebugString(L"Failed to load DDS file");
         }
     }
+
+    m_world.CreateTestCube();
+
+    return true;
 }
 
 void Game::RegisterEngineSystems() {

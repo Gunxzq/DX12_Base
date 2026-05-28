@@ -13,8 +13,6 @@ class DescriptorHeapCollection;
 
 class TextureManager {
 public:
-    static TextureManager &GetInstance();
-
     void Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps);
     void Shutdown();
 

@@ -8,11 +8,6 @@
 
 namespace DX12Engine::Resource {
 
-TextureManager &TextureManager::GetInstance() {
-    static TextureManager instance;
-    return instance;
-}
-
 void TextureManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps) {
     if (m_initialized) {
         Shutdown();

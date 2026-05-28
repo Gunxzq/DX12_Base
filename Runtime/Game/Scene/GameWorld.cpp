@@ -135,7 +135,7 @@ void GameWorld::RegisterSystems() {
                      if (!item.IsValid())
                          continue;
                      m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
-                                          item.materialCBAddress, m_context->testTextureSRVHandle);
+                                          item.materialCBAddress, item.textureSRV);
                  }
                  m_renderer->EndFrame();
 
@@ -304,5 +304,6 @@ void GameWorld::CreateTestCube() {
     meshComp.lodMeshHandle = lodHandle;
     meshComp.localBounds = bounds;
     meshComp.materialHandle = materialHandle;
+    meshComp.textureHandle = m_context->testTextureHandle;
     m_registry->AddComponent<MeshComponent>(m_cubeEntity, std::move(meshComp));
 }

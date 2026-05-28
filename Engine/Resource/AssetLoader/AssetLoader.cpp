@@ -25,7 +25,7 @@ bool AssetLoader::LoadTextureFromFile(const std::wstring &path, DDSTextureInfo &
     file.close();
 
     // 3. 调用 DDSLoader 解析
-    return result = DDSLoader::LoadFromMemory(fileData.data(), fileSize, outInfo);
+    return DDSLoader::LoadFromMemory(fileData.data(), fileSize, outInfo);
 }
 
 bool AssetLoader::LoadTextureFromMemory(const uint8_t *data, size_t dataSize, DDSTextureInfo &outInfo) {
