@@ -1,7 +1,11 @@
 #include "DebugUIManager.h"
-#include "Boot/GameContext.h"
+#include "Common/WindowsPlatform.h"
+
+// Common
 #include "Common/ImGuiWrapper.h"
 #include "Common/d3dx12.h"
+
+#include "Boot/GameContext.h"
 #include "ECS/Core/Registry.h"
 #include "Framework/SystemRegistry.h"
 #include "Platform/Windows/Window.h"
@@ -362,6 +366,8 @@ void DebugUIManager::DrawPanel(const PanelConfig &config, float deltaTime, uint3
     }
 }
 
+void DebugUIManager::DrawDemoWindow() { ImGui::ShowDemoWindow(&m_showDemoWindow); }
+
 void DebugUIManager::RenderAndSubmit(ID3D12GraphicsCommandList *commandList, float deltaTime, uint32_t frameNumber) {
     if (!m_initialized)
         return;
@@ -391,15 +397,13 @@ void DebugUIManager::RenderAndSubmit(ID3D12GraphicsCommandList *commandList, flo
 
     // 渲染
     ImGui::Render();
-    
 
-
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
         ImGui::UpdatePlatformWindows();
         ImGui::RenderPlatformWindowsDefault();
     }
-    
+
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
 }
 

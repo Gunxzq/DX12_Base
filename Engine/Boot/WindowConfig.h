@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Common/Common.h"
+
 #include <nlohmann/json.hpp>
 
 namespace DX12Engine {

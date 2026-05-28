@@ -1,10 +1,9 @@
 #pragma once
 
 #include "Event.h"
-#include <algorithm>
-#include <atomic>
+
+#include "Common/Common.h"
 #include <moodycamel/concurrentqueue.h>
-// #include <thread>
 #include <vector>
 
 namespace DX12Engine {

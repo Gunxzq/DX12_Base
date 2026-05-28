@@ -1,8 +1,6 @@
 #pragma once
 
 #include <DirectXMath.h>
-#include <cmath>
-#include <cstdint>
 #include <variant>
 #include <vector>
 

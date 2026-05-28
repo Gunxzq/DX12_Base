@@ -1,12 +1,7 @@
 #pragma once
 
 #include "ECS/Core/Entity.h"
-#include <cstdint>
-#include <functional>
 #include <mutex>
-#include <string>
-#include <unordered_map>
-#include <vector>
 #include <wrl/client.h>
 
 // 前置声明（避免头文件污染）
@@ -116,7 +111,7 @@ private:
     void CreateSrvDescriptorHeap(ID3D12Device *device);
     void DrawMenuBar();
     void DrawPanel(const PanelConfig &config, float deltaTime, uint32_t frameNumber);
-    void DrawDemoWindow() { ImGui::ShowDemoWindow(&m_showDemoWindow); };
+    void DrawDemoWindow();
 
     // 描述符分配器（简单计数器实现）
     struct DescriptorAllocator {

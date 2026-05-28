@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Common/Common.h"
 #include "LoggerConfig.h"
 #include "RendererConfig.h"
 #include "WindowConfig.h"
+#include <shared_mutex>
 
 #include <nlohmann/json.hpp>
 

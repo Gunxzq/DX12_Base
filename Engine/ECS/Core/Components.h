@@ -1,13 +1,13 @@
 #pragma once
 
+#include "Common/Common.h"
+
 #include "Math/BoundingVolume.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/LODMeshHandle.h"
 #include "Resource/Struct/MaterialHandle.h"
 #include "Resource/Struct/TextureHandle.h"
-#include <DirectXMath.h>
-#include <d3d12.h>
 
 namespace DX12Engine {
 namespace Math {

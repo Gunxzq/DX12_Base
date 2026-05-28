@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Common/Common.h"
-#include "Common/d3dx12.h"
+
 #include <nlohmann/json.hpp>
 
 namespace DX12Engine {

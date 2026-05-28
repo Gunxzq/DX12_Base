@@ -1,9 +1,8 @@
 #pragma once
 
 #include "Event.h"
-#include <atomic>
+
 #include <cassert>
-#include <cstdint>
 #include <cstring> // for memset
 #include <mutex>
 

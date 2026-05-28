@@ -1,6 +1,6 @@
 ﻿#include "DebugOverlay.h"
 
-#include <algorithm>
+#include "Common/Common.h"
 
 namespace DX12Engine::Logger {
 

@@ -1,8 +1,7 @@
 #pragma once
 #include "Core/InputKeyCodes.h"
-#include <algorithm>
-#include <cctype>
-#include <string>
+
+#include "Common/Common.h"
 #include <unordered_map>
 
 namespace DX12Engine {

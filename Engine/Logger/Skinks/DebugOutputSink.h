@@ -1,5 +1,6 @@
 #pragma once
-#include "Common/WindowsPlatform.h"
+
+#include <mutex>
 #include <spdlog/sinks/base_sink.h>
 
 namespace DX12Engine {

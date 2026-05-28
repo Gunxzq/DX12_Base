@@ -1,8 +1,8 @@
 #pragma once
 #include "Core/InputKeyCodes.h"
-#include <algorithm>
+
+#include "Common/Common.h"
 #include <array>
-#include <cstdint>
 
 namespace DX12Engine {
 namespace Input {

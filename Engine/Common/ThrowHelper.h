@@ -2,6 +2,8 @@
 #pragma once
 #include "WindowsPlatform.h"
 #include <comdef.h>
+#include <iostream>
+#include <sstream>
 
 /**
  * @brief 将 HRESULT 转换为可读的错误字符串
@@ -42,7 +44,7 @@ public:
     do {                                                                                                               \
         if (x) {                                                                                                       \
             x->Release();                                                                                              \
-            x = nullptr;                                                                                                \
+            x = nullptr;                                                                                               \
         }                                                                                                              \
     } while (0)
 #endif
@@ -56,7 +58,7 @@ public:
     do {                                                                                                               \
         HRESULT hr__ = (x);                                                                                            \
         if (FAILED(hr__)) {                                                                                            \
-            throw DxException(hr__, L#x, __FILEW__, __LINE__);                                                           \
+            throw DxException(hr__, L#x, __FILEW__, __LINE__);                                                         \
         }                                                                                                              \
     } while (0)
 #endif

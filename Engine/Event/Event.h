@@ -1,7 +1,7 @@
 #pragma once
 
-#include <chrono>
-#include <cstdint>
+#include "Common/Common.h"
+
 #include <type_traits>
 
 namespace DX12Engine {

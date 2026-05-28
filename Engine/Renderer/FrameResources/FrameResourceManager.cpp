@@ -1,6 +1,7 @@
 #include "FrameResourceManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
-#include <cassert>
+
+#include "Common/Common.h"
 
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;

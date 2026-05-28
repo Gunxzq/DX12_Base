@@ -1,5 +1,7 @@
-// Renderer/Core/CullingSystem.cpp
 #include "CullingSystem.h"
+
+#include "Common/Common.h"
+
 #include "ECS/Core/Components.h"
 
 using namespace DX12Engine::Math;

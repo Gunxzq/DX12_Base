@@ -1,5 +1,7 @@
 #include "MessageDispatcher.h"
 
+#include "Common/Common.h"
+
 namespace DX12Engine::Event {
 
 MessageDispatcher *MessageDispatcher::GetInstance() {

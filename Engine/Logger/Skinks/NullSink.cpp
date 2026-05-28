@@ -1,5 +1,7 @@
 #include "NullSink.h"
 
+#include "Common/Common.h"
+
 namespace DX12Engine::Logger {
 
 // 显式实例化多线程版本

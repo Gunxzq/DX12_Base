@@ -1,13 +1,12 @@
 #include "Logger/SinkFactory.h"
-#include "Boot/LoggerConfig.h"
 
+#include "Common/Common.h"
+
+#include "Boot/LoggerConfig.h"
+#include "Logger/DebugOverlay.h"
 #include "Logger/Skinks/DebugOutputSink.h"
 #include "Logger/Skinks/LogWindowSink.h"
 #include "Logger/Skinks/NullSink.h"
-
-#include "Logger/DebugOverlay.h"
-
-#include <filesystem>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 

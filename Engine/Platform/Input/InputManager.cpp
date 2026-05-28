@@ -1,5 +1,7 @@
-// InputManager.cpp
 #include "InputManager.h"
+
+#include "Common/Common.h"
+
 #include "InputConfigLoader.cpp"
 #include "InputContextStack.h"
 #include "InputSystem.h"

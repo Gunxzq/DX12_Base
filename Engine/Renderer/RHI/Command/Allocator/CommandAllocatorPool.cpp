@@ -1,5 +1,7 @@
 #include "CommandAllocatorPool.h"
 
+#include "Common/Common.h"
+
 namespace DX12Engine::Renderer {
 
 // ========================================================================

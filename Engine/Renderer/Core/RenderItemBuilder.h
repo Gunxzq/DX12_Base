@@ -1,5 +1,5 @@
-// Renderer/Core/RenderItemBuilder.h
 #pragma once
+
 #include "ECS/Core/Registry.h"
 #include "Renderer/Core/CullingSystem.h"
 #include "Renderer/Core/LODSystem.h"
@@ -8,7 +8,6 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Texture/TextureManager.h"
-#include <unordered_map>
 
 namespace DX12Engine {
 

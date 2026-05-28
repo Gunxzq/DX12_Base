@@ -1,8 +1,7 @@
 #pragma once
-#include "Common/Common.h"
+
 #include "Event/EventTypes.h"
 #include "Resource.h"
-#include <string>
 
 namespace DX12Engine {
 

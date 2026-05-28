@@ -4,7 +4,6 @@
 #include "Event.h"
 #include <array>
 #include <atomic>
-#include <cstdint>
 
 namespace DX12Engine {
 

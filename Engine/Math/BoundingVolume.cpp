@@ -1,9 +1,12 @@
 #include "BoundingVolume.h"
+
+#include "Common/Common.h"
 #include <Jolt/Jolt.h>
 
 #include <Jolt/Geometry/AABox.h>
 #include <Jolt/Geometry/ConvexHullBuilder.h>
 #include <Jolt/Geometry/Sphere.h>
+
 #include <unordered_set>
 
 namespace DX12Engine::Math {

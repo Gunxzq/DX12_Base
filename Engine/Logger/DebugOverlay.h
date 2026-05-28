@@ -1,8 +1,9 @@
 #pragma once
 
-#include "Common/Common.h"
 #include <atomic>
+#include <chrono>
 #include <deque>
+#include <mutex>
 
 //
 #define WM_LOG_UPDATE (WM_USER + 1)

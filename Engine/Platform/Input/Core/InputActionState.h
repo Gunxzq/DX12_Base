@@ -1,5 +1,6 @@
 #pragma once
-#include <cstdint>
+
+#include "Common/Common.h"
 #include <vector>
 
 namespace DX12Engine {

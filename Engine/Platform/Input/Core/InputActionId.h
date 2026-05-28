@@ -1,7 +1,7 @@
 #pragma once
 #include "Math/HashTypes.h"
-#include <cstdint>
-#include <string_view>
+
+#include "Common/Common.h"
 
 namespace DX12Engine {
 namespace Input {

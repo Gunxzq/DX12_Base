@@ -1,10 +1,10 @@
 #include "RenderItemBuilder.h"
+
+#include "Common/Common.h"
+
 #include "ECS/Core/Components.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Resource/Manager/MaterialManager.h"
-#include <iostream>
-
-#include <cmath>
 
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;
@@ -37,9 +37,8 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
             continue;
         }
         Resource::MaterialHandle materialHandle = meshComp.materialHandle;
-         Resource::TextureHandle textureHandle = meshComp.textureHandle;
-         Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
-        
+        Resource::TextureHandle textureHandle = meshComp.textureHandle;
+        Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
 
         if (!materialHandle.IsValid()) {
             continue;

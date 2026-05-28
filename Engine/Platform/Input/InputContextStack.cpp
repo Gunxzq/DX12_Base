@@ -1,5 +1,7 @@
 #include "InputContextStack.h"
 
+#include "Common/Common.h"
+
 namespace DX12Engine {
 namespace Input {
 

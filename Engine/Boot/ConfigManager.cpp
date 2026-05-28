@@ -1,5 +1,8 @@
 #include "ConfigManager.h"
 
+#include "Common/Common.h"
+#include <fstream>
+
 namespace {
 
 /**

@@ -2,9 +2,7 @@
 #include "Resource/Struct/Descriptor.h"
 #include "RingBuffer.h"
 #include "Struct/FrameResourceTypes.h"
-#include <array>
 #include <d3d12.h>
-#include <memory>
 #include <wrl/client.h>
 
 namespace DX12Engine {

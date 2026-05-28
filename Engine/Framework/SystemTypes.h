@@ -10,9 +10,8 @@
 #include "ECS/Core/Registry.h"
 #include "Scheduler/RenderPhase.h"
 #include "Scheduler/Task.h"
-#include <functional>
-#include <string>
-#include <vector>
+
+#include "Common/Common.h"
 
 namespace DX12Engine::Scheduler {
 

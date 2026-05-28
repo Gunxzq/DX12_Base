@@ -1,7 +1,6 @@
 #pragma once
-#include <memory>
+
 #include <spdlog/sinks/sink.h>
-#include <vector>
 
 // 前置声明配置结构，避免包含大头文件
 namespace DX12Engine {

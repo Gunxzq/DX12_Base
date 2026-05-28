@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Common/Common.h"
 #include "ECS/Core/Entity.h"
 #include "GameTimer.h"
 #include "Logger/Logger.h"
@@ -9,7 +8,6 @@
 #include "Renderer/Core/RenderQueue.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Resource/Texture/TextureManager.h"
-#include <unordered_map>
 
 // 前向声明 Renderer 命名空间中的类型
 namespace DX12Engine::Renderer {

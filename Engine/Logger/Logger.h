@@ -8,6 +8,7 @@
 #endif
 
 #include "Common/Common.h"
+#include <shared_mutex>
 #include <spdlog/logger.h>
 
 namespace DX12Engine {

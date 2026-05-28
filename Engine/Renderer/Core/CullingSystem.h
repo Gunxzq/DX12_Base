@@ -5,7 +5,6 @@
 #include "Math/BoundingVolume.h"
 #include "Renderer/Scene/Struct/Frustum.h"
 #include <DirectXMath.h>
-#include <unordered_map>
 
 namespace DX12Engine {
 

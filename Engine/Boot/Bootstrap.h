@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Common/Common.h"
 #include "DebugUI/DebugUIManager.h"
 #include "ECS/Core/Registry.h"
 #include "GameTimer.h"
@@ -11,6 +10,7 @@
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Manager/MaterialManager.h"
 #include "Resource/Texture/TextureManager.h"
+#include <filesystem>
 
 namespace DX12Engine {
 

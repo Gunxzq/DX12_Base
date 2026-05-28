@@ -1,6 +1,6 @@
 #include "RingBuffer.h"
-#include <cassert>
-#include <cstring>
+
+#include "Common/Common.h"
 
 using namespace DX12Engine::Renderer;
 

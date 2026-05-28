@@ -1,6 +1,6 @@
-#include <algorithm>
-#include <cstdint>
-#include <d3d12.h>
+
+// Common
+#include "Common/Common.h"
 
 #include "DDSTypes.h"
 

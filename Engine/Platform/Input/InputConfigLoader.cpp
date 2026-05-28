@@ -1,8 +1,9 @@
+
+#include "Common/Common.h"
 #include "Core/InputActionId.h"
 #include "Core/InputBinding.h"
 #include "InputKeyParser.h"
 #include <fstream>
-#include <iostream>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;

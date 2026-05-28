@@ -1,6 +1,7 @@
 #pragma once
 #include "Event.h"
-#include <cstdint>
+
+#include "Common/Common.h"
 
 namespace DX12Engine {
 

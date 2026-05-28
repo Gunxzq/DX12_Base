@@ -1,10 +1,6 @@
 #pragma once
 
 #include "CommandAllocator.h"
-#include <atomic>
-#include <cassert>
-#include <d3d12.h>
-#include <memory>
 #include <mutex>
 #include <vector>
 

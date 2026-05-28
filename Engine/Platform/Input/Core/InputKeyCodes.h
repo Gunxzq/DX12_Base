@@ -1,6 +1,6 @@
 #pragma once
-#include <Windows.h> // 必须包含，用于 VK_ 和 XINPUT 定义
-#include <cstdint>
+
+#include "Common/Common.h"
 
 namespace DX12Engine {
 namespace Input {

@@ -1,6 +1,8 @@
 #include "LODSystem.h"
+
+#include "Common/Common.h"
+
 #include "ECS/Core/Components.h"
-#include <cmath>
 
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;

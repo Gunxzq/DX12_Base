@@ -1,7 +1,7 @@
 #pragma once
+
 #include "Common/d3dUtil.h"
 #include <queue>
-#include <vector>
 #include <wrl/client.h>
 
 namespace DX12Engine::Renderer {

@@ -1,4 +1,7 @@
 #include "Bootstrap.h"
+
+#include "Common/Common.h"
+
 #include "Boot/ResourceConfig.h"
 #include "ConfigManager.h"
 #include "ECS/Core/Registry.h"

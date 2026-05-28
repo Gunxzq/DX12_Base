@@ -13,6 +13,7 @@
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Texture/TextureManager.h"
 #include "Scheduler/FrameDriver.h"
+#include "ThirdParty/imgui/imgui.h"
 
 using namespace DX12Engine;
 using namespace DX12Engine::DebugUI;
