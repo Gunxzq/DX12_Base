@@ -13,6 +13,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
     UNREFERENCED_PARAMETER(lpCmdLine);
     UNREFERENCED_PARAMETER(nCmdShow);
 
+    // 设置工作目录为 exe 所在目录
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    std::wstring exeDir = exePath;
+    exeDir = exeDir.substr(0, exeDir.find_last_of(L"\\/"));
+    SetCurrentDirectoryW(exeDir.c_str());
+
     Bootstrap bootstrap;
 
     try {

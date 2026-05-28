@@ -213,22 +213,19 @@ void Bootstrap::InitializeModules() {
         // 2. 日志 (依赖配置)
         InitializeLogging();
 
-        // 3. 窗口 (依赖配置)
-        if (!CreateMainWindow()) {
-            throw std::runtime_error("[Bootstrap] CreateMainWindow returned false.");
-        }
-
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing InputManager...");
         auto &inputMgr = DX12Engine::Input::InputManager::Get();
         // 假设配置文件路径为 "Config/input_bindings.json" 或在 ConfigManager 中获取
         std::string inputConfigPath = "Config/default_input.json";
 
-        if (inputMgr.Initialize(inputConfigPath)) {
-            m_window->SetInputManager(&inputMgr); // ← 添加这行
-        } else {
-            EngineLogger::GetInstance()->Warn(
-                "[Bootstrap] InputManager initialization failed or config not found. Using defaults.");
+        inputMgr.Initialize(inputConfigPath);
+
+        // 3. 窗口 (依赖配置)
+        if (!CreateMainWindow()) {
+            throw std::runtime_error("[Bootstrap] CreateMainWindow returned false.");
         }
+
+        m_window->SetInputManager(&inputMgr);
 
         // 4. D3D12 设备上下文 (依赖窗口句柄)
         if (!InitializeD3DDeviceContext()) {
@@ -258,6 +255,18 @@ void Bootstrap::InitializeModules() {
         m_descriptorHeaps.Initialize(m_deviceContext->GetDevice(), heapConfigs);
         EngineLogger::GetInstance()->Info("[Bootstrap] DescriptorHeapCollection initialized.");
 
+        // 初始化材质管理器
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing MaterialManager...");
+        m_materialManager.Initialize(1024);
+        EngineLogger::GetInstance()->Info("[Bootstrap] MaterialManager initialized.");
+
+        // ====================================================================
+        // 初始化 TextureManager
+        // ====================================================================
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing TextureManager...");
+        m_textureManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
+        EngineLogger::GetInstance()->Info("[Bootstrap] TextureManager initialized.");
+
         // ====================================================================
         // 初始化帧资源管理器
         // ====================================================================
@@ -273,11 +282,6 @@ void Bootstrap::InitializeModules() {
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing GeometryResourceManager...");
         m_geometryResourceManager.Initialize(1024);
         EngineLogger::GetInstance()->Info("[Bootstrap] GeometryResourceManager initialized.");
-
-        // 初始化材质管理器
-        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing MaterialManager...");
-        m_materialManager.Initialize(1024);
-        EngineLogger::GetInstance()->Info("[Bootstrap] MaterialManager initialized.");
 
         InitializeDebugUI();
 
@@ -299,7 +303,6 @@ void Bootstrap::InitializeModules() {
             throw std::runtime_error("[Bootstrap] GNS Initialization Failed");
         }
         EngineLogger::GetInstance()->Info("[Bootstrap] GameNetworkingSockets initialized.");
-
     } catch (const std::exception &e) {
         // 如果任何一步失败，记录错误并重新抛出
         // 注意：如果 Logger 还没好，EarlyLog 会兜底

@@ -48,66 +48,22 @@ public:
     Bootstrap &operator=(Bootstrap &&) = delete;
 
     // ── 生命周期 ──
-
-    /**
-     * @brief 初始化模块
-     */
     void Run();
 
-    /**
-     * @brief 创建游戏上下文
-     * @return GameContext*
-     * @date 2026-04-21
-     */
     GameContext *CreateContext();
-
-    /**
-     * @brief 获取 ECS Registry 引用（用于初始化调度器）
-     */
     ECS::Registry &GetRegistry();
 
-private:
-    /**
-     * @brief 关闭并清理
-     */
     void Shutdown();
 
-    /**
-     * @brief 初始化配置管理器
-     */
+private:
     void InitializeConfigManager(const std::filesystem::path &configDir);
-
-    /**
-     * @brief 初始化日志系统
-     */
     void InitializeLogging();
-
-    /**
-     * @brief 创建窗口
-     */
     bool CreateMainWindow();
-
-    /**
-     * @brief 初始化 D3D12 设备上下文
-     */
     bool InitializeD3DDeviceContext();
-
-    /**
-     * @brief 初始化 ECS Registry
-     */
     void InitializeRegistry();
-
-    /**
-     * @brief 初始化 FrameDriver (调度层核心)
-     */
     void InitializeFrameDriver();
-
     void InitializeDebugUI();
 
-    /**
-     * @brief 初始化模块
-     * @date 2026-04-21
-     */
     void InitializeModules();
 
     // ── 成员变量 ──
