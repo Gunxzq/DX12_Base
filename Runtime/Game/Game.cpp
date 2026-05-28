@@ -46,17 +46,7 @@ bool Game::Initialize() {
     m_opaqueRenderer->SetDeviceContext(m_context->DeviceContext);
     m_opaqueRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
     m_opaqueRenderer->SetMaterialManager(m_context->MaterialMgr);
-
     m_opaqueRenderer->Initialize();
-
-    m_context->CullingSystem = &m_cullingSystem;
-    m_context->LODSystem = &m_lodSystem;
-    m_context->RenderItemBuilder = &m_renderItemBuilder;
-
-    // 设置帧驱动器引用
-    m_context->RenderItemBuilder->SetFrameResourceManager(m_context->FrameResourceManager);
-    m_context->RenderItemBuilder->SetMaterialManager(m_context->MaterialMgr);
-    m_context->RenderItemBuilder->SetTextureManager(m_context->TextureMgr);
 
     // 4. 初始化相机
     if (m_context->CameraMgr) {
@@ -65,14 +55,6 @@ bool Game::Initialize() {
         mainCamera.Rotation = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f);
         m_context->CameraMgr->UpdateMainCamera();
     }
-
-    // 配置 LODSystem
-    m_lodSystem.SetLODConfig(LODConfig::GetDefault());
-    m_lodSystem.SetCameraManager(m_context->CameraMgr);
-    m_lodSystem.SetGeometryManager(m_context->GeometryResourceManager);
-
-    // 配置 RenderItemBuilder
-    m_renderItemBuilder.SetCameraManager(m_context->CameraMgr);
 
     // 初始化 LightManager
     m_lightManager.Initialize();

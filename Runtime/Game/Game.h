@@ -40,9 +40,6 @@ private:
     GameWorld m_world;
     GameInputHandler m_inputHandler;
 
-    DX12Engine::Renderer::CullingSystem m_cullingSystem;
-    DX12Engine::Renderer::LODSystem m_lodSystem;
-    DX12Engine::Renderer::RenderItemBuilder m_renderItemBuilder;
     DX12Engine::Renderer::LightManager m_lightManager;
 
     bool m_isRunning = false;

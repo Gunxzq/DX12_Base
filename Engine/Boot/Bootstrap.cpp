@@ -286,6 +286,10 @@ void Bootstrap::InitializeModules() {
         m_geometryResourceManager.Initialize(1024);
         EngineLogger::GetInstance()->Info("[Bootstrap] GeometryResourceManager initialized.");
 
+        m_lodSystem.SetLODConfig(LODConfig::GetDefault());
+        m_lodSystem.SetCameraManager(&DX12Engine::Renderer::CameraManager::GetInstance());
+        m_lodSystem.SetGeometryManager(&m_geometryResourceManager);
+
         InitializeDebugUI();
 
         // 5. MessageDispatcher 单例 (Event 层，调度系统需要)
@@ -360,6 +364,13 @@ GameContext *Bootstrap::CreateContext() {
     m_context->GeometryResourceManager = &m_geometryResourceManager;
     m_context->MaterialMgr = &m_materialManager;
     m_context->TextureMgr = &m_textureManager;
+    m_context->CullingSystem = &m_cullingSystem;
+    m_context->LODSystem = &m_lodSystem;
+    m_context->RenderItemBuilder = &m_renderItemBuilder;
+    m_context->RenderItemBuilder->SetFrameResourceManager(&m_frameResourceManager);
+    m_context->RenderItemBuilder->SetMaterialManager(&m_materialManager);
+    m_context->RenderItemBuilder->SetTextureManager(&m_textureManager);
+    m_context->RenderItemBuilder->SetCameraManager(m_context->CameraMgr);
 
     if (m_frameDriver) {
         m_frameDriver->SetGameContext(m_context.get());
@@ -370,13 +381,6 @@ GameContext *Bootstrap::CreateContext() {
     debugUI.AutoRegisterToFrameDriver(m_context.get());
 
     return m_context.get();
-}
-
-DX12Engine::ECS::Registry &Bootstrap::GetRegistry() {
-    if (!m_registry) {
-        throw std::runtime_error("[Bootstrap] Registry not initialized");
-    }
-    return *m_registry;
 }
 
 void Bootstrap::Run() {

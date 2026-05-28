@@ -1,5 +1,4 @@
 #include "GameContext.h"
-
 #include "Common/Common.h"
 
 #include "ConfigManager.h"

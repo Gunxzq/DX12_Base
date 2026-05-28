@@ -91,12 +91,13 @@ public:
     // ── 渲染子系统指针 ──
     Renderer::D3D12DeviceContext *DeviceContext = nullptr;
     Renderer::CameraManager *CameraMgr = nullptr;
-    Resource::DescriptorHeapCollection *DescriptorHeaps = nullptr;
+
     Renderer::FrameResourceManager *FrameResourceManager = nullptr;
-    Resource::GeometryResourceManager *GeometryResourceManager = nullptr;
 
     Resource::MaterialManager *MaterialMgr = nullptr;
     Resource::TextureManager *TextureMgr = nullptr;
+    Resource::GeometryResourceManager *GeometryResourceManager = nullptr;
+    Resource::DescriptorHeapCollection *DescriptorHeaps = nullptr;
 
     Input::InputManager *InputMgr = nullptr;
 

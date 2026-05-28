@@ -4,6 +4,9 @@
 #include "ECS/Core/Registry.h"
 #include "GameTimer.h"
 #include "Platform/Windows/Window.h"
+#include "Renderer/Core/CullingSystem.h"
+#include "Renderer/Core/LODSystem.h"
+#include "Renderer/Core/RenderItemBuilder.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
@@ -49,13 +52,13 @@ public:
 
     // ── 生命周期 ──
     void Run();
-
-    GameContext *CreateContext();
-    ECS::Registry &GetRegistry();
-
     void Shutdown();
 
+    // 注入 GameContext
+    GameContext *CreateContext();
+
 private:
+    // 初始化基础设施
     void InitializeConfigManager(const std::filesystem::path &configDir);
     void InitializeLogging();
     bool CreateMainWindow();
@@ -64,6 +67,7 @@ private:
     void InitializeFrameDriver();
     void InitializeDebugUI();
 
+    // 初始化模块
     void InitializeModules();
 
     // ── 成员变量 ──
@@ -72,13 +76,18 @@ private:
     std::unique_ptr<GameTimer> m_mainTimer;                        // 主计时器
     std::unique_ptr<Renderer::D3D12DeviceContext> m_deviceContext; // D3D12 设备上下文
     std::unique_ptr<ECS::Registry> m_registry;                     // ECS Registry
-    Scheduler::FrameDriver *m_frameDriver = nullptr;               // FrameDriver (由基础设施层创建)
-    Resource::DescriptorHeapCollection m_descriptorHeaps;
-    Renderer::FrameResourceManager m_frameResourceManager;
-    Resource::GeometryResourceManager m_geometryResourceManager;
+    Scheduler::FrameDriver *m_frameDriver;                         // FrameDriver (由基础设施层创建)
 
+    Renderer::FrameResourceManager m_frameResourceManager;
+
+    Resource::GeometryResourceManager m_geometryResourceManager;
     Resource::MaterialManager m_materialManager;
     Resource::TextureManager m_textureManager;
+    Resource::DescriptorHeapCollection m_descriptorHeaps;
+
+    Renderer::CullingSystem m_cullingSystem;
+    Renderer::LODSystem m_lodSystem;
+    Renderer::RenderItemBuilder m_renderItemBuilder;
 
     // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问
 
