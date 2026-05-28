@@ -4,64 +4,55 @@
 #include <cstring>
 #include <d3d12.h>
 #include <fstream>
+#include <iostream>
 #include <memory>
 
 namespace DX12Engine::Resource {
 
-bool DDSLoader::FillSubresourceData(const uint8_t *bitData, size_t bitSize, const DDSTextureInfo &info, size_t maxsize,
-                                    std::vector<D3D12_SUBRESOURCE_DATA> &outSubresources, uint32_t &outSkipMip) {
-    if (!bitData || bitSize == 0) {
-        return false;
-    }
+static HRESULT FillInitDataForInfo(_In_ size_t width, _In_ size_t height, _In_ size_t depth, _In_ size_t mipCount,
+                                   _In_ size_t arraySize, _In_ DXGI_FORMAT format, _In_ size_t maxsize,
+                                   _In_ size_t bitSize, _In_reads_bytes_(bitSize) const uint8_t *bitData,
+                                   _Out_ size_t &twidth, _Out_ size_t &theight, _Out_ size_t &tdepth,
+                                   _Out_ size_t &skipMip,
+                                   _Out_writes_(mipCount *arraySize) D3D12_SUBRESOURCE_DATA *initData) {
+    if (!bitData || !initData)
+        return E_POINTER;
 
-    outSkipMip = 0;
-    outSubresources.clear();
-
-    size_t width = info.desc.Width;
-    size_t height = info.desc.Height;
-    size_t depth = (info.desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? info.desc.DepthOrArraySize : 1;
-    size_t mipCount = info.desc.MipLevels;
-    size_t arraySize = info.desc.DepthOrArraySize;
-    DXGI_FORMAT format = info.desc.Format;
+    skipMip = 0;
+    twidth = 0;
+    theight = 0;
+    tdepth = 0;
 
     size_t NumBytes = 0;
     size_t RowBytes = 0;
     const uint8_t *pSrcBits = bitData;
     const uint8_t *pEndBits = bitData + bitSize;
 
-    size_t totalSubresources = mipCount * arraySize;
-    outSubresources.reserve(totalSubresources);
-
-    size_t twidth = 0;
-    size_t theight = 0;
-    size_t tdepth = 0;
-
-    for (size_t arrayIdx = 0; arrayIdx < arraySize; ++arrayIdx) {
+    size_t index = 0;
+    for (size_t j = 0; j < arraySize; j++) {
         size_t w = width;
         size_t h = height;
         size_t d = depth;
-
-        for (size_t mipIdx = 0; mipIdx < mipCount; ++mipIdx) {
+        for (size_t i = 0; i < mipCount; i++) {
             GetSurfaceInfo(w, h, format, &NumBytes, &RowBytes, nullptr);
 
             if ((mipCount <= 1) || !maxsize || (w <= maxsize && h <= maxsize && d <= maxsize)) {
-                if (twidth == 0) {
+                if (!twidth) {
                     twidth = w;
                     theight = h;
                     tdepth = d;
                 }
 
-                D3D12_SUBRESOURCE_DATA subData;
-                subData.pData = pSrcBits;
-                subData.RowPitch = static_cast<UINT>(RowBytes);
-                subData.SlicePitch = static_cast<UINT>(NumBytes);
-                outSubresources.push_back(subData);
-            } else if (arrayIdx == 0) {
-                ++outSkipMip;
+                initData[index].pData = (const void *)pSrcBits;
+                initData[index].RowPitch = static_cast<UINT>(RowBytes);
+                initData[index].SlicePitch = static_cast<UINT>(NumBytes);
+                ++index;
+            } else if (!j) {
+                ++skipMip;
             }
 
             if (pSrcBits + (NumBytes * d) > pEndBits) {
-                return false;
+                return HRESULT_FROM_WIN32(ERROR_HANDLE_EOF);
             }
 
             pSrcBits += NumBytes * d;
@@ -78,8 +69,9 @@ bool DDSLoader::FillSubresourceData(const uint8_t *bitData, size_t bitSize, cons
         }
     }
 
-    return !outSubresources.empty();
+    return (index > 0) ? S_OK : E_FAIL;
 }
+
 bool DDSLoader::ParseDDS(const uint8_t *fileData, size_t fileSize, DDSTextureInfo &outInfo) {
     // 验证 magic number
     if (fileSize < sizeof(uint32_t) + sizeof(DDS_HEADER))
@@ -178,12 +170,22 @@ bool DDSLoader::ParseDDS(const uint8_t *fileData, size_t fileSize, DDSTextureInf
     if (pixelDataOffset >= fileSize)
         return false;
 
-    outInfo.pixelData = fileData + pixelDataOffset;
-    outInfo.pixelDataSize = fileSize - pixelDataOffset;
+    outInfo.pixelData.resize(fileSize - pixelDataOffset);
+    memcpy(outInfo.pixelData.data(), fileData + pixelDataOffset, fileSize - pixelDataOffset);
 
-    // 填充子资源数据
-    uint32_t skipMip;
-    if (!FillSubresourceData(outInfo.pixelData, outInfo.pixelDataSize, outInfo, 0, outInfo.subresources, skipMip)) {
+    size_t mipCount = outInfo.desc.MipLevels;
+    size_t width = outInfo.desc.Width;
+    size_t height = outInfo.desc.Height;
+    size_t depth = (outInfo.desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? outInfo.desc.DepthOrArraySize : 1;
+
+    outInfo.subresources.resize(mipCount * arraySize);
+
+    size_t twidth, theight, tdepth, skipMip;
+    HRESULT hr = FillInitDataForInfo(width, height, depth, mipCount, arraySize, format, 0, outInfo.pixelData.size(),
+                                     outInfo.pixelData.data(), // ← 使用 pixelData
+                                     twidth, theight, tdepth, skipMip, outInfo.subresources.data());
+
+    if (FAILED(hr)) {
         return false;
     }
 

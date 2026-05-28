@@ -120,14 +120,14 @@ void GameWorld::RegisterSystems() {
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = m_context->lightCBAddress;
 
+                 // 开始渲染
+                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr);
+
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
                      m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
 
                  //  一个堆
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
-
-                 // 开始渲染
-                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr);
 
                  // 遍历所有带 MeshComponent 和 TransformComponent 的实体并渲染
                  const auto &renderQueue = m_context->renderQueue;
@@ -187,6 +187,7 @@ void GameWorld::CreateTestCube() {
         XMFLOAT3 Position;
         XMFLOAT4 Color;
         XMFLOAT3 Normal;
+        XMFLOAT2 TexCoord;
     };
 
     std::vector<SimpleVertex> simpleVertices(meshData.Vertices.size());
@@ -194,27 +195,7 @@ void GameWorld::CreateTestCube() {
         simpleVertices[i].Position = meshData.Vertices[i].Position;
         simpleVertices[i].Normal = meshData.Vertices[i].Normal;
         simpleVertices[i].Color = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-
-        // 为每个面设置不同颜色
-        if (i < 4) {
-            simpleVertices[i].Color = XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f);
-            simpleVertices[i].Normal = XMFLOAT3(1.0f, 0.0f, 0.0f); // 红色
-        } else if (i < 8) {
-            simpleVertices[i].Color = XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f); // 绿色
-            simpleVertices[i].Normal = XMFLOAT3(0.0f, 1.0f, 0.0f);      // 绿色
-        } else if (i < 12) {
-            simpleVertices[i].Color = XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色
-            simpleVertices[i].Normal = XMFLOAT3(0.0f, 0.0f, 1.0f);      // 蓝色
-        } else if (i < 16) {
-            simpleVertices[i].Color = XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f); // 黄色
-            simpleVertices[i].Normal = XMFLOAT3(1.0f, 1.0f, 0.0f);      // 黄色
-        } else if (i < 20) {
-            simpleVertices[i].Color = XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f); // 紫色
-            simpleVertices[i].Normal = XMFLOAT3(1.0f, 0.0f, 1.0f);      // 紫色
-        } else if (i < 24) {
-            simpleVertices[i].Color = XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f); // 青色
-            simpleVertices[i].Normal = XMFLOAT3(0.0f, 1.0f, 1.0f);      // 青色
-        }
+        simpleVertices[i].TexCoord = meshData.Vertices[i].TexC;
     }
 
     // 3. 创建 GPU 资源

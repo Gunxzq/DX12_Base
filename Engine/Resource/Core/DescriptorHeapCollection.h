@@ -44,8 +44,7 @@ private:
     };
 
 private:
-    HeapEntry &GetHeapEntry(DescriptorHeapType type);
-    const HeapEntry &GetHeapEntry(DescriptorHeapType type) const;
+    HeapEntry &GetHeapEntry(DescriptorHeapType type) { return m_heaps[type]; };
 
     ID3D12Device *m_device = nullptr;
     std::unordered_map<DescriptorHeapType, HeapEntry> m_heaps;

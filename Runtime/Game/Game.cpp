@@ -7,6 +7,7 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Resource/AssetLoader/AssetLoader.h"
+#include "Resource/AssetLoader/Loader/DDSLoader.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
@@ -166,7 +167,7 @@ bool Game::Initialize() {
 
         // 1. 解析 DDS 文件
         DDSTextureInfo ddsInfo;
-        std::wstring texturePath = L"Content/Textures/water1.dds";
+        std::wstring texturePath = L"Content/Textures/WoodCrate01.dds";
         if (AssetLoader::GetInstance().LoadTextureFromFile(texturePath, ddsInfo)) {
 
             // 2. 创建 GPU 资源（使用 COMMON 状态，不是 COPY_DEST）
@@ -178,6 +179,10 @@ bool Game::Initialize() {
                 // 3. 分配 SRV 描述符
                 auto &descriptorHeaps = m_context->DescriptorHeaps;
                 uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+                OutputDebugString((L"SRV Index: " + std::to_wstring(srvIndex) + L"\n").c_str());
+                if (srvIndex == UINT32_MAX) {
+                    OutputDebugString(L"ERROR: Failed to allocate SRV index!\n");
+                }
 
                 if (srvIndex != UINT32_MAX) {
                     // 4. 创建 SRV
@@ -206,6 +211,9 @@ bool Game::Initialize() {
                     m_context->testTextureSRVHandle =
                         descriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
 
+                    OutputDebugString(
+                        (L"GPU Handle ptr: " + std::to_wstring(m_context->testTextureSRVHandle.ptr) + L"\n").c_str());
+
                     // 5. 注册到 TextureManager
                     auto &texMgr = TextureManager::GetInstance();
                     m_context->testTextureHandle = texMgr.RegisterTexture(gpuHandle, srvIndex);
@@ -218,14 +226,10 @@ bool Game::Initialize() {
                     auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
                     auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
-                    // 准备子资源数据
-                    std::vector<D3D12_SUBRESOURCE_DATA> subresources;
-                    uint32_t skipMip;
-                    DDSLoader::FillSubresourceData(ddsInfo.pixelData, ddsInfo.pixelDataSize, ddsInfo, 0, subresources,
-                                                   skipMip);
+                    // 直接使用解析好的 subresources（不再调用 FillSubresourceData）
+                    std::vector<D3D12_SUBRESOURCE_DATA> subresources = ddsInfo.subresources;
 
                     // 计算所需上传缓冲区大小
-
                     UINT64 requiredSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
                                                                       static_cast<UINT>(subresources.size()));
 
@@ -257,7 +261,7 @@ bool Game::Initialize() {
                     uint64_t sequence = m_context->GetNextSequence();
 
                     // 释放上传缓冲区
-                    // gpuMgr.Release(uploadHandle, sequence);
+                    gpuMgr.Release(uploadHandle, sequence);
 
                     // 释放临时资源
                     m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
