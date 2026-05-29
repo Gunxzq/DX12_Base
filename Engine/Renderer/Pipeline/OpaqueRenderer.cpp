@@ -69,12 +69,13 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
     cmdList.Get()->SetPipelineState(m_pso.Get());
     cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
-    cmdList.Get()->SetGraphicsRootConstantBufferView(3, lightCBAddress);
+    cmdList.Get()->SetGraphicsRootConstantBufferView(2, lightCBAddress);
 }
 
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
                               const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-                              D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV) {
+                              D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV,
+                              D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) {
     if (!m_geometryManager) {
         OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - GeometryResourceManager not set!\n");
         return;
@@ -112,9 +113,19 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
     cmdList.Get()->IASetIndexBuffer(&ibView);
     cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objectCBAddress);
-    cmdList.Get()->SetGraphicsRootConstantBufferView(2, matCBAddress);
 
+    // 材质数组 StructuredBuffer SRV (slot 3, t0 space1)
+    if (materialBufferSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(3, materialBufferSRV);
+    }
+
+    // 纹理 SRV (slot 4)
     cmdList.Get()->SetGraphicsRootDescriptorTable(4, textureSRV);
+
+    // 环境贴图 SRV (slot 5, t10)
+    if (envMapSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(5, envMapSRV);
+    }
 
     cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
 }
@@ -176,38 +187,55 @@ void OpaqueRenderer::LoadShaders() {
 void OpaqueRenderer::CreateRootSignature() {
     auto device = m_context->GetDevice();
 
-    CD3DX12_ROOT_PARAMETER slotRootParameter[5];
+    // ========================================================================
+    // 根参数布局 (对齐 Common_PBR.hlsl):
+    //   slot 0: b0 cbPerObject      (CBV)
+    //   slot 1: b1 cbPass           (CBV)
+    //   slot 2: b2 cbLights         (CBV)
+    //   slot 3: t0,space1           StructuredBuffer<MaterialData> (SRV 描述符表)
+    //   slot 4: t0                  纹理 SRV (描述符表)
+    //   slot 5: t10                 环境贴图 SRV (描述符表)
+    // ========================================================================
+    CD3DX12_ROOT_PARAMETER slotRootParameter[6];
+
+    CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
+    materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
     CD3DX12_DESCRIPTOR_RANGE texTable;
     texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
-    slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL);
-    slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
-    slotRootParameter[2].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL);
-    slotRootParameter[3].InitAsConstantBufferView(3, 0, D3D12_SHADER_VISIBILITY_ALL);
-    slotRootParameter[4].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
+    CD3DX12_DESCRIPTOR_RANGE envMapTable;
+    envMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+
+    slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL); // b0: cbPerObject
+    slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL); // b1: cbPass
+    slotRootParameter[2].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL); // b2: cbLights
+    slotRootParameter[3].InitAsDescriptorTable(1, &materialBufferRange, D3D12_SHADER_VISIBILITY_PIXEL); // t0,space1
+    slotRootParameter[4].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);            // t0
+    slotRootParameter[5].InitAsDescriptorTable(1, &envMapTable, D3D12_SHADER_VISIBILITY_PIXEL);         // t10
 
     // ========================================================================
-    // 修复：完整配置静态采样器
+    // 静态采样器 (对齐 Common_PBR.hlsl: s0~s5 + s10)
     // ========================================================================
-    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1];
+    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[7];
 
-    // 使用 CLAMP 模式，防止边界问题
-    staticSamplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    staticSamplers[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; // 改为 CLAMP
-    staticSamplers[0].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    staticSamplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    staticSamplers[0].MipLODBias = 0;
-    staticSamplers[0].MaxAnisotropy = 0;
-    staticSamplers[0].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-    staticSamplers[0].BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
-    staticSamplers[0].MinLOD = 0.0f;
-    staticSamplers[0].MaxLOD = D3D12_FLOAT32_MAX;
-    staticSamplers[0].ShaderRegister = 0;
-    staticSamplers[0].RegisterSpace = 0;
-    staticSamplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    staticSamplers[1].Init(1, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+    staticSamplers[2].Init(2, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    staticSamplers[3].Init(3, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+    staticSamplers[4].Init(4, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, 0.0f, 8);
+    staticSamplers[5].Init(5, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, 0.0f, 8);
+    // s10: 环境贴图采样器
+    staticSamplers[6].Init(10, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(5, slotRootParameter, 1, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(6, slotRootParameter, 7, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;

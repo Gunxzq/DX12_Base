@@ -64,12 +64,16 @@ public:
     /**
      * @brief 绘制单个 Mesh
      * @param cmdList 当前命令列表
-     * @param mesh ECS 网格组件
-     * @param transform ECS 变换组件
+     * @param geometryHandle 几何体句柄
+     * @param worldMatrix 世界变换矩阵
+     * @param objectCBAddress 对象常量缓冲区GPU地址
+     * @param matCBAddress 材质常量缓冲区GPU地址
+     * @param textureSRV 纹理SRV描述符
      */
     void DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
                   const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-                  D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV);
+                  D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV,
+                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV);
 
     /**
      * @brief 结束录制

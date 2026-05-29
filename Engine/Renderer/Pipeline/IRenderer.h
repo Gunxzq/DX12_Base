@@ -46,7 +46,8 @@ public:
 
     virtual void DrawMesh(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
                           const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-                          D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV) = 0;
+                          D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV,
+                          D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) = 0;
 };
 
 } // namespace DX12Engine::Renderer
