@@ -51,7 +51,6 @@ void FrameResourceManager::Initialize(ID3D12Device *device, DescriptorHeapCollec
     m_skinning.Initialize(device, DEFAULT_BUFFER_SIZE);
     m_instance.Initialize(device, DEFAULT_BUFFER_SIZE);
     m_light.Initialize(device, DEFAULT_BUFFER_SIZE);
-    m_materialCB.Initialize(device, DEFAULT_BUFFER_SIZE);
 
     m_passConstants = {};
     UpdatePassConstants();
@@ -68,7 +67,6 @@ void FrameResourceManager::Shutdown() {
     m_skinning.Shutdown();
     m_instance.Shutdown();
     m_light.Shutdown();
-    m_materialCB.Shutdown();
 
     if (m_passCBResource) {
         if (m_passCBMapped) {
@@ -152,12 +150,6 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateLight(const void *data, 
     if (!m_initialized)
         return 0;
     return AllocateWithRetry(m_light, data, size, m_currentFence);
-}
-
-D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateMaterialCB(const void *data, uint32_t size) {
-    if (!m_initialized)
-        return 0;
-    return AllocateWithRetry(m_materialCB, data, size, m_currentFence);
 }
 
 void *FrameResourceManager::GetCPUAddress(uint32_t offset) {
