@@ -4,7 +4,10 @@
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${env:VCPKG_ROOT}/installed/x64-windows/include"
+                "${env:VCPKG_ROOT}/installed/x64-windows/include",
+                "${env:WindowsSdkDir}Include/${env:WindowsSdkVersion}um",
+                "${env:WindowsSdkDir}Include/${env:WindowsSdkVersion}shared",
+                "${env:VcToolsInstallDir}include"
             ],
             "defines": [
                 "_DEBUG",

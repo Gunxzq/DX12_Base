@@ -10,6 +10,14 @@
       { "device": "Mouse", "axis": "Delta" },
       { "device": "Gamepad", "stick": "RightStick" }
     ],
+    "MoveUp": [
+    { "key": "Q" },
+    { "key": "Space" }
+    ],
+    "MoveDown": [
+        { "key": "E" },
+        { "key": "LeftControl" }
+    ],
     "Jump": [
       { "key": "Space" },
       { "key": "Gamepad_A" }

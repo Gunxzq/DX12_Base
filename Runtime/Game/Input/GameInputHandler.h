@@ -73,4 +73,12 @@ private:
 
     // 跳过第一帧的鼠标输入（避免切换捕获时的视角跳变）
     bool m_skipLookInputThisFrame = false;
+
+    // 自由相机参数
+    float m_mouseSensitivity = 0.002f;
+    float m_moveSpeed = 8.0f;
+    float m_sprintMultiplier = 2.5f;
+
+    // 垂直升降速度 (Q/E 键)
+    float m_verticalSpeed = 6.0f;
 };

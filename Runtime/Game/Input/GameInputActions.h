@@ -12,7 +12,8 @@ using DX12Engine::Input::ActionId;
 
 DEFINE_ACTION(Move);
 DEFINE_ACTION(Look);
-
+DEFINE_ACTION(MoveUp);
+DEFINE_ACTION(MoveDown);
 DEFINE_ACTION(Jump);
 DEFINE_ACTION(Sprint);
 DEFINE_ACTION(Crouch);
