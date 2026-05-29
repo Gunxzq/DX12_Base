@@ -38,13 +38,18 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
         }
         Resource::MaterialHandle materialHandle = meshComp.materialHandle;
         Resource::TextureHandle textureHandle = meshComp.textureHandle;
-        Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
 
         if (!materialHandle.IsValid()) {
             continue;
         }
 
         if (!textureHandle.IsValid()) {
+            continue;
+        }
+
+        // 验证材质仍有效（generation 匹配）
+        const Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
+        if (!material) {
             continue;
         }
 
@@ -60,31 +65,28 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
         uint64_t sortKey = BuildSortKey(0, depth, isTransparent);
 
         // 构建 ObjectConstants
+        ObjectConstants objCB;
         XMMATRIX world = transform.GetMatrix();
         XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
 
-        ObjectConstants objCB;
         XMStoreFloat4x4(&objCB.World, world);
         XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
+        XMStoreFloat4x4(&objCB.PrevWorld, world);
+        objCB.MaterialIndex = m_materialManager->GetGPUIndex(materialHandle); // 返回 handle.index
+        objCB.ReceiveShadow = 0;
 
-        // 直接分配 GPU 地址
+        // 分配 GPU 地址
         D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
             m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
 
-        MaterialConstants matCB = m_materialManager->GetGPUConstants(materialHandle);
-
-        D3D12_GPU_VIRTUAL_ADDRESS materialCBAddress =
-            m_frameResourceManager->AllocateMaterialCB(&matCB, sizeof(MaterialConstants));
-
-        // 6. 构建 RenderItem
+        // 构建 RenderItem
         RenderItem item;
         item.geometryHandle = handle;
         item.materialHandle = materialHandle;
         item.worldMatrix = transform.GetMatrix();
         item.objectCBAddress = objectCBAddress;
-        item.materialCBAddress = materialCBAddress;
         item.depth = depth;
-        item.sortKey = sortKey;
+        item.sortKey = BuildSortKey(materialHandle.index, depth, false); // 传入 index
         item.textureSRV = m_textureManager->GetSRV(textureHandle);
 
         outQueue.Add(item);
@@ -102,20 +104,18 @@ float RenderItemBuilder::CalculateDepth(const DirectX::XMFLOAT3 &pos, const Dire
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-uint64_t RenderItemBuilder::BuildSortKey(uint32_t materialId, float depth, bool isTransparent) const {
+uint64_t RenderItemBuilder::BuildSortKey(uint32_t materialIndex, float depth, bool isTransparent) const {
     // 位布局：
     //   Bits 63:      透明标志（1 = 透明）
     //   Bits 62-48:   保留
-    //   Bits 47-32:   材质 ID
+    //   Bits 47-32:   材质索引（16 位）
     //   Bits 31-0:    深度值
     uint64_t transparentBit = isTransparent ? (1ULL << 63) : 0;
-    uint64_t materialPart = (static_cast<uint64_t>(materialId) & 0xFFFF) << 32;
+    uint64_t materialPart = (static_cast<uint64_t>(materialIndex) & 0xFFFF) << 32;
 
-    // 深度值转换为 32 位整数（精度 0.001 米）
     uint32_t depthInt = static_cast<uint32_t>(depth * 1000.0f);
 
     if (isTransparent) {
-        // 透明物体：远到近（深度值大的排前面）
         depthInt = 0xFFFFFFFF - depthInt;
     }
 

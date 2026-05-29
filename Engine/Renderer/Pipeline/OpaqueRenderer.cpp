@@ -62,7 +62,8 @@ void OpaqueRenderer::Update(float deltaTime) {
 // ========================================================================
 
 void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
-                                D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress) {
+                                D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
+                                D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV) {
     if (!m_pso || !m_rootSignature)
         return;
 
@@ -70,25 +71,26 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
     cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
     cmdList.Get()->SetGraphicsRootConstantBufferView(2, lightCBAddress);
+
+    // 绑定材质数组 SRV (slot 3)
+    if (materialBufferSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(3, materialBufferSRV);
+    }
 }
 
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
                               const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-                              D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV,
-                              D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) {
+                              D3D12_GPU_DESCRIPTOR_HANDLE textureSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) {
     if (!m_geometryManager) {
         OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawMesh - GeometryResourceManager not set!\n");
         return;
     }
 
-    // 1. 获取几何体数据
     const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
-
     if (!mesh || !mesh->isGpuReady) {
         return;
     }
 
-    // 2. 获取 GPU 资源
     auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Resource *vbResource = gpuMgr.GetResource(mesh->vertexBufferHandle);
     ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
@@ -98,7 +100,6 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
         return;
     }
 
-    // 3. 设置顶点/索引缓冲视图
     D3D12_VERTEX_BUFFER_VIEW vbView;
     vbView.BufferLocation = vbResource->GetGPUVirtualAddress();
     vbView.StrideInBytes = mesh->vertexStride;
@@ -113,11 +114,6 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
     cmdList.Get()->IASetIndexBuffer(&ibView);
     cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objectCBAddress);
-
-    // 材质数组 StructuredBuffer SRV (slot 3, t0 space1)
-    if (materialBufferSRV.ptr != 0) {
-        cmdList.Get()->SetGraphicsRootDescriptorTable(3, materialBufferSRV);
-    }
 
     // 纹理 SRV (slot 4)
     cmdList.Get()->SetGraphicsRootDescriptorTable(4, textureSRV);

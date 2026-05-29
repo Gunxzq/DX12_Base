@@ -5,6 +5,7 @@
 #include "Resource/AssetLoader/Loader/TerrainLoader.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/MaterialHandle.h"
+#include "Resource/Struct/ResourceHandle.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Scheduler/Task.h"
 #include <memory>
@@ -44,6 +45,7 @@ public:
     void CreateTestCube();
     void LoadTestTexture();
     void CreateTerrain();
+    void CreateMaterials();
 
 private:
     void RegisterRotationSystem();
@@ -60,6 +62,8 @@ private:
     DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
 
     DX12Engine::Resource::TextureHandle m_testTextureHandle; // 存储纹理句柄
+    DX12Engine::Resource::MaterialHandle m_cubeMaterialHandle;
+    DX12Engine::Resource::GpuResourceHandle m_materialBufferHandle; // 材质数组 GPU Buffer 句柄
     DX12Engine::ECS::Entity m_cubeEntity;
 
     // 地形数据

@@ -1,124 +1,153 @@
-明白了，你的需求就是 **引擎提供机制，游戏开发者根据游戏类型选择 P2P 或服务器模式，甚至可以同时支持（通过配置文件/编译选项切换）。**
 
-这是一个非常成熟的引擎架构设计。下面是一套清晰的抽象方案：
+这个问题问到了架构设计的核心。根据你对引擎的定位（P2P 优先，同时支持 Client-Server），我建议采用 **策略模式 + 组合**，而不是继承。
 
----
+## 两种模式的本质区别
 
-## 🏗️ 统一抽象层设计
+| 方面 | P2P 模式 | 权威服务器模式 |
+|------|---------|---------------|
+| 数据流向 | 广播给所有对等端 | 客户端→服务器→客户端 |
+| 权威性 | 无中心，各端独立模拟 | 服务器绝对权威 |
+| 同步方式 | 帧同步（输入同步） | 状态同步（快照） |
+| 玩家加入 | 对等端互相发现 | 客户端向服务器注册 |
+| 冲突解决 | 无需解决（确定性模拟） | 服务器覆盖客户端 |
 
-### 1. 核心接口
+## 共同部分（可复用）
+
+| 功能 | 说明 |
+|------|------|
+| 序列化/反序列化 | 打包/解包游戏数据 |
+| 可靠传输策略 | ACK、重传、消息队列 |
+| 网络统计 | RTT、丢包率、带宽 |
+| 消息优先级 | 重要消息优先发送 |
+| 加密/压缩 | 可选的安全层 |
+
+## 推荐的架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   NetworkTopology (抽象层)               │
+│  - 发送消息（隐藏是广播还是单播）                         │
+│  - 玩家加入/离开通知                                     │
+│  - 模式切换接口                                          │
+└─────────────────────────────────────────────────────────┘
+                    ↓ 实现
+        ┌───────────┴───────────┐
+        ↓                       ↓
+┌───────────────┐       ┌───────────────┐
+│   P2PTopology │       │  CSTopology   │
+│  - 广播给所有  │       │ - 客户端→服务器│
+│  - 帧同步逻辑  │       │ - 服务器→客户端│
+│  - 输入对齐   │       │ - 快照同步    │
+└───────────────┘       └───────────────┘
+        ↓                       ↓
+        └───────────┬───────────┘
+                    ↓
+        ┌───────────────────────┐
+        │  NetworkTransport (底层)│
+        │  - 点到点发送           │
+        │  - 连接管理             │
+        └───────────────────────┘
+```
+
+## 组合优于继承的原因
+
+1. **P2P 和 CS 的差异太大**：数据流向、同步方式完全不同，强行用继承会导致大量条件判断
+2. **可以运行时切换模式**：游戏启动时根据配置选择拓扑实现
+3. **便于测试**：可以注入 Mock 拓扑
+4. **共同逻辑可以提取成独立的辅助类**（序列化、统计等），被两个拓扑复用
+
+## 具体组织方式
 
 ```cpp
-// 网络会话接口（引擎层）
-class INetworkSession {
-public:
-    virtual ~INetworkSession() = default;
-    
-    // 生命周期
-    virtual bool StartHost(uint16_t port) = 0;
-    virtual bool JoinSession(const std::string& address, uint16_t port) = 0;
-    virtual void LeaveSession() = 0;
-    
-    // 发送数据
+// 共同逻辑：独立模块
+class NetworkSerializer { ... };
+class NetworkStatsCollector { ... };
+class ReliableMessageQueue { ... };
+
+// 拓扑接口
+class INetworkTopology {
     virtual void SendToAll(const uint8_t* data, size_t size) = 0;
-    virtual void SendToPlayer(int playerId, const uint8_t* data, size_t size) = 0;
-    
-    // 接收数据（每帧调用）
-    virtual void PollEvents() = 0;
-    virtual bool HasPendingData() = 0;
-    virtual bool ReceiveNextData(uint8_t* buffer, size_t& outSize, int& outSenderId) = 0;
-    
-    // 状态查询
-    virtual bool IsHost() const = 0;
-    virtual int GetPlayerId() const = 0;
-    virtual int GetPlayerCount() const = 0;
-};
-```
-
-### 2. 两种实现
-
-```cpp
-// P2P 实现（使用 Enet / SteamNetworkingSockets）
-class P2PSession : public INetworkSession {
-    // 主机负责：广播输入、接收状态
-    // 客户端负责：发送输入、接收状态
+    virtual void SendToPlayer(PlayerId target, const uint8_t* data, size_t size) = 0;
+    virtual void Update(float dt) = 0;
+    // ...
 };
 
-// 专用服务器实现
-class ServerSession : public INetworkSession {
-    // 客户端始终连接中央服务器
-    // 服务器负责：计算权威状态、广播
+// P2P 实现（使用 Transport 和共同模块）
+class P2PTopology : public INetworkTopology {
+    // 帧同步逻辑、输入收集、广播...
 };
-```
 
-### 3. 游戏层选择
+// Client-Server 实现
+class CSTopology : public INetworkTopology {
+    // 快照同步、客户端预测和解...
+};
 
-```cpp
-// 引擎初始化时
-std::unique_ptr<INetworkSession> session;
-
-if (config.networkMode == "p2p") {
-    session = std::make_unique<P2PSession>();
-} else if (config.networkMode == "dedicated_server") {
-    session = std::make_unique<ServerSession>();
-}
-
-// 游戏循环中
-session->PollEvents();
-while (session->HasPendingData()) {
-    session->ReceiveNextData(buffer, size, senderId);
-    // 处理网络数据（更新 ECS 组件）
+// 引擎中使用
+std::unique_ptr<INetworkTopology> topology;
+if (config.mode == NetworkMode::P2P) {
+    topology = std::make_unique<P2PTopology>(transport);
+} else {
+    topology = std::make_unique<CSTopology>(transport);
 }
 ```
 
----
+这样，P2P 和 CS 各自独立实现，共享底层的 `NetworkTransport` 和工具类，清晰且易扩展。
 
-## 🔧 同步模式的选择
 
-| 同步模式 | 适合游戏类型 | 带宽 | 确定性要求 |
-|:---|:---|:---|:---|
-| **输入同步（帧同步）** | RTS、格斗、平台跳跃 | 极低 | **高**（逻辑必须确定性） |
-| **状态同步** | FPS、MOBA、动作游戏 | 较高 | 低 |
 
-**你可以在 `INetworkSession` 之上再抽象一层同步策略**：
 
-```cpp
-class ISyncStrategy {
-public:
-    virtual void OnLocalInput(const InputState& input) = 0;
-    virtual void OnNetworkData(const uint8_t* data, size_t size, int sender) = 0;
-    virtual void Update(float dt) = 0;  // 每帧更新同步逻辑
-};
-```
 
-这样：
-- **帧同步实现**：收集输入 → 主机广播 → 所有客户端执行
-- **状态同步实现**：客户端预测 → 发送输入 → 服务器权威 → 广播状态
 
----
+从测试和调试的角度，P2P帧同步需要覆盖以下场景。按优先级排列：
 
-## 📁 建议的文件结构
+## 第一阶段：基础连接与通信（必须通过）
 
-```
-Engine/Network/
-├── INetworkSession.h          // 抽象接口
-├── P2PSession.h/cpp           // P2P 实现（Enet/Steam）
-├── ServerSession.h/cpp        // 专用服务器实现
-├── ISyncStrategy.h            // 同步策略抽象
-├── FrameSyncStrategy.h/cpp    // 帧同步实现
-├── StateSyncStrategy.h/cpp    // 状态同步实现
-└── NetworkConfig.h            // 配置结构体
-```
+| 场景 | 预期行为 | 验证方法 |
+|------|---------|---------|
+| 两个节点互相连接 | 连接建立，双方收到 `OnPlayerJoined` | 控制台输出连接成功 |
+| 发送测试消息 | 消息正确到达，内容完整 | 发送"Hello"，接收端打印内容 |
+| 一方断开连接 | 另一方收到 `OnPlayerLeft` | Ctrl+C 关闭一方，另一方打印断开 |
+| 连接拒绝 | 对方收到 `OnConnectionRequest`，可拒绝 | 模拟服务器满员场景 |
 
----
+## 第二阶段：帧同步核心逻辑（核心功能）
 
-## ✅ 下一步行动
+| 场景 | 预期行为 | 验证方法 |
+|------|---------|---------|
+| 单玩家（本地） | 帧正常推进，`m_currentFrame` 递增 | 无其他玩家时游戏照常运行 |
+| 双玩家正常输入 | 双方输入正确到达，帧同步推进 | 打印帧号，验证双方帧号一致 |
+| 输入为空 | 广播 0，帧正常推进 | 玩家不操作时帧继续推进 |
+| 帧号对齐 | 双方执行相同的帧序列 | 记录输入序列，对比两端一致 |
+| 延迟输入 | 慢的输入到达后，帧才推进 | 模拟网络延迟（如 100ms） |
 
-| 优先级 | 任务 | 时间 |
-|:---|:---|:---|
-| **P0** | 定义 `INetworkSession` 接口 | 0.5 天 |
-| **P0** | 用 Enet 实现 `P2PSession`（打通收发） | 2 天 |
-| **P1** | 实现 `ServerSession`（TCP 版先占位） | 1 天 |
-| **P1** | 定义 `ISyncStrategy` + `FrameSyncStrategy` | 1 天 |
-| **P2** | 集成到 `FrameDriver` 中 | 1 天 |
+## 第三阶段：异常处理（鲁棒性）
 
+| 场景 | 预期行为 | 验证方法 |
+|------|---------|---------|
+| 丢包（不可靠通道） | 输入消息丢失，需要重传或帧卡住 | 用工具模拟 10% 丢包 |
+| 乱序到达 | 按帧号排队，不破坏顺序 | 模拟网络乱序 |
+| 玩家短暂掉线 | 超时后自动补 0 输入，不掉线 | 暂停一方 500ms，恢复后继续 |
+| 玩家永久掉线 | 超时后踢出，其他玩家继续 | 关闭一方，另一方继续推进帧 |
+| 玩家重新加入 | 需要状态同步（较复杂） | 新玩家请求当前状态快照 |
+
+## 第四阶段：性能与压力（可选）
+
+| 场景 | 预期行为 |
+|------|---------|
+| 多玩家（4-8人） | 帧同步正常，不卡顿 |
+| 高频率输入 | 每帧 60 次广播，CPU/带宽正常 |
+| 长时间运行 | 内存不泄漏，帧号不溢出 |
+
+## 测试环境建议
+
+| 工具 | 用途 |
+|------|------|
+| 两个命令行窗口 | 基础连接测试 |
+| `clumsy`（Windows） | 模拟丢包、延迟、乱序 |
+| 多开脚本 | 同时启动 4 个进程测试多玩家 |
+| 日志对比工具 | 对比双方帧号序列是否一致 |
+
+## 下一步建议
+
+**先保证第二阶段通过**：写一个简单的测试程序，两个节点互相连接，每帧打印帧号和本地输入，对比两边输出是否一致。
+
+如果第二阶段稳定，再处理第三阶段的异常场景。需要我提供这个帧同步测试程序的代码框架吗？

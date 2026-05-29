@@ -10,6 +10,7 @@
 #include "Renderer/Core/LODSystem.h"
 #include "Renderer/Core/RendererRegistry.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
+#include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/LightManager.h"
@@ -49,6 +50,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_renderer = renderer;
 
     LoadTestTexture();
+    CreateMaterials();
     CreateTestCube();
     CreateTerrain();
 }
@@ -149,23 +151,11 @@ void GameWorld::CreateTestCube() {
 
     LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
 
-    // 创建材质
-    MaterialData material;
-    material.baseColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-    material.metallic = 0.0f;
-    material.roughness = 0.5f;
-    material.ambient = 0.5f;
-    material.alphaCutoff = 0.0f;
-    material.alpha = 1.0f;
-    material.emissive = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
-    material.normalIntensity = 1.0f;
-
-    material.rendererTypeHash = TYPE_HASH("OpaquePBR"); // 需要定义
-
-    MaterialHandle materialHandle = m_context->MaterialMgr->RegisterMaterial(material);
+    // 使用预创建的材质句柄
+    MaterialHandle materialHandle = m_cubeMaterialHandle;
 
     if (!materialHandle.IsValid()) {
-        OutputDebugStringW(L"[ERROR] RegisterMaterial failed!\n");
+        OutputDebugStringW(L"[ERROR] Cube material handle is invalid!\n");
     }
 
     // 验证能否取回
@@ -271,6 +261,143 @@ void GameWorld::LoadTestTexture() {
     m_context->Logging->Info("[GameWorld] Test texture loaded successfully");
 }
 
+void GameWorld::CreateMaterials() {
+    auto *materialMgr = m_context->MaterialMgr;
+
+    // 立方体材质
+    MaterialData cubeMaterial;
+    cubeMaterial.materialId = TYPE_HASH("cube_material");
+    cubeMaterial.name = "cube_material";
+    cubeMaterial.baseColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+    cubeMaterial.metallic = 0.0f;
+    cubeMaterial.roughness = 0.5f;
+    cubeMaterial.ambient = 0.5f;
+    cubeMaterial.alpha = 1.0f;
+    cubeMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
+    m_cubeMaterialHandle = materialMgr->RegisterMaterial(cubeMaterial);
+
+    // 地形材质
+    MaterialData terrainMaterial;
+    terrainMaterial.materialId = TYPE_HASH("terrain_material");
+    terrainMaterial.name = "terrain_material";
+    terrainMaterial.baseColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+    terrainMaterial.metallic = 0.0f;
+    terrainMaterial.roughness = 0.8f;
+    terrainMaterial.ambient = 0.8f;
+    terrainMaterial.alpha = 1.0f;
+    terrainMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
+    m_terrainMaterialHandle = materialMgr->RegisterMaterial(terrainMaterial);
+
+    // ========================================================================
+    // 创建材质数组 GPU Buffer 和 SRV
+    // ========================================================================
+    auto materialList = materialMgr->GetGPUMaterialList();
+    if (materialList.empty()) {
+        m_context->Logging->Error("[GameWorld] Material list is empty, cannot create material buffer");
+        return;
+    }
+
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    ID3D12Device *device = m_context->DeviceContext->GetDevice();
+
+    // 提取 MaterialConstants 数组
+    std::vector<MaterialConstants> gpuData;
+    gpuData.reserve(materialList.size());
+    for (auto &[idx, constants] : materialList) {
+        gpuData.push_back(constants);
+    }
+
+    size_t bufferSize = gpuData.size() * sizeof(MaterialConstants);
+
+    // 创建默认堆缓冲区（GPU 端）
+    GpuResourceHandle bufferHandle =
+        gpuMgr.CreateBuffer(device, bufferSize, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON);
+
+    if (!bufferHandle.IsValid()) {
+        m_context->Logging->Error("[GameWorld] Failed to create material GPU buffer");
+        return;
+    }
+
+    // 创建上传堆缓冲区
+    GpuResourceHandle uploadHandle =
+        gpuMgr.CreateBuffer(device, bufferSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+    if (!uploadHandle.IsValid()) {
+        m_context->Logging->Error("[GameWorld] Failed to create material upload buffer");
+        gpuMgr.Release(bufferHandle, 0);
+        return;
+    }
+
+    // 写入数据到上传缓冲区
+    ID3D12Resource *uploadResource = gpuMgr.GetResource(uploadHandle);
+    void *mappedData = nullptr;
+    uploadResource->Map(0, nullptr, &mappedData);
+    memcpy(mappedData, gpuData.data(), bufferSize);
+    uploadResource->Unmap(0, nullptr);
+
+    // 使用命令列表上传
+    uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+    auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+    auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+    auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+    auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+    // 屏障：COMMON -> COPY_DEST
+    auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(bufferHandle), D3D12_RESOURCE_STATE_COMMON,
+                                                         D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdList.Get()->ResourceBarrier(1, &barrier1);
+
+    // 复制数据
+    cmdList.Get()->CopyResource(gpuMgr.GetResource(bufferHandle), uploadResource);
+
+    // 屏障：COPY_DEST -> NON_PIXEL_SHADER_RESOURCE
+    auto barrier2 =
+        CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(bufferHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    cmdList.Get()->ResourceBarrier(1, &barrier2);
+
+    cmdList.Close();
+
+    m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
+    m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+    uint64_t sequence = m_context->GetNextSequence();
+    gpuMgr.Release(uploadHandle, sequence);
+
+    m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+    m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+
+    // 分配 SRV 描述符
+    auto &descriptorHeaps = m_context->DescriptorHeaps;
+    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    if (srvIndex == UINT32_MAX) {
+        m_context->Logging->Error("[GameWorld] Failed to allocate SRV for material buffer");
+        gpuMgr.Release(bufferHandle, sequence);
+        return;
+    }
+
+    // 创建 SRV（StructuredBuffer<MaterialConstants>）
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    srvDesc.Buffer.FirstElement = 0;
+    srvDesc.Buffer.NumElements = static_cast<UINT>(gpuData.size());
+    srvDesc.Buffer.StructureByteStride = sizeof(MaterialConstants);
+    srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    device->CreateShaderResourceView(gpuMgr.GetResource(bufferHandle), &srvDesc, cpuHandle);
+
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = descriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    materialMgr->SetMaterialBufferSRV(gpuHandle);
+
+    // 存储 bufferHandle 以便后续释放
+    m_materialBufferHandle = bufferHandle;
+
+    m_context->Logging->Info("[GameWorld] Material buffer created and SRV set");
+}
+
 void GameWorld::RegisterRotationSystem() {
     SystemRegistry::Register({.name = "CubeRotationSystem",
                               .func =
@@ -339,10 +466,8 @@ void GameWorld::RegisterCubeRenderSystem() {
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
 
-                 //  GetLightCBAddress
-
-                 // 开始渲染
-                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr);
+                 // 获取材质数组 SRV
+                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
                      m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
@@ -350,13 +475,17 @@ void GameWorld::RegisterCubeRenderSystem() {
                  //  一个堆
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
+                 // 开始渲染
+                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
+
                  // 遍历所有带 MeshComponent 和 TransformComponent 的实体并渲染
                  const auto &renderQueue = m_context->renderQueue;
                  for (const auto &item : renderQueue.GetItems()) {
                      if (!item.IsValid())
                          continue;
+                     D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}; // TODO: 从场景获取
                      m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
-                                          item.materialCBAddress, item.textureSRV);
+                                          item.textureSRV, envMapSRV);
                  }
                  m_renderer->EndFrame();
 
@@ -587,21 +716,8 @@ void GameWorld::CreateTerrainMaterial() {
         }
     }
 
-    // 创建材质（雪地）
-    MaterialData material;
-    material.baseColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-    material.metallic = 0.0f;
-    material.roughness = 0.5f;
-    material.ambient = 0.5f;
-    material.alphaCutoff = 0.0f;
-    material.alpha = 1.0f;
-    material.emissive = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
-    material.normalIntensity = 1.0f;
-    material.rendererTypeHash = TYPE_HASH("OpaquePBR");
-
-    m_terrainMaterialHandle = m_context->MaterialMgr->RegisterMaterial(material);
-
+    // 材质已在 CreateMaterials() 中注册，这里只需要验证
     if (!m_terrainMaterialHandle.IsValid()) {
-        m_context->Logging->Error("[GameWorld] Failed to register terrain material");
+        m_context->Logging->Error("[GameWorld] Terrain material handle is invalid");
     }
 }

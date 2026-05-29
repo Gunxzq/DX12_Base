@@ -1,5 +1,7 @@
+// MaterialManager.h
 #pragma once
 
+#include "Math/HashTypes.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
 #include "Resource/Material/MaterialResource.h"
 #include "Resource/Struct/MaterialHandle.h"
@@ -8,74 +10,67 @@
 
 namespace DX12Engine::Resource {
 
-// ============================================================================
-// 材质管理器 - 管理材质数据的生命周期
-// ============================================================================
-
 class MaterialManager {
 public:
     MaterialManager() = default;
     ~MaterialManager() = default;
-    MaterialManager(const MaterialManager &) = delete;
-    MaterialManager &operator=(const MaterialManager &) = delete;
 
-    void Initialize(uint32_t initialCapacity = 1024);
+    void Initialize(uint32_t initialCapacity = 256);
     void Shutdown();
 
+    // 注册材质资产，返回句柄
     MaterialHandle RegisterMaterial(const MaterialData &material);
-    void UpdateMaterial(MaterialHandle handle, const MaterialData &data);
-    void ReleaseMaterial(MaterialHandle handle, uint64_t fenceValue);
-    void Reclaim(uint64_t completedFence);
 
+    // 获取材质引用（refCount++）
+    MaterialHandle AcquireMaterial(TypeHash materialId);
+
+    // 释放材质引用
+    void ReleaseMaterial(MaterialHandle handle);
+
+    // 查询
     const MaterialData *GetMaterial(MaterialHandle handle) const;
-    MaterialData *GetMaterial(MaterialHandle handle);
+    const MaterialData *GetMaterialById(TypeHash materialId) const;
     bool IsValid(MaterialHandle handle) const;
 
-    //
+    // GPU 索引 = handle.index
+    uint32_t GetGPUIndex(MaterialHandle handle) const { return handle.index; }
+
+    // 获取所有材质的 GPU 数据列表（按 index 顺序）
+    std::vector<std::pair<uint32_t, Renderer::MaterialConstants>> GetGPUMaterialList() const;
     static Renderer::MaterialConstants ConvertToGPUConstants(const MaterialData &data);
-    Renderer::MaterialConstants GetGPUConstants(MaterialHandle handle) const;
-    std::vector<Renderer::MaterialConstants> GetAllGPUConstants() const;
 
-    //  调试/统计
-    uint32_t GetActiveCount() const;
-    uint32_t GetCapacity() const;
-    uint32_t GetPendingReleaseCount() const;
+    // 脏标记
+    bool IsDirty() const { return m_dirty; }
+    void ClearDirty() { m_dirty = false; }
 
-    // 根据渲染器类型 Hash 获取所有材质句柄
-    std::vector<MaterialHandle> GetMaterialsByRenderer(uint64_t rendererTypeHash) const;
-    void SetMaterialBufferSRV(D3D12_GPU_DESCRIPTOR_HANDLE srvHandle);
-    D3D12_GPU_DESCRIPTOR_HANDLE GetMaterialBufferSRV() const;
+    // SRV 句柄
+    void SetMaterialBufferSRV(D3D12_GPU_DESCRIPTOR_HANDLE srv) { m_materialBufferSRV = srv; }
+    D3D12_GPU_DESCRIPTOR_HANDLE GetMaterialBufferSRV() const { return m_materialBufferSRV; }
+
+    uint32_t GetActiveCount() const { return static_cast<uint32_t>(m_entries.size()); }
 
 private:
-    struct Entry {
+    struct MaterialEntry {
         MaterialData data;
-        uint32_t generation = 0;
-        bool inUse = false;
+        uint32_t refCount = 0;
+        uint32_t generation = 1;
+        bool isValid = true;
     };
 
-    struct PendingRelease {
-        uint32_t index;
-        uint32_t generation;
-        uint64_t fenceValue;
-    };
+    uint32_t AllocateIndex();
+    void FreeIndex(uint32_t index);
+    void MarkDirty() { m_dirty = true; }
 
-private:
-    uint32_t AllocateEntry();
-    void FreeEntry(uint32_t index);
-
-    std::vector<Entry> m_entries;
-    std::vector<uint32_t> m_freeList;
-    std::vector<PendingRelease> m_pendingReleases;
-    std::unordered_map<uint64_t, std::vector<uint32_t>> m_rendererMap; // rendererTypeHash → 材质索引列表
-
-    uint32_t m_nextGeneration = 1;
-    uint32_t m_capacity = 0;
-    bool m_initialized = false;
-
-    static constexpr uint32_t INITIAL_CAPACITY = 1024;
-    static constexpr uint32_t MAX_CAPACITY = 65536;
+    std::vector<MaterialEntry> m_entries;               // index → 条目
+    std::vector<uint32_t> m_freeList;                   // 空闲索引
+    std::unordered_map<TypeHash, uint32_t> m_idToIndex; // 资产ID → index
+    std::unordered_map<uint64_t, std::vector<uint32_t>> m_rendererMap;
 
     D3D12_GPU_DESCRIPTOR_HANDLE m_materialBufferSRV = {0};
+    bool m_dirty = false;
+    bool m_initialized = false;
+
+    static constexpr uint32_t MAX_INDICES = 0x3FFFFF; // 22 位最大值
 };
 
 } // namespace DX12Engine::Resource

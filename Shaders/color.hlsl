@@ -1,7 +1,6 @@
 #include "Common_PBR.hlsl"
 
 Texture2D gTexture : register(t0);
-SamplerState gSampler : register(s0);
 
 struct VertexIn
 {
@@ -54,7 +53,6 @@ float4 PS(VertexOut pin) : SV_Target
     mat.Emissive = float4(emissive, 1.0f);
     mat.Alpha = matData.Alpha;
     mat.AlphaCutoff = matData.AlphaCutoff;
-    mat.Padding = {0, 0, 0};
 
     // 环境光
     float3 ambient = gAmbientLight.xyz * gAmbientLight.w * albedo * ao;

@@ -34,8 +34,6 @@ public:
     virtual void SetDeviceContext(D3D12DeviceContext *context) = 0;
     virtual void Initialize() = 0;
     virtual void OnResize(uint32_t width, uint32_t height) = 0;
-    virtual void BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
-                            D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress) = 0;
     virtual void EndFrame() = 0;
 
     // ----------------------------------------------------------------------
@@ -43,11 +41,6 @@ public:
     // ----------------------------------------------------------------------
 
     virtual void Update(float deltaTime) = 0;
-
-    virtual void DrawMesh(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
-                          const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-                          D3D12_GPU_VIRTUAL_ADDRESS matCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureSRV,
-                          D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) = 0;
 };
 
 } // namespace DX12Engine::Renderer

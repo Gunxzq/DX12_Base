@@ -24,7 +24,6 @@ struct RenderItem {
     DirectX::XMMATRIX prevWorldMatrix = {}; // 上一帧世界矩阵（用于运动模糊）
 
     D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress = 0;       // 世界矩阵等常量缓冲
-    D3D12_GPU_VIRTUAL_ADDRESS materialCBAddress = 0;     // 材质参数缓冲
     D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = 0; // 实例化数据缓冲（可选）
     D3D12_GPU_DESCRIPTOR_HANDLE textureSRV = {0};        // 纹理 SRV 处理符
 
@@ -67,7 +66,7 @@ struct RenderItem {
     bool NeedSubMeshOverride() const { return indexCount > 0; }
     void BuildSortKey(uint8_t queueType, float depth) {
         uint64_t typePart = (static_cast<uint64_t>(queueType) & 0xFF) << 56;
-        uint64_t materialPart = (static_cast<uint64_t>(materialHandle.GetHash()) & 0xFFFF) << 32;
+        uint64_t materialPart = (static_cast<uint64_t>(materialHandle.index) & 0xFFFF) << 32;
         uint32_t depthInt = static_cast<uint32_t>(depth * 1000000.0f);
         sortKey = typePart | materialPart | depthInt;
     }

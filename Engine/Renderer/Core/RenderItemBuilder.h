@@ -43,7 +43,7 @@ public:
 
 private:
     float CalculateDepth(const DirectX::XMFLOAT3 &pos, const DirectX::XMFLOAT3 &cameraPos) const;
-    uint64_t BuildSortKey(uint32_t materialId, float depth, bool isTransparent) const;
+    uint64_t BuildSortKey(uint32_t materialIndex, float depth, bool isTransparent) const;
 
     CameraManager *m_cameraManager = nullptr;
     FrameResourceManager *m_frameResourceManager = nullptr;
