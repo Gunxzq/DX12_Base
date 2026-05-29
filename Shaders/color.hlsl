@@ -72,19 +72,19 @@ SamplerState gSampler : register(s0);
 // =================================================================================================
 struct VertexIn
 {
-    float3 PosL : POSITION;
-    float4 ColorL : COLOR;
-    float3 NormalL : NORMAL;
-    float2 TexCoord : TEXCOORD; // 添加纹理坐标
+    float3 PosL     : POSITION;
+    float3 NormalL  : NORMAL;
+    float3 TangentL : TANGENT;
+    float2 TexCoord : TEXCOORD;
 };
 
 struct VertexOut
 {
-    float4 PosH : SV_POSITION;
-    float3 WorldPos : POSITION;
+    float4 PosH        : SV_POSITION;
+    float3 WorldPos    : POSITION;
     float3 WorldNormal : NORMAL;
-    float4 Color : COLOR;
-    float2 TexCoord : TEXCOORD; // 传递纹理坐标
+    float3 TangentW    : TANGENT;
+    float2 TexCoord    : TEXCOORD;
 };
 
 // =================================================================================================
@@ -99,8 +99,8 @@ VertexOut VS(VertexIn vin)
     vout.PosH = mul(worldPos, gViewProj);
 
     vout.WorldNormal = normalize(mul(vin.NormalL, (float3x3)gWorldInvTrans));
-    vout.Color = vin.ColorL;
-    vout.TexCoord = vin.TexCoord; // 传递纹理坐标
+    vout.TangentW = normalize(mul(vin.TangentL, (float3x3)gWorld));
+    vout.TexCoord = clamp(vin.TexCoord, 0.0f, 0.999f);
 
     return vout;
 }
@@ -154,8 +154,9 @@ float4 PS(VertexOut pin) : SV_Target
     // 自发光
     float3 emissive = mat.Emissive.xyz * mat.Emissive.w;
 
-    // 合并光照
-    float3 litColor = (ambient + directLight + emissive) * pin.Color.rgb;
+    // 合并光照 - 移除 pin.Color 的乘法
+    float3 litColor = ambient + directLight + emissive;
 
-    return float4(litColor, gBaseColor.a * pin.Color.a);
+    // 使用材质的基础颜色 alpha
+    return float4(litColor, gBaseColor.a);
 }
