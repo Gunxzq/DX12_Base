@@ -11,21 +11,22 @@ namespace DX12Engine::Renderer {
 struct PassConstants {
 
     // 预计算,减少GPU计算量
-    DirectX::XMFLOAT4X4 View;        // 视图矩阵
-    DirectX::XMFLOAT4X4 Proj;        // 投影矩阵
-    DirectX::XMFLOAT4X4 ViewProj;    // 视图投影矩阵
-    DirectX::XMFLOAT4X4 InvView;     // 视图矩阵的逆矩阵
-    DirectX::XMFLOAT4X4 InvProj;     // 投影矩阵的逆矩阵
-    DirectX::XMFLOAT4X4 InvViewProj; // 视图投影矩阵的逆矩阵
-    DirectX::XMFLOAT3 CameraPos;     // 相机位置
-    float TotalTime;                 // 总时间
-    float DeltaTime;                 // 帧时间间隔
-    float NearPlane;                 // 近裁剪平面
-    float FarPlane;                  // 远裁剪平面
-    float AspectRatio;               // 屏幕宽高比
-    uint32_t FrameCount;             // 帧计数
-    DirectX::XMFLOAT4 AmbientLight;  // 环境光 (RGB, Intensity)
-    float Pad[3];                    // 确保 256 字节对齐
+    DirectX::XMFLOAT4X4 View;         // 视图矩阵
+    DirectX::XMFLOAT4X4 Proj;         // 投影矩阵
+    DirectX::XMFLOAT4X4 ViewProj;     // 视图投影矩阵
+    DirectX::XMFLOAT4X4 InvView;      // 视图矩阵的逆矩阵
+    DirectX::XMFLOAT4X4 InvProj;      // 投影矩阵的逆矩阵
+    DirectX::XMFLOAT4X4 InvViewProj;  // 视图投影矩阵的逆矩阵
+    DirectX::XMFLOAT4X4 PrevViewProj; // 上一帧视图投影矩阵
+    DirectX::XMFLOAT3 CameraPos;      // 相机位置
+    float TotalTime;                  // 总时间
+    float DeltaTime;                  // 帧时间间隔
+    float NearPlane;                  // 近裁剪平面
+    float FarPlane;                   // 远裁剪平面
+    float AspectRatio;                // 屏幕宽高比
+    uint32_t FrameCount;              // 帧计数
+    DirectX::XMFLOAT4 AmbientLight;   // 环境光 (RGB, Intensity)
+    float Pad[3];
 };
 
 // ============================================================================
@@ -38,7 +39,7 @@ struct ObjectConstants {
     DirectX::XMFLOAT4X4 PrevWorld;         // 上一帧的变换矩阵
     uint32_t MaterialIndex;                // 材质索引
     uint32_t ReceiveShadow;                // 是否接收阴影
-    float Pad[2];
+    float ObjPad[2];
 };
 
 // ============================================================================
@@ -70,8 +71,8 @@ struct MaterialConstants {
     uint32_t NormalTextureIndex;            // 法线纹理索引
     uint32_t MetallicRoughnessTextureIndex; // 元金属度和粗糙度纹理索引
     uint32_t EmissiveTextureIndex;          // 自发光颜色纹理索引
-    uint32_t OcclusionTextureIndex;         // 阴挡纹理索引
-    float Pad[2];
+    uint32_t OcclusionTextureIndex;         // 遮挡纹理索引
+    float MatPad[2];                        // 填充
 };
 
 // ============================================================================
