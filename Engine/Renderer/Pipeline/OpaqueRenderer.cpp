@@ -243,11 +243,7 @@ void OpaqueRenderer::CreatePSO() {
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 
     // // // 启用线框模式以便调试
-    // D3D12_RASTERIZER_DESC rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    // rasterizerDesc.FillMode = D3D12_FILL_MODE_WIREFRAME;
-    rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-    rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // 禁用背面剔除
-    psoDesc.RasterizerState = rasterizerDesc;
+    D3D12_RASTERIZER_DESC rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 
