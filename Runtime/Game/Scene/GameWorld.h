@@ -42,7 +42,8 @@ public:
     void LoadTestTexture(); // 新增：加载测试纹理
     // void CreateTerrain();   // 新增：创建地形（后续实现）
 
-    void RegisterSystems();
+    void RegisterRotationSystem();
+    void RegisterCubeRenderSystem();
 
 private:
     DX12Engine::Boot::GameContext *m_context = nullptr;

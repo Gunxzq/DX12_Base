@@ -144,9 +144,6 @@ bool Game::Initialize() {
     m_isInitialized = true;
     m_context->Logging->Info("[Game] Game initialized successfully");
 
-    m_world.LoadTestTexture();
-    m_world.CreateTestCube();
-
     return true;
 }
 

@@ -47,124 +47,8 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_registry = context->Registry;
     m_renderer = renderer;
 
-    // 注册游戏世界相关的系统
-    RegisterSystems();
-}
-
-void GameWorld::RegisterSystems() {
-    if (!m_context)
-        return;
-
-    // ========================================================================
-    // CubeRotationSystem - 旋转立方体
-    // ========================================================================
-    SystemRegistry::Register(
-        {.name = "CubeRotationSystem",
-         .func =
-             [this](Registry &registry, const MessageContext &ctx) {
-                 float deltaTime = m_context->MainTimer->GetDeltaTime();
-                 auto view = registry.view<TransformComponent>();
-                 view.each([deltaTime](TransformComponent &transform) { transform.rotation.y += deltaTime * 2.0f; });
-             },
-         .phase = TaskPhase::Update,
-         .threadType = ThreadType::Worker,
-         .priority = TaskPriority::Normal,
-         .alwaysRun = true});
-
-    // ========================================================================
-    // CubeRenderSystem - 渲染立方体（原 MainRenderSystem）
-    // 注意：这个系统现在在 GameWorld 中注册，而不是在引擎层
-    // ========================================================================
-    SystemRegistry::Register(
-        {.name = "CubeRenderSystem",
-         .func =
-             [this](Registry &registry, const MessageContext &ctx) {
-                 if (m_context->renderQueue.Empty()) {
-                     ;
-                     return;
-                 }
-
-                 // 获取命令列表等渲染资源
-                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
-                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
-                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-
-                 auto backBufferIndex = m_context->GetBackBufferIndex();
-                 auto backBuffer = m_context->GetBackBuffer();
-
-                 // 屏障：Present -> RenderTarget
-                 D3D12_RESOURCE_BARRIER beginBarrier = {};
-                 beginBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                 beginBarrier.Transition.pResource = backBuffer;
-                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 beginBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
-
-                 // 设置视口和渲染目标
-                 const auto &viewport = m_context->DeviceContext->GetViewport();
-                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
-                 cmdList.Get()->RSSetViewports(1, &viewport);
-                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
-
-                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
-                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
-                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-                 // 清除
-                 const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-                 cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-                 cmdList.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
-                                                      1.0f, 0, 0, nullptr);
-
-                 // 获取 Pass Constant Buffer 地址
-                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
-                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
-
-                 //  GetLightCBAddress
-
-                 // 开始渲染
-                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr);
-
-                 ID3D12DescriptorHeap *descriptorHeaps[] = {
-                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
-
-                 //  一个堆
-                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
-
-                 // 遍历所有带 MeshComponent 和 TransformComponent 的实体并渲染
-                 const auto &renderQueue = m_context->renderQueue;
-                 for (const auto &item : renderQueue.GetItems()) {
-                     if (!item.IsValid())
-                         continue;
-                     m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
-                                          item.materialCBAddress, item.textureSRV);
-                 }
-                 m_renderer->EndFrame();
-
-                 // 屏障：RenderTarget -> Present
-                 D3D12_RESOURCE_BARRIER endBarrier = {};
-                 endBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                 endBarrier.Transition.pResource = backBuffer;
-                 endBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 endBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-                 endBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                 cmdList.Get()->ResourceBarrier(1, &endBarrier);
-
-                 // 关闭并提交
-                 cmdList.Close();
-                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdListHandle);
-
-                 uint64_t sequence = m_context->GetNextSequence();
-                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
-             },
-         .phase = TaskPhase::Render,
-         .threadType = ThreadType::Main,
-         .priority = TaskPriority::Normal,
-         .renderPhase = RenderPhase::Opaque,
-         .alwaysRun = true});
+    LoadTestTexture();
+    CreateTestCube();
 }
 
 void GameWorld::Clear() {
@@ -311,6 +195,11 @@ void GameWorld::CreateTestCube() {
     meshComp.materialHandle = materialHandle;
     meshComp.textureHandle = m_testTextureHandle; // 使用成员变量
     m_registry->AddComponent<MeshComponent>(m_cubeEntity, std::move(meshComp));
+
+    // 注册旋转系统
+    RegisterRotationSystem();
+    // 注册立方体渲染系统
+    RegisterCubeRenderSystem();
 }
 
 void GameWorld::LoadTestTexture() {
@@ -394,4 +283,112 @@ void GameWorld::LoadTestTexture() {
     m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
 
     m_context->Logging->Info("[GameWorld] Test texture loaded successfully");
+}
+
+void GameWorld::RegisterRotationSystem() {
+    SystemRegistry::Register(
+        {.name = "CubeRotationSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 float deltaTime = m_context->MainTimer->GetDeltaTime();
+                 auto view = registry.view<TransformComponent>();
+                 view.each([deltaTime](TransformComponent &transform) { transform.rotation.y += deltaTime * 2.0f; });
+             },
+         .phase = TaskPhase::Update,
+         .threadType = ThreadType::Worker,
+         .priority = TaskPriority::Normal,
+         .alwaysRun = true});
+}
+
+void GameWorld::RegisterCubeRenderSystem() {
+    SystemRegistry::Register(
+        {.name = "CubeRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 if (m_context->renderQueue.Empty()) {
+                     ;
+                     return;
+                 }
+
+                 // 获取命令列表等渲染资源
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+                 auto backBufferIndex = m_context->GetBackBufferIndex();
+                 auto backBuffer = m_context->GetBackBuffer();
+
+                 // 屏障：Present -> RenderTarget
+                 D3D12_RESOURCE_BARRIER beginBarrier = {};
+                 beginBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 beginBarrier.Transition.pResource = backBuffer;
+                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 beginBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
+
+                 // 设置视口和渲染目标
+                 const auto &viewport = m_context->DeviceContext->GetViewport();
+                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
+                 cmdList.Get()->RSSetViewports(1, &viewport);
+                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+
+                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
+                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
+                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+                 // 清除
+                 const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
+                 cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+                 cmdList.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+                                                      1.0f, 0, 0, nullptr);
+
+                 // 获取 Pass Constant Buffer 地址
+                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
+                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
+
+                 //  GetLightCBAddress
+
+                 // 开始渲染
+                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr);
+
+                 ID3D12DescriptorHeap *descriptorHeaps[] = {
+                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+
+                 //  一个堆
+                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+
+                 // 遍历所有带 MeshComponent 和 TransformComponent 的实体并渲染
+                 const auto &renderQueue = m_context->renderQueue;
+                 for (const auto &item : renderQueue.GetItems()) {
+                     if (!item.IsValid())
+                         continue;
+                     m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
+                                          item.materialCBAddress, item.textureSRV);
+                 }
+                 m_renderer->EndFrame();
+
+                 // 屏障：RenderTarget -> Present
+                 D3D12_RESOURCE_BARRIER endBarrier = {};
+                 endBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 endBarrier.Transition.pResource = backBuffer;
+                 endBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 endBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+                 endBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &endBarrier);
+
+                 // 关闭并提交
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdListHandle);
+
+                 uint64_t sequence = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Main,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::Opaque,
+         .alwaysRun = true});
 }
