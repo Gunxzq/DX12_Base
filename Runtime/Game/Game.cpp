@@ -57,8 +57,8 @@ bool Game::Initialize() {
     }
 
     // 初始化 LightManager
-    m_lightManager.Initialize();
-    m_lightManager.CreateTestLights(); // 创建测试光源
+    LightManager::GetInstance().Initialize();
+    LightManager::GetInstance().CreateTestLights(); // 创建测试光源
 
     // 5. 注册引擎级系统（窗口大小变化、全屏切换等）
     RegisterEngineSystems();
@@ -96,7 +96,7 @@ bool Game::Initialize() {
                 // ========================================================================
                 // 更新跟随相机的光源位置（点光源索引 2）
                 // ========================================================================
-                Light *followLight = m_lightManager.GetPointLight(2);
+                Light *followLight = LightManager::GetInstance().GetPointLight(2);
                 if (followLight) {
                     followLight->Position =
                         DirectX::XMFLOAT4(camera.Position.x, camera.Position.y + 1.0f, camera.Position.z, 0.0f);
@@ -106,8 +106,7 @@ bool Game::Initialize() {
                 // 上传光源数据到 GPU
                 // ========================================================================
                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress =
-                    m_lightManager.UpdateAndUpload(m_context->FrameResourceManager);
-                m_context->lightCBAddress = lightCBAddress;
+                    LightManager::GetInstance().UpdateAndUpload(m_context->FrameResourceManager);
 
                 m_context->FrameResourceManager->UpdatePassConstants();
             },
@@ -145,118 +144,7 @@ bool Game::Initialize() {
     m_isInitialized = true;
     m_context->Logging->Info("[Game] Game initialized successfully");
 
-    // 加载测试纹理
-    {
-        using namespace DX12Engine::Resource;
-
-        // 1. 解析 DDS 文件
-        DDSTextureInfo ddsInfo;
-        std::wstring texturePath = L"Content/Textures/WoodCrate01.dds";
-        if (AssetLoader::GetInstance().LoadTextureFromFile(texturePath, ddsInfo)) {
-
-            // 2. 创建 GPU 资源（使用 COMMON 状态，不是 COPY_DEST）
-            auto &gpuMgr = GpuResourceManager::GetInstance();
-            ID3D12Device *device = m_context->DeviceContext->GetDevice();
-            GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
-
-            if (gpuHandle.IsValid()) {
-                // 3. 分配 SRV 描述符
-                auto &descriptorHeaps = m_context->DescriptorHeaps;
-                uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
-                OutputDebugString((L"SRV Index: " + std::to_wstring(srvIndex) + L"\n").c_str());
-                if (srvIndex == UINT32_MAX) {
-                    OutputDebugString(L"ERROR: Failed to allocate SRV index!\n");
-                }
-
-                if (srvIndex != UINT32_MAX) {
-                    // 4. 创建 SRV
-                    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                    srvDesc.Format = ddsInfo.desc.Format;
-                    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-
-                    if (ddsInfo.isCubeMap) {
-                        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-                        srvDesc.TextureCube.MipLevels = ddsInfo.desc.MipLevels;
-                        srvDesc.TextureCube.MostDetailedMip = 0;
-                        srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
-                    } else {
-                        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                        srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
-                        srvDesc.Texture2D.MostDetailedMip = 0;
-                        srvDesc.Texture2D.PlaneSlice = 0;
-                        srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-                    }
-
-                    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
-                        descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
-                    device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
-
-                    Resource::TextureManager *texMgr = m_context->TextureMgr;
-
-                    m_context->testTextureHandle = texMgr->RegisterTexture(gpuHandle, srvIndex);
-
-                    // ========== 6. 同步上传纹理数据 ==========
-                    uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-                    auto allocatorHandle =
-                        m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
-                    auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
-                    auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-                    auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-
-                    // 直接使用解析好的 subresources（不再调用 FillSubresourceData）
-                    std::vector<D3D12_SUBRESOURCE_DATA> subresources = ddsInfo.subresources;
-
-                    // 计算所需上传缓冲区大小
-                    UINT64 requiredSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
-                                                                      static_cast<UINT>(subresources.size()));
-
-                    // 创建上传缓冲区
-                    GpuResourceHandle uploadHandle = gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD,
-                                                                         D3D12_RESOURCE_STATE_GENERIC_READ);
-
-                    // 屏障：COMMON -> COPY_DEST
-                    auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(
-                        gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
-                    cmdList.Get()->ResourceBarrier(1, &barrier1);
-
-                    // 更新子资源
-                    UpdateSubresources(cmdList.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadHandle),
-                                       0, 0, static_cast<UINT>(subresources.size()), subresources.data());
-
-                    // 屏障：COPY_DEST -> PIXEL_SHADER_RESOURCE
-                    auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle),
-                                                                         D3D12_RESOURCE_STATE_COPY_DEST,
-                                                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                    cmdList.Get()->ResourceBarrier(1, &barrier2);
-
-                    cmdList.Close();
-
-                    // 提交并刷新
-                    m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
-                    m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
-
-                    uint64_t sequence = m_context->GetNextSequence();
-
-                    // 释放上传缓冲区
-                    gpuMgr.Release(uploadHandle, sequence);
-
-                    // 释放临时资源
-                    m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-                    m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
-
-                    m_context->Logging->Info("[Game] Test texture loaded successfully");
-                } else {
-                    gpuMgr.Release(gpuHandle, 0);
-                    OutputDebugString(L"Failed to allocate SRV");
-                }
-            } else {
-                OutputDebugString(L"Failed to create GPU texture");
-            }
-        } else {
-            OutputDebugString(L"Failed to load DDS file");
-        }
-    }
-
+    m_world.LoadTestTexture();
     m_world.CreateTestCube();
 
     return true;

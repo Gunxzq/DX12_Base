@@ -110,10 +110,6 @@ public:
     Renderer::LODSystem *LODSystem = nullptr;
     Renderer::RenderItemBuilder *RenderItemBuilder = nullptr;
 
-    D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress = 0;
-    Resource::TextureHandle testTextureHandle; // 测试纹理句柄
-    D3D12_GPU_DESCRIPTOR_HANDLE testTextureSRVHandle = {0};
-
     // ── 便捷访问方法 ──
     bool IsValid() const;
     const char *GetInvalidReason() const;

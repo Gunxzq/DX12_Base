@@ -40,8 +40,6 @@ private:
     GameWorld m_world;
     GameInputHandler m_inputHandler;
 
-    DX12Engine::Renderer::LightManager m_lightManager;
-
     bool m_isRunning = false;
     bool m_isInitialized = false;
 };

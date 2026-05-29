@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ECS/Core/Entity.h"
+#include "Math/BoundingVolume.h"
+#include "Resource/Struct/TextureHandle.h"
 #include "Scheduler/Task.h"
 #include <memory>
 #include <vector>
@@ -34,9 +36,11 @@ public:
     void Clear();
 
     DX12Engine::ECS::Registry *GetRegistry() const { return m_registry; }
+    DX12Engine::ECS::Entity GetTestCube() const { return m_cubeEntity; }
 
     void CreateTestCube();
-    DX12Engine::ECS::Entity GetTestCube() const { return m_cubeEntity; }
+    void LoadTestTexture(); // 新增：加载测试纹理
+    // void CreateTerrain();   // 新增：创建地形（后续实现）
 
     void RegisterSystems();
 
@@ -44,6 +48,6 @@ private:
     DX12Engine::Boot::GameContext *m_context = nullptr;
     DX12Engine::ECS::Registry *m_registry = nullptr;
     DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
-
+    DX12Engine::Resource::TextureHandle m_testTextureHandle; // 存储纹理句柄
     DX12Engine::ECS::Entity m_cubeEntity;
 };

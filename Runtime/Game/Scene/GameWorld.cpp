@@ -12,14 +12,17 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
+#include "Renderer/Scene/LightManager.h"
 #include "Renderer/Utils/GeometryGenerator.h"
 #include "Resource/Asset/LODMesh.h"
+#include "Resource/AssetLoader/AssetLoader.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Manager/MaterialManager.h"
 #include "Resource/Material/MaterialResource.h"
+#include "Resource/Texture/TextureManager.h"
 #include "Scheduler/FrameDriver.h"
 #include <DirectXMath.h>
 #include <wrl/client.h>
@@ -118,7 +121,9 @@ void GameWorld::RegisterSystems() {
 
                  // 获取 Pass Constant Buffer 地址
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
-                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = m_context->lightCBAddress;
+                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
+
+                 //  GetLightCBAddress
 
                  // 开始渲染
                  m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr);
@@ -304,6 +309,89 @@ void GameWorld::CreateTestCube() {
     meshComp.lodMeshHandle = lodHandle;
     meshComp.localBounds = bounds;
     meshComp.materialHandle = materialHandle;
-    meshComp.textureHandle = m_context->testTextureHandle;
+    meshComp.textureHandle = m_testTextureHandle; // 使用成员变量
     m_registry->AddComponent<MeshComponent>(m_cubeEntity, std::move(meshComp));
+}
+
+void GameWorld::LoadTestTexture() {
+
+    DDSTextureInfo ddsInfo;
+    std::wstring texturePath = L"Content/Textures/WoodCrate01.dds";
+
+    if (!AssetLoader::GetInstance().LoadTextureFromFile(texturePath, ddsInfo)) {
+        OutputDebugStringW(L"[ERROR] Failed to load test texture\n");
+        return;
+    }
+
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    ID3D12Device *device = m_context->DeviceContext->GetDevice();
+    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+
+    if (!gpuHandle.IsValid()) {
+        OutputDebugStringW(L"[ERROR] Failed to create GPU texture\n");
+        return;
+    }
+
+    auto &descriptorHeaps = m_context->DescriptorHeaps;
+    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+
+    if (srvIndex == UINT32_MAX) {
+        OutputDebugStringW(L"[ERROR] Failed to allocate SRV index\n");
+        gpuMgr.Release(gpuHandle, 0);
+        return;
+    }
+
+    // 创建 SRV
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = ddsInfo.desc.Format;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+
+    // 注册到 TextureManager
+    TextureManager *texMgr = m_context->TextureMgr;
+    m_testTextureHandle = texMgr->RegisterTexture(gpuHandle, srvIndex);
+
+    // 上传纹理数据
+    uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+    auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+    auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+    auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+    auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+    std::vector<D3D12_SUBRESOURCE_DATA> subresources = ddsInfo.subresources;
+
+    UINT64 requiredSize =
+        GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
+
+    GpuResourceHandle uploadHandle =
+        gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+    auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
+                                                         D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdList.Get()->ResourceBarrier(1, &barrier1);
+
+    UpdateSubresources(cmdList.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadHandle), 0, 0,
+                       static_cast<UINT>(subresources.size()), subresources.data());
+
+    auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    cmdList.Get()->ResourceBarrier(1, &barrier2);
+
+    cmdList.Close();
+
+    m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
+    m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+    uint64_t sequence = m_context->GetNextSequence();
+    gpuMgr.Release(uploadHandle, sequence);
+
+    m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+    m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+
+    m_context->Logging->Info("[GameWorld] Test texture loaded successfully");
 }
