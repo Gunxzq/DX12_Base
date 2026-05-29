@@ -311,12 +311,18 @@ Renderer::MaterialConstants MaterialManager::ConvertToGPUConstants(const Materia
     gpu.EmissiveTextureIndex = 0;
     gpu.OcclusionTextureIndex = 0;
 
-    // 填充
-    gpu.Pad[0] = 0.0f;
-    gpu.Pad[1] = 0.0f;
-    gpu.Pad[2] = 0.0f;
-
     return gpu;
+}
+
+std::vector<Renderer::MaterialConstants> MaterialManager::GetAllGPUConstants() const {
+    std::vector<Renderer::MaterialConstants> result;
+    result.reserve(m_entries.size());
+    for (const auto &entry : m_entries) {
+        if (entry.inUse) {
+            result.push_back(ConvertToGPUConstants(entry.data));
+        }
+    }
+    return result;
 }
 
 } // namespace DX12Engine::Resource

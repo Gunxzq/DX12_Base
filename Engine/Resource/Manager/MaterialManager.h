@@ -34,6 +34,7 @@ public:
     //
     static Renderer::MaterialConstants ConvertToGPUConstants(const MaterialData &data);
     Renderer::MaterialConstants GetGPUConstants(MaterialHandle handle) const;
+    std::vector<Renderer::MaterialConstants> GetAllGPUConstants() const;
 
     //  调试/统计
     uint32_t GetActiveCount() const;
