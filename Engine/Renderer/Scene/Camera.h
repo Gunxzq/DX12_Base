@@ -39,7 +39,10 @@ struct Camera {
     XMMATRIX ViewMatrix;
     XMMATRIX ProjMatrix;
     XMMATRIX ViewProjMatrix;
+    XMMATRIX InverseView;
+    XMMATRIX InverseProj;
     XMMATRIX InverseViewProj;
+    XMMATRIX PrevViewProjMatrix; // 上一帧的 ViewProj
 
     struct {
         bool bFollowTarget : 1;   // 是否跟随某个实体（第三人称）

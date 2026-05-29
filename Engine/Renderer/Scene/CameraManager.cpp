@@ -34,7 +34,8 @@ void CameraManager::Initialize(uint32_t initialWidth, uint32_t initialHeight) {
     m_mainCamera.Position = XMFLOAT3(0.0f, 0.0f, -5.0f);
 
     // 初始计算一次矩阵
-    CalculateMatrices(m_mainCamera);
+    CalculateMatrices(m_mainCamera);                               // 计算当前帧矩阵
+    m_mainCamera.PrevViewProjMatrix = m_mainCamera.ViewProjMatrix; // 第一帧时与当前帧相同
 }
 
 void CameraManager::Shutdown() {
@@ -50,7 +51,11 @@ Camera &CameraManager::GetMainCamera() { return m_mainCamera; }
 
 const Camera &CameraManager::GetMainCamera() const { return m_mainCamera; }
 
-void CameraManager::UpdateMainCamera() { CalculateMatrices(m_mainCamera); }
+void CameraManager::UpdateMainCamera() {
+    // 保存上一帧的 ViewProj 矩阵
+    m_mainCamera.PrevViewProjMatrix = m_mainCamera.ViewProjMatrix;
+    CalculateMatrices(m_mainCamera);
+}
 
 // ========================================================================
 // 辅助相机管理
@@ -144,11 +149,10 @@ void CameraManager::CalculateMatrices(Camera &camera) {
         camera.ProjMatrix = XMMatrixOrthographicLH(orthoWidth, camera.OrthoSize, camera.NearPlane, camera.FarPlane);
     }
 
-    // 5. 计算 ViewProj 和 InverseViewProj
+    // 5. 计算 ViewProj 和逆矩阵
     camera.ViewProjMatrix = camera.ViewMatrix * camera.ProjMatrix;
-
-    // 注意：XMMatrixInverse 的第一个参数可以传入一个 XMVECTOR* 来接收行列式，
-    // 如果不需要行列式值，传 nullptr 即可。
+    camera.InverseView = XMMatrixInverse(nullptr, camera.ViewMatrix);
+    camera.InverseProj = XMMatrixInverse(nullptr, camera.ProjMatrix);
     camera.InverseViewProj = XMMatrixInverse(nullptr, camera.ViewProjMatrix);
 }
 
