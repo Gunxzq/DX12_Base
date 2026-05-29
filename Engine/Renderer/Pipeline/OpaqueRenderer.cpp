@@ -178,7 +178,6 @@ void OpaqueRenderer::CreateRootSignature() {
 
     CD3DX12_ROOT_PARAMETER slotRootParameter[5];
 
-    // 只有纹理 SRV 范围
     CD3DX12_DESCRIPTOR_RANGE texTable;
     texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
@@ -188,9 +187,25 @@ void OpaqueRenderer::CreateRootSignature() {
     slotRootParameter[3].InitAsConstantBufferView(3, 0, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[4].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
 
-    // 静态采样器
+    // ========================================================================
+    // 修复：完整配置静态采样器
+    // ========================================================================
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1];
-    staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+
+    // 使用 CLAMP 模式，防止边界问题
+    staticSamplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    staticSamplers[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; // 改为 CLAMP
+    staticSamplers[0].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[0].MipLODBias = 0;
+    staticSamplers[0].MaxAnisotropy = 0;
+    staticSamplers[0].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+    staticSamplers[0].BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+    staticSamplers[0].MinLOD = 0.0f;
+    staticSamplers[0].MaxLOD = D3D12_FLOAT32_MAX;
+    staticSamplers[0].ShaderRegister = 0;
+    staticSamplers[0].RegisterSpace = 0;
+    staticSamplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(5, slotRootParameter, 1, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
@@ -212,12 +227,13 @@ void OpaqueRenderer::CreateRootSignature() {
 void OpaqueRenderer::CreatePSO() {
     auto device = m_context->GetDevice();
 
+    // 输入布局对齐 GeometryGenerator::Vertex (44 bytes):
+    //   Position(0,12) | Normal(12,12) | TangentU(24,12) | TexC(36,8)
     D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 40, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0} // 添加
-    };
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = {inputLayout, _countof(inputLayout)};
     psoDesc.pRootSignature = m_rootSignature.Get();
@@ -229,17 +245,20 @@ void OpaqueRenderer::CreatePSO() {
     // // // 启用线框模式以便调试
     // D3D12_RASTERIZER_DESC rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     // rasterizerDesc.FillMode = D3D12_FILL_MODE_WIREFRAME;
-    // rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // 禁用背面剔除
-    // psoDesc.RasterizerState = rasterizerDesc;
+    rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+    rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // 禁用背面剔除
+    psoDesc.RasterizerState = rasterizerDesc;
 
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 
-    // 临时
     D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-    depthStencilDesc.DepthEnable = FALSE;
+    depthStencilDesc.DepthEnable = TRUE;
+    depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     depthStencilDesc.StencilEnable = FALSE;
+
     psoDesc.DepthStencilState = depthStencilDesc;
 
     psoDesc.SampleMask = UINT_MAX;

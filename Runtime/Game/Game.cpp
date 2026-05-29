@@ -91,19 +91,10 @@ bool Game::Initialize() {
                 passConstants.FarPlane = camera.FarPlane;
                 passConstants.AspectRatio = camera.AspectRatio;
                 passConstants.FrameCount = m_context->FrameDriver->GetFrameStats().frameNumber;
-                passConstants.AmbientLight = {0.5f, 0.5f, 0.5f, 0.8f}; // 提高环境光强度
+                passConstants.AmbientLight = {0.4f, 0.45f, 0.5f, 1.0f}; // 环境光：模拟天空散射
 
                 // ========================================================================
-                // 更新跟随相机的光源位置（点光源索引 2）
-                // ========================================================================
-                Light *followLight = LightManager::GetInstance().GetPointLight(2);
-                if (followLight) {
-                    followLight->Position =
-                        DirectX::XMFLOAT4(camera.Position.x, camera.Position.y + 1.0f, camera.Position.z, 0.0f);
-                }
-
-                // ========================================================================
-                // 上传光源数据到 GPU
+                // 上传光源数据到 GPU（太阳方向光 + 环境光，无点光源）
                 // ========================================================================
                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress =
                     LightManager::GetInstance().UpdateAndUpload(m_context->FrameResourceManager);

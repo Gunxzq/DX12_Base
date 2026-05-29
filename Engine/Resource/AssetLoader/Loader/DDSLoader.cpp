@@ -99,6 +99,21 @@ bool DDSLoader::ParseDDS(const uint8_t *fileData, size_t fileSize, DDSTextureInf
 
         dxt10Header = reinterpret_cast<const DDS_HEADER_DXT10 *>(fileData + pixelDataOffset);
         format = dxt10Header->dxgiFormat;
+        if (dxt10Header) {
+            format = dxt10Header->dxgiFormat;
+            // 调试输出
+            switch (format) {
+            case DXGI_FORMAT_BC7_UNORM:
+                OutputDebugString(L"Format: BC7_UNORM (linear)\n");
+                break;
+            case DXGI_FORMAT_BC7_UNORM_SRGB:
+                OutputDebugString(L"Format: BC7_UNORM_SRGB (sRGB)\n");
+                break;
+            default:
+                OutputDebugString(L"Format: Other\n");
+                break;
+            }
+        }
         pixelDataOffset += sizeof(DDS_HEADER_DXT10);
 
         if (format == DXGI_FORMAT_UNKNOWN)

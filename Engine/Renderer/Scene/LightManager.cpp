@@ -171,42 +171,44 @@ D3D12_GPU_VIRTUAL_ADDRESS LightManager::UpdateAndUpload(FrameResourceManager *fr
 void LightManager::CreateTestLights() {
     Clear();
 
-    // 方向光 0（主光）- 增强强度
+    // ========================================================================
+    // 方向光 0 — 模拟太阳光
+    // ========================================================================
     Light dirLight;
-    dirLight.Strength = DirectX::XMFLOAT4(1.5f, 1.2f, 1.0f, 0.0f); // 增强强度
-    dirLight.Direction = DirectX::XMFLOAT4(0.57735f, -0.57735f, 0.57735f, 0.0f);
+    dirLight.Strength = DirectX::XMFLOAT4(4.0f, 3.8f, 3.5f, 0.0f);   // 暖色太阳光
+    dirLight.Direction = DirectX::XMFLOAT4(0.0f, -1.0f, 0.0f, 0.0f); // 正上方垂直向下
     SetDirectionalLight(dirLight, 0);
 
-    // 添加一个暖色点光源（右前方）- 增强
+    // 暖色点光源（右前方）
     Light pointLight0;
-    pointLight0.Strength = DirectX::XMFLOAT4(2.0f, 1.0f, 0.5f, 0.0f); // 增强并变暖
+    pointLight0.Strength = DirectX::XMFLOAT4(1.0f, 0.6f, 0.3f, 0.0f);
     pointLight0.Position = DirectX::XMFLOAT4(3.0f, 2.0f, 4.0f, 0.0f);
     pointLight0.FalloffStart = 1.0f;
     pointLight0.FalloffEnd = 20.0f;
     pointLight0.Range = 20.0f;
     AddPointLight(pointLight0);
 
-    // 添加一个冷色点光源（左前方）- 增强
+    // 冷色点光源（左前方）
     Light pointLight1;
-    pointLight1.Strength = DirectX::XMFLOAT4(0.5f, 1.0f, 2.0f, 0.0f); // 增强并变冷
+    pointLight1.Strength = DirectX::XMFLOAT4(0.3f, 0.6f, 1.0f, 0.0f);
     pointLight1.Position = DirectX::XMFLOAT4(-3.0f, 2.0f, 4.0f, 0.0f);
     pointLight1.FalloffStart = 1.0f;
     pointLight1.FalloffEnd = 20.0f;
     pointLight1.Range = 20.0f;
     AddPointLight(pointLight1);
 
-    // 添加一个背光补光（增强边缘光）
+    // 背光补光
     Light backLight;
-    backLight.Strength = DirectX::XMFLOAT4(1.0f, 1.0f, 1.5f, 0.0f);
+    backLight.Strength = DirectX::XMFLOAT4(0.5f, 0.5f, 0.8f, 0.0f);
     backLight.Position = DirectX::XMFLOAT4(0.0f, 3.0f, -5.0f, 0.0f);
     backLight.FalloffStart = 1.0f;
     backLight.FalloffEnd = 15.0f;
     backLight.Range = 15.0f;
     AddPointLight(backLight);
 
-    // 跟随相机的光源（保持原有）
+    // 跟随相机的光源
     Light followLight;
-    followLight.Strength = DirectX::XMFLOAT4(1.2f, 1.2f, 1.5f, 0.0f);
+    followLight.Strength = DirectX::XMFLOAT4(0.8f, 0.8f, 1.0f, 0.0f);
     followLight.FalloffStart = 0.5f;
     followLight.FalloffEnd = 10.0f;
     followLight.Range = 10.0f;

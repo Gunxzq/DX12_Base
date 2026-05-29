@@ -2,6 +2,9 @@
 
 #include "ECS/Core/Entity.h"
 #include "Math/BoundingVolume.h"
+#include "Resource/AssetLoader/Loader/TerrainLoader.h"
+#include "Resource/Struct/GeometryHandle.h"
+#include "Resource/Struct/MaterialHandle.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Scheduler/Task.h"
 #include <memory>
@@ -39,16 +42,30 @@ public:
     DX12Engine::ECS::Entity GetTestCube() const { return m_cubeEntity; }
 
     void CreateTestCube();
-    void LoadTestTexture(); // 新增：加载测试纹理
-    // void CreateTerrain();   // 新增：创建地形（后续实现）
+    void LoadTestTexture();
+    void CreateTerrain();
 
+private:
     void RegisterRotationSystem();
     void RegisterCubeRenderSystem();
+
+    void CreateTerrainMesh();
+    void UploadTerrainGeometry();
+    void CreateTerrainMaterial();
+    void CreateTerrainEntity();
 
 private:
     DX12Engine::Boot::GameContext *m_context = nullptr;
     DX12Engine::ECS::Registry *m_registry = nullptr;
     DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
+
     DX12Engine::Resource::TextureHandle m_testTextureHandle; // 存储纹理句柄
     DX12Engine::ECS::Entity m_cubeEntity;
+
+    // 地形数据
+    DX12Engine::Resource::TerrainMeshData m_terrainMeshData;
+    DX12Engine::Resource::GeometryHandle m_terrainGeometryHandle;
+    DX12Engine::Resource::MaterialHandle m_terrainMaterialHandle;
+    DX12Engine::Resource::TextureHandle m_terrainTextureHandle;
+    DX12Engine::ECS::Entity m_terrainEntity;
 };
