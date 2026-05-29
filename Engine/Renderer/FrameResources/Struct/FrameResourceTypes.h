@@ -25,7 +25,7 @@ struct PassConstants {
     float AspectRatio;               // 屏幕宽高比
     uint32_t FrameCount;             // 帧计数
     DirectX::XMFLOAT4 AmbientLight;  // 环境光 (RGB, Intensity)
-    float Pad[2];                    // 确保 256 字节对齐
+    float Pad[3];                    // 确保 256 字节对齐
 };
 
 // ============================================================================
