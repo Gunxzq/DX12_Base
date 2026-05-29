@@ -325,4 +325,8 @@ std::vector<Renderer::MaterialConstants> MaterialManager::GetAllGPUConstants() c
     return result;
 }
 
+void MaterialManager::SetMaterialBufferSRV(D3D12_GPU_DESCRIPTOR_HANDLE srvHandle) { m_materialBufferSRV = srvHandle; }
+
+D3D12_GPU_DESCRIPTOR_HANDLE MaterialManager::GetMaterialBufferSRV() const { return m_materialBufferSRV; }
+
 } // namespace DX12Engine::Resource

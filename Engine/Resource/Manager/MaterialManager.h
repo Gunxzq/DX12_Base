@@ -43,6 +43,8 @@ public:
 
     // 根据渲染器类型 Hash 获取所有材质句柄
     std::vector<MaterialHandle> GetMaterialsByRenderer(uint64_t rendererTypeHash) const;
+    void SetMaterialBufferSRV(D3D12_GPU_DESCRIPTOR_HANDLE srvHandle);
+    D3D12_GPU_DESCRIPTOR_HANDLE GetMaterialBufferSRV() const;
 
 private:
     struct Entry {
@@ -72,6 +74,8 @@ private:
 
     static constexpr uint32_t INITIAL_CAPACITY = 1024;
     static constexpr uint32_t MAX_CAPACITY = 65536;
+
+    D3D12_GPU_DESCRIPTOR_HANDLE m_materialBufferSRV = {0};
 };
 
 } // namespace DX12Engine::Resource
