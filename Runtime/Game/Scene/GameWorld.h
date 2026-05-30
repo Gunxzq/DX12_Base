@@ -21,7 +21,8 @@ class Registry;
 namespace Renderer {
 class OpaqueRenderer;
 class SkyRenderer;
-}
+class WaterRenderer;
+} // namespace Renderer
 } // namespace DX12Engine
 
 /**
@@ -43,15 +44,21 @@ public:
     DX12Engine::ECS::Registry *GetRegistry() const { return m_registry; }
     DX12Engine::ECS::Entity GetTestCube() const { return m_cubeEntity; }
 
-    void CreateTestCube();
     void LoadTestTexture();
-    void CreateTerrain();
+    void LoadWaterTexture();
+
     void CreateMaterials();
+
+    void CreateTerrain();
+    void CreateTestCube();
     void CreateSkybox();
+    void CreateWater();
 
 private:
     void RegisterRotationSystem();
     void RegisterCubeRenderSystem();
+    void RegisterSkyboxSystem();
+    void RegisterWaterRenderSystem();
 
     void CreateTerrainMesh();
     void UploadTerrainGeometry();
@@ -61,9 +68,10 @@ private:
 private:
     DX12Engine::Boot::GameContext *m_context = nullptr;
     DX12Engine::ECS::Registry *m_registry = nullptr;
-    DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
 
+    DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
     std::unique_ptr<DX12Engine::Renderer::SkyRenderer> m_skyRenderer; // 天空盒渲染器
+    std::unique_ptr<DX12Engine::Renderer::WaterRenderer> m_waterRenderer;
 
     DX12Engine::Resource::TextureHandle m_testTextureHandle; // 存储纹理句柄
     DX12Engine::Resource::MaterialHandle m_cubeMaterialHandle;
@@ -81,4 +89,9 @@ private:
     DX12Engine::Resource::MaterialHandle m_terrainMaterialHandle;
     DX12Engine::Resource::TextureHandle m_terrainTextureHandle;
     DX12Engine::ECS::Entity m_terrainEntity;
+
+    // 水
+    DX12Engine::Resource::MaterialHandle m_waterMaterialHandle;
+    DX12Engine::Resource::TextureHandle m_waterTextureHandle;
+    DX12Engine::ECS::Entity m_waterEntity;
 };

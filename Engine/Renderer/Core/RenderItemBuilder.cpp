@@ -16,12 +16,11 @@ namespace DX12Engine::Renderer {
 // ============================================================================
 
 void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cullingResult, const LODResult &lodResult,
-                                RenderQueue &outQueue) {
+                                RenderQueue &outOpaqueQueue, RenderQueue &outTransparentQueue) {
 
-    // 清空上一帧的队列
-    outQueue.Clear();
+    outOpaqueQueue.Clear();
+    outTransparentQueue.Clear();
 
-    // 获取相机位置（用于深度计算）
     DirectX::XMFLOAT3 cameraPos = {0.0f, 0.0f, 0.0f};
     if (m_cameraManager) {
         const auto &camera = m_cameraManager->GetMainCamera();
@@ -29,68 +28,79 @@ void RenderItemBuilder::Execute(ECS::Registry &registry, const CullingResult &cu
     }
 
     for (auto entity : cullingResult.visibleEntities) {
-
-        auto &meshComp = registry.GetComponent<ECS::MeshComponent>(entity);
-
-        Resource::GeometryHandle handle = lodResult.GetHandle(entity);
-        if (!handle.IsValid()) {
-            continue;
-        }
-        Resource::MaterialHandle materialHandle = meshComp.materialHandle;
-        Resource::TextureHandle textureHandle = meshComp.textureHandle;
-
-        if (!materialHandle.IsValid()) {
+        // 尝试不透明组件
+        auto *opaqueComp = registry.TryGetComponent<ECS::MeshComponent>(entity);
+        if (opaqueComp) {
+            BuildRenderItem(registry, entity, *opaqueComp, lodResult, cameraPos, outOpaqueQueue, false);
             continue;
         }
 
-        if (!textureHandle.IsValid()) {
+        // 尝试透明组件
+        auto *transparentComp = registry.TryGetComponent<ECS::TransparentMeshComponent>(entity);
+        if (transparentComp) {
+            BuildRenderItem(registry, entity, *transparentComp, lodResult, cameraPos, outTransparentQueue, true);
             continue;
         }
-
-        // 验证材质仍有效（generation 匹配）
-        const Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
-        if (!material) {
-            continue;
-        }
-
-        // 3. 获取 Transform
-        auto &transform = registry.GetComponent<ECS::TransformComponent>(entity);
-
-        // 4. 计算深度
-        float depth = CalculateDepth(transform.position, cameraPos);
-
-        // 5. 构建排序键（当前阶段透明物体统一按深度排序）
-        //    TODO: 后续支持材质系统时，排序键应包含材质 ID
-        bool isTransparent = false; // 当前阶段无透明物体
-        uint64_t sortKey = BuildSortKey(0, depth, isTransparent);
-
-        // 构建 ObjectConstants
-        ObjectConstants objCB;
-        XMMATRIX world = transform.GetMatrix();
-        XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
-
-        XMStoreFloat4x4(&objCB.World, world);
-        XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
-        XMStoreFloat4x4(&objCB.PrevWorld, world);
-        objCB.MaterialIndex = m_materialManager->GetGPUIndex(materialHandle); // 返回 handle.index
-        objCB.ReceiveShadow = 0;
-
-        // 分配 GPU 地址
-        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
-            m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
-
-        // 构建 RenderItem
-        RenderItem item;
-        item.geometryHandle = handle;
-        item.materialHandle = materialHandle;
-        item.worldMatrix = transform.GetMatrix();
-        item.objectCBAddress = objectCBAddress;
-        item.depth = depth;
-        item.sortKey = BuildSortKey(materialHandle.index, depth, false); // 传入 index
-        item.textureSRV = m_textureManager->GetSRV(textureHandle);
-
-        outQueue.Add(item);
     }
+
+    // 分别排序（透明物体需要远到近）
+    outOpaqueQueue.Sort(); // 不透明物体按 sortKey 升序（近到远）
+    // 透明物体排序在 BuildSortKey 中已处理（depth 取反）
+    outTransparentQueue.Sort();
+}
+
+// ============================================================================
+// 模板辅助函数
+// ============================================================================
+
+template <typename MeshCompType>
+void RenderItemBuilder::BuildRenderItem(ECS::Registry &registry, ECS::Entity entity, MeshCompType &meshComp,
+                                        const LODResult &lodResult, const DirectX::XMFLOAT3 &cameraPos,
+                                        RenderQueue &outQueue, bool isTransparent) {
+
+    Resource::GeometryHandle handle = lodResult.GetHandle(entity);
+    if (!handle.IsValid())
+        return;
+
+    Resource::MaterialHandle materialHandle = meshComp.materialHandle;
+    Resource::TextureHandle textureHandle = meshComp.textureHandle;
+
+    if (!materialHandle.IsValid() || !textureHandle.IsValid())
+        return;
+
+    const Resource::MaterialData *material = m_materialManager->GetMaterial(materialHandle);
+    if (!material)
+        return;
+
+    auto &transform = registry.GetComponent<ECS::TransformComponent>(entity);
+
+    float depth = CalculateDepth(transform.position, cameraPos);
+
+    // 构建 ObjectConstants
+    ObjectConstants objCB;
+    XMMATRIX world = transform.GetMatrix();
+    XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+
+    XMStoreFloat4x4(&objCB.World, world);
+    XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
+    XMStoreFloat4x4(&objCB.PrevWorld, world);
+    objCB.MaterialIndex = m_materialManager->GetGPUIndex(materialHandle);
+    objCB.ReceiveShadow = 0;
+
+    D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
+        m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
+
+    // 构建 RenderItem
+    RenderItem item;
+    item.geometryHandle = handle;
+    item.materialHandle = materialHandle;
+    item.worldMatrix = transform.GetMatrix();
+    item.objectCBAddress = objectCBAddress;
+    item.depth = depth;
+    item.sortKey = BuildSortKey(materialHandle.index, depth, isTransparent);
+    item.textureSRV = m_textureManager->GetSRV(textureHandle);
+
+    outQueue.Add(item);
 }
 
 // ============================================================================
@@ -121,5 +131,16 @@ uint64_t RenderItemBuilder::BuildSortKey(uint32_t materialIndex, float depth, bo
 
     return transparentBit | materialPart | depthInt;
 }
+
+// 显式实例化模板（避免链接错误）
+template void RenderItemBuilder::BuildRenderItem<ECS::MeshComponent>(ECS::Registry &, ECS::Entity, ECS::MeshComponent &,
+                                                                     const LODResult &, const DirectX::XMFLOAT3 &,
+                                                                     RenderQueue &, bool);
+
+template void RenderItemBuilder::BuildRenderItem<ECS::TransparentMeshComponent>(ECS::Registry &, ECS::Entity,
+                                                                                ECS::TransparentMeshComponent &,
+                                                                                const LODResult &,
+                                                                                const DirectX::XMFLOAT3 &,
+                                                                                RenderQueue &, bool);
 
 } // namespace DX12Engine::Renderer

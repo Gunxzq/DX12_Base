@@ -93,6 +93,26 @@ bool Game::Initialize() {
                 passConstants.FrameCount = m_context->FrameDriver->GetFrameStats().frameNumber;
                 passConstants.AmbientLight = {0.4f, 0.45f, 0.5f, 1.0f}; // 环境光：模拟天空散射
 
+                // ====================================================================
+                // 更新水波常量
+                // ====================================================================
+                WaterConstants waterCB;
+                waterCB.Time = passConstants.TotalTime;
+                waterCB.WaveAmplitude = 0.5f + sin(passConstants.TotalTime * 0.5f) * 0.2f;
+                waterCB.WaveSpeed = 1.5f;
+                waterCB.WaveFrequency = 2.0f;
+                waterCB.RefractionStrength = 0.3f;
+                waterCB.FresnelPower = 2.0f;
+                waterCB.FoamIntensity = 0.5f;
+                waterCB.ReflectionTextureIndex = 0;
+                waterCB.RefractionTextureIndex = 0;
+                waterCB.DepthTextureIndex = 0;
+                waterCB.NormalTextureIndex = 0;
+                waterCB.Pad = 0;
+
+                m_context->WaterCBAddress =
+                    m_context->FrameResourceManager->AllocateWaterCB(&waterCB, sizeof(WaterConstants));
+
                 // ========================================================================
                 // 上传光源数据到 GPU（太阳方向光 + 环境光，无点光源）
                 // ========================================================================
@@ -178,7 +198,8 @@ void Game::RegisterEngineSystems() {
                                       m_context->CullingSystem->Execute(reg, m_context->cullingResult);
                                       m_context->LODSystem->Execute(reg, m_context->lodResult);
                                       m_context->RenderItemBuilder->Execute(
-                                          reg, m_context->cullingResult, m_context->lodResult, m_context->renderQueue);
+                                          reg, m_context->cullingResult, m_context->lodResult, m_context->renderQueue,
+                                          m_context->transparentRenderQueue);
 
                                       m_context->renderQueue.Sort();
                                   },

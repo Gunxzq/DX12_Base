@@ -11,8 +11,11 @@
 #include "Renderer/Core/RendererRegistry.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
+
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/Pipeline/SkyRenderer.h"
+#include "Renderer/Pipeline/WaterRenderer.h"
+
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/LightManager.h"
 #include "Renderer/Utils/GeometryGenerator.h"
@@ -50,11 +53,20 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_registry = context->Registry;
     m_renderer = renderer;
 
+    m_waterRenderer = std::make_unique<WaterRenderer>();
+    m_waterRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_waterRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
+    m_waterRenderer->SetMaterialManager(m_context->MaterialMgr);
+    m_waterRenderer->Initialize();
+
     LoadTestTexture();
+    LoadWaterTexture();
+
     CreateMaterials();
     CreateSkybox();
     CreateTestCube();
     CreateTerrain();
+    CreateWater();
 }
 
 void GameWorld::Clear() {
@@ -289,6 +301,18 @@ void GameWorld::CreateMaterials() {
     terrainMaterial.alpha = 1.0f;
     terrainMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
     m_terrainMaterialHandle = materialMgr->RegisterMaterial(terrainMaterial);
+
+    // 水材质
+    MaterialData waterMaterial;
+    waterMaterial.materialId = TYPE_HASH("water_material");
+    waterMaterial.name = "water_material";
+    waterMaterial.baseColor = XMFLOAT4(0.2f, 0.4f, 0.6f, 0.8f); // 半透明蓝色
+    waterMaterial.metallic = 0.0f;
+    waterMaterial.roughness = 0.2f; // 光滑表面
+    waterMaterial.ambient = 0.5f;
+    waterMaterial.alpha = 0.8f; // 半透明
+    waterMaterial.rendererTypeHash = TYPE_HASH("TransparentPBR");
+    m_waterMaterialHandle = materialMgr->RegisterMaterial(waterMaterial);
 
     // ========================================================================
     // 创建材质数组 GPU Buffer 和 SRV
@@ -551,6 +575,9 @@ void GameWorld::CreateSkybox() {
     m_skyboxObjectCBAddress = m_context->FrameResourceManager->AllocateObjectCB(&skyObjCB, sizeof(ObjectConstants));
 
     m_context->Logging->Info("[GameWorld] Skybox created successfully");
+
+    // 注册天空盒任务
+    RegisterSkyboxSystem();
 }
 
 void GameWorld::RegisterRotationSystem() {
@@ -644,19 +671,6 @@ void GameWorld::RegisterCubeRenderSystem() {
                  }
                  m_renderer->EndFrame();
 
-                 // ========================================================================
-                 // 绘制天空盒（在实体渲染之后、Present 屏障之前）
-                 // ========================================================================
-                 if (m_skyRenderer && m_skyboxGeometryHandle.IsValid()) {
-                     D3D12_GPU_DESCRIPTOR_HANDLE skySRV = {0};
-                     if (m_skyboxTextureHandle.IsValid()) {
-                         skySRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
-                     }
-                     m_skyRenderer->BeginFrame(cmdList, passCBAddr, skySRV);
-                     m_skyRenderer->DrawSky(cmdList, m_skyboxGeometryHandle, m_skyboxObjectCBAddress);
-                     m_skyRenderer->EndFrame();
-                 }
-
                  // 屏障：RenderTarget -> Present
                  D3D12_RESOURCE_BARRIER endBarrier = {};
                  endBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -674,12 +688,94 @@ void GameWorld::RegisterCubeRenderSystem() {
                  m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
              },
          .phase = TaskPhase::Render,
-         .threadType = ThreadType::Main,
+         .threadType = ThreadType::Render,
          .priority = TaskPriority::Normal,
          .renderPhase = RenderPhase::Opaque,
          .alwaysRun = true});
 }
 
+void GameWorld::RegisterSkyboxSystem() {
+    SystemRegistry::Register(
+        {.name = "SkyboxRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 if (!m_skyRenderer || !m_skyboxGeometryHandle.IsValid()) {
+                     return;
+                 }
+
+                 // 获取命令列表等渲染资源
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+                 // ====================================================================
+                 // 1. 获取资源
+                 // ====================================================================
+                 auto backBuffer = m_context->GetBackBuffer();
+                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
+                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
+                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
+
+                 D3D12_GPU_DESCRIPTOR_HANDLE skySRV = {0};
+                 if (m_skyboxTextureHandle.IsValid()) {
+                     skySRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
+                 }
+
+                 // ====================================================================
+                 // 2. 资源屏障：确保 BackBuffer 处于 RENDER_TARGET 状态
+                 // ====================================================================
+                 D3D12_RESOURCE_BARRIER barrier = {};
+                 barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 barrier.Transition.pResource = backBuffer;
+                 barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+                 barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &barrier);
+
+                 // ====================================================================
+                 // 3. 设置渲染目标、视口、裁剪矩形
+                 // ====================================================================
+                 const auto &viewport = m_context->DeviceContext->GetViewport();
+                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
+                 cmdList.Get()->RSSetViewports(1, &viewport);
+                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+                 // ====================================================================
+                 // 4. 设置描述符堆
+                 // ====================================================================
+                 ID3D12DescriptorHeap *descriptorHeaps[] = {
+                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+
+                 // ====================================================================
+                 // 5. 渲染天空盒
+                 // ====================================================================
+                 m_skyRenderer->BeginFrame(cmdList, passCBAddr, skySRV);
+                 m_skyRenderer->DrawSky(cmdList, m_skyboxGeometryHandle, m_skyboxObjectCBAddress);
+                 m_skyRenderer->EndFrame();
+
+                 // ====================================================================
+                 // 6. 屏障：转换回 PRESENT 状态（供下一阶段或 Present 使用）
+                 // ====================================================================
+                 barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+                 cmdList.Get()->ResourceBarrier(1, &barrier);
+
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PostProcess, cmdListHandle);
+
+                 uint64_t sequence = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Render,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::PostProcess,
+         .alwaysRun = true});
+}
 void GameWorld::CreateTerrain() {
     if (!m_registry || !m_renderer || !m_context) {
         return;
@@ -697,8 +793,8 @@ void GameWorld::CreateTerrain() {
 
 void GameWorld::CreateTerrainMesh() {
     // 地形参数
-    float width = 100.0f;    // 地形宽度（X 轴）
-    float depth = 100.0f;    // 地形深度（Z 轴）
+    float width = 256.0f;    // 地形宽度（X 轴）
+    float depth = 256.0f;    // 地形深度（Z 轴）
     float maxHeight = 20.0f; // 最大高度
     uint32_t segments = 257; // 257x257 网格（256x256 个格子）
 
@@ -888,4 +984,262 @@ void GameWorld::CreateTerrainMaterial() {
     if (!m_terrainMaterialHandle.IsValid()) {
         m_context->Logging->Error("[GameWorld] Terrain material handle is invalid");
     }
+}
+
+void GameWorld::CreateWater() {
+    if (!m_registry || !m_renderer || !m_context)
+        return;
+
+    // 1. 生成水面几何体（20x20 平面，64x64 细分）
+    GeometryGenerator geoGen;
+    auto meshData = geoGen.CreateGrid(256.0f, 256.0f, 64, 64); // width, depth, m, n
+
+    // 2. 创建 GPU 资源（与 CreateTestCube 相同流程）
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto device = m_context->DeviceContext->GetDevice();
+
+    size_t vbSize = meshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
+    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
+    if (vbResource) {
+        void *vbMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        vbResource->Map(0, &readRange, &vbMapped);
+        memcpy(vbMapped, meshData.Vertices.data(), vbSize);
+        vbResource->Unmap(0, nullptr);
+    }
+
+    size_t ibSize = meshData.Indices32.size() * sizeof(uint32_t);
+    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
+    if (ibResource) {
+        void *ibMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        ibResource->Map(0, &readRange, &ibMapped);
+        memcpy(ibMapped, meshData.Indices32.data(), ibSize);
+        ibResource->Unmap(0, nullptr);
+    }
+
+    // 3. 构建 TriangleMesh（水面使用三角形网格）
+    TriangleMesh waterMesh;
+    waterMesh.vertexBufferHandle = vbHandle;
+    waterMesh.indexBufferHandle = ibHandle;
+    waterMesh.vertexCount = static_cast<uint32_t>(meshData.Vertices.size());
+    waterMesh.indexCount = static_cast<uint32_t>(meshData.Indices32.size());
+    waterMesh.vertexStride = sizeof(GeometryGenerator::Vertex);
+    waterMesh.indexFormat = DXGI_FORMAT_R32_UINT;
+    waterMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    waterMesh.isGpuReady = true;
+
+    // 计算包围盒
+    BoundingAABB bounds;
+    bounds.min = XMFLOAT3(-10.0f, 0.0f, -10.0f);
+    bounds.max = XMFLOAT3(10.0f, 0.0f, 10.0f);
+
+    auto &geoMgr = m_context->GeometryResourceManager;
+    GeometryHandle geoHandle = geoMgr->RegisterTriangleMesh(waterMesh);
+
+    // 4. 创建 LODMesh
+    LODMesh lodMesh;
+    lodMesh.lodChain = {geoHandle};
+    LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
+
+    // 5. 创建实体
+    m_waterEntity = m_registry->CreateEntity();
+
+    XMFLOAT3 position(0.0f, 0.0f, 0.0f); // 在地形高度范围内
+    XMFLOAT3 rotation(0.0f, 0.0f, 0.0f);
+    XMFLOAT3 scale(1.0f, 1.0f, 1.0f);
+    m_registry->AddComponent<TransformComponent>(m_waterEntity, position, rotation, scale);
+
+    // 使用 TransparentMeshComponent
+    TransparentMeshComponent meshComp;
+    meshComp.lodMeshHandle = lodHandle;
+    meshComp.localBounds = bounds;
+    meshComp.materialHandle = m_waterMaterialHandle;
+    meshComp.textureHandle = m_waterTextureHandle;
+    m_registry->AddComponent<TransparentMeshComponent>(m_waterEntity, std::move(meshComp));
+
+    // 绘制调用
+    RegisterWaterRenderSystem();
+}
+
+void GameWorld::RegisterWaterRenderSystem() {
+    SystemRegistry::Register(
+        {.name = "WaterRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 if (m_context->transparentRenderQueue.Empty()) {
+                     return;
+                 }
+
+                 //  每二十帧输出一次
+                 static int frameCount = 0;
+                 frameCount++;
+                 if (frameCount % 20 == 0) {
+                     auto &transform = registry.GetComponent<TransformComponent>(m_waterEntity);
+                     std::wstring debugStr = std::wstring(L"Water position: ") + std::to_wstring(transform.position.x) +
+                                             L", " + std::to_wstring(transform.position.y) + L", " +
+                                             std::to_wstring(transform.position.z) + L"\n";
+                     OutputDebugStringW(debugStr.c_str());
+                 }
+
+                 // 获取命令列表等渲染资源
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+                 // 屏障：确保 BackBuffer 处于 RENDER_TARGET 状态
+                 auto backBuffer = m_context->GetBackBuffer();
+                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
+                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
+
+                 D3D12_RESOURCE_BARRIER barrier = {};
+                 barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 barrier.Transition.pResource = backBuffer;
+                 barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+                 barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &barrier);
+
+                 // 设置视口、裁剪矩形、渲染目标
+                 const auto &viewport = m_context->DeviceContext->GetViewport();
+                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
+                 cmdList.Get()->RSSetViewports(1, &viewport);
+                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+                 // 设置描述符堆
+                 ID3D12DescriptorHeap *descriptorHeaps[] = {
+                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+
+                 // 获取 Pass Constant Buffer 地址
+                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
+                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
+                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
+
+                 // 开始渲染（透明物体使用 OpaqueRenderer 但 PSO 不同？需要单独的 TransparentRenderer）
+                 m_waterRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV,
+                                             m_context->WaterCBAddress);
+
+                 // 遍历透明物体队列
+                 const auto &renderQueue = m_context->transparentRenderQueue;
+                 for (const auto &item : renderQueue.GetItems()) {
+                     if (!item.IsValid())
+                         continue;
+                     D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};
+                     if (m_skyboxTextureHandle.IsValid()) {
+                         envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
+                     }
+                     m_waterRenderer->DrawWater(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
+                                                item.textureSRV, envMapSRV);
+                 }
+
+                 m_waterRenderer->EndFrame();
+
+                 // 屏障：转换回 PRESENT 状态
+                 barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+                 cmdList.Get()->ResourceBarrier(1, &barrier);
+
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Transparent, cmdListHandle);
+
+                 uint64_t sequence = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Render,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::Transparent,
+         .alwaysRun = true});
+}
+
+void GameWorld::LoadWaterTexture() {
+    DDSTextureInfo ddsInfo;
+    std::wstring texturePath = L"Content/Textures/water1.dds";
+
+    if (!AssetLoader::GetInstance().LoadTextureFromFile(texturePath, ddsInfo)) {
+        m_context->Logging->Error("[GameWorld] Failed to load water texture");
+        // 使用测试纹理作为 fallback
+        m_waterTextureHandle = m_testTextureHandle;
+        return;
+    }
+
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    ID3D12Device *device = m_context->DeviceContext->GetDevice();
+    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+
+    if (!gpuHandle.IsValid()) {
+        m_context->Logging->Error("[GameWorld] Failed to create water GPU texture");
+        m_waterTextureHandle = m_testTextureHandle;
+        return;
+    }
+
+    auto &descriptorHeaps = m_context->DescriptorHeaps;
+    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+
+    if (srvIndex == UINT32_MAX) {
+        m_context->Logging->Error("[GameWorld] Failed to allocate SRV for water texture");
+        gpuMgr.Release(gpuHandle, 0);
+        m_waterTextureHandle = m_testTextureHandle;
+        return;
+    }
+
+    // 创建 SRV
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = ddsInfo.desc.Format;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+
+    // 注册到 TextureManager
+    TextureManager *texMgr = m_context->TextureMgr;
+    m_waterTextureHandle = texMgr->RegisterTexture(gpuHandle, srvIndex);
+
+    // 上传纹理数据
+    uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+    auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+    auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+    auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+    auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+    std::vector<D3D12_SUBRESOURCE_DATA> subresources = ddsInfo.subresources;
+
+    UINT64 requiredSize =
+        GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
+
+    GpuResourceHandle uploadHandle =
+        gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+    auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
+                                                         D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdList.Get()->ResourceBarrier(1, &barrier1);
+
+    UpdateSubresources(cmdList.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadHandle), 0, 0,
+                       static_cast<UINT>(subresources.size()), subresources.data());
+
+    auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    cmdList.Get()->ResourceBarrier(1, &barrier2);
+
+    cmdList.Close();
+
+    m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
+    m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+    uint64_t sequence = m_context->GetNextSequence();
+    gpuMgr.Release(uploadHandle, sequence);
+
+    m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+    m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+
+    m_context->Logging->Info("[GameWorld] Water texture loaded successfully");
 }

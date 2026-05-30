@@ -39,11 +39,16 @@ public:
     void SetTextureManager(Resource::TextureManager *manager) { m_textureManager = manager; }
 
     void Execute(ECS::Registry &registry, const CullingResult &cullingResult, const LODResult &lodResult,
-                 RenderQueue &outQueue);
+                 RenderQueue &outOpaqueQueue, RenderQueue &outTransparentQueue);
 
 private:
     float CalculateDepth(const DirectX::XMFLOAT3 &pos, const DirectX::XMFLOAT3 &cameraPos) const;
     uint64_t BuildSortKey(uint32_t materialIndex, float depth, bool isTransparent) const;
+
+    template <typename MeshCompType>
+    void BuildRenderItem(ECS::Registry &registry, ECS::Entity entity, MeshCompType &meshComp,
+                         const LODResult &lodResult, const DirectX::XMFLOAT3 &cameraPos, RenderQueue &outQueue,
+                         bool isTransparent);
 
     CameraManager *m_cameraManager = nullptr;
     FrameResourceManager *m_frameResourceManager = nullptr;

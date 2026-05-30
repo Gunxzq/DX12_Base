@@ -61,10 +61,12 @@ private:
     void FreeIndex(uint32_t index);
     void MarkDirty() { m_dirty = true; }
 
-    std::vector<MaterialEntry> m_entries;               // index → 条目
-    std::vector<uint32_t> m_freeList;                   // 空闲索引
-    std::unordered_map<TypeHash, uint32_t> m_idToIndex; // 资产ID → index
-    std::unordered_map<uint64_t, std::vector<uint32_t>> m_rendererMap;
+    std::vector<MaterialEntry> m_entries; // index → 条目
+    std::vector<uint32_t> m_freeList;     // 空闲索引
+
+    // 映射
+    std::unordered_map<TypeHash, uint32_t> m_idToIndex;                // 资产ID → index
+    std::unordered_map<uint64_t, std::vector<uint32_t>> m_rendererMap; // 渲染器类型 → 材质索引列表
 
     D3D12_GPU_DESCRIPTOR_HANDLE m_materialBufferSRV = {0};
     bool m_dirty = false;

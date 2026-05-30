@@ -87,6 +87,27 @@ void LODSystem::Execute(ECS::Registry &registry, LODResult &outResult) {
         // 写入临时结构
         outResult.SetHandle(entity, geometryHandle);
     }
+
+    // 透明物体
+    auto transparentView = registry.view<ECS::TransparentMeshComponent, ECS::TransformComponent>();
+    for (auto entity : transparentView) {
+        auto &meshComp = transparentView.get<ECS::TransparentMeshComponent>(entity);
+        auto &transform = transparentView.get<ECS::TransformComponent>(entity);
+
+        const Resource::LODMesh *lodMesh = GetLODMesh(meshComp.lodMeshHandle);
+        if (!lodMesh || !lodMesh->IsValid())
+            continue;
+
+        float distance = CalculateDistance(transform.position, cameraPos);
+        uint32_t requestedIndex = m_lodConfig.GetLODIndex(distance);
+        Resource::GeometryHandle geometryHandle = ResolveGeometryHandle(*lodMesh, requestedIndex);
+        if (!geometryHandle.IsValid()) {
+            geometryHandle = lodMesh->GetHighestLOD();
+            if (!geometryHandle.IsValid())
+                continue;
+        }
+        outResult.SetHandle(entity, geometryHandle);
+    }
 }
 
 // ============================================================================

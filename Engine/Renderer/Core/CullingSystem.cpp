@@ -42,6 +42,12 @@ void CullingSystem::Execute(ECS::Registry &registry, CullingResult &outResult) {
         // 当前阶段：所有实体都可见
         outResult.SetVisible(entity);
     }
+
+    // 透明
+    auto transparentView = registry.view<ECS::TransparentMeshComponent, ECS::TransformComponent>();
+    for (auto entity : transparentView) {
+        outResult.SetVisible(entity);
+    }
 }
 
 // ============================================================================

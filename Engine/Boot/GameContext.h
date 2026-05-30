@@ -104,11 +104,16 @@ public:
     // PreRender 阶段的临时结果（每帧重置）
     Renderer::CullingResult cullingResult; // 改为 CullingResult 类型
     Renderer::LODResult lodResult;         // 改为 LODResult 类型
+
+    // 实体队列与透明队列
     Renderer::RenderQueue renderQueue;
+    Renderer::RenderQueue transparentRenderQueue;
 
     Renderer::CullingSystem *CullingSystem = nullptr;
     Renderer::LODSystem *LODSystem = nullptr;
     Renderer::RenderItemBuilder *RenderItemBuilder = nullptr;
+
+    D3D12_GPU_VIRTUAL_ADDRESS WaterCBAddress = 0;
 
     // ── 便捷访问方法 ──
     bool IsValid() const;
