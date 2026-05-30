@@ -47,5 +47,16 @@ struct MeshComponent {
     Math::BoundingVolumeVariant localBounds;
     bool IsValid() const { return lodMeshHandle.IsValid(); }
 };
+
+// 透明网格组件（用于水、玻璃等）
+struct TransparentMeshComponent {
+    Resource::LODMeshHandle lodMeshHandle;
+    Resource::MaterialHandle materialHandle;
+    Resource::TextureHandle textureHandle;
+
+    Math::BoundingVolumeVariant localBounds;
+    bool IsValid() const { return lodMeshHandle.IsValid(); }
+};
+
 } // namespace ECS
 } // namespace DX12Engine

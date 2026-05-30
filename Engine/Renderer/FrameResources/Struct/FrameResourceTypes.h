@@ -138,20 +138,18 @@ struct FogConstants {
 // ============================================================================
 
 struct WaterConstants {
-    DirectX::XMFLOAT4X4 World;             // 物体变换矩阵
-    DirectX::XMFLOAT4X4 WorldInvTranspose; // 物体逆变换矩阵的转置
-    float Time;                            // 时间
-    float WaveAmplitude;                   // 波幅
-    float WaveFrequency;                   // 波频
-    float WaveSpeed;                       // 波速
-    float RefractionStrength;              // 折射强度
-    float FresnelPower;                    // 斯涅尔功率
-    float FoamIntensity;                   // 泡泡强度
-    float Pad;                             // 填充
-    uint32_t ReflectionTextureIndex;       // 反射纹理索引
-    uint32_t RefractionTextureIndex;       // 折射纹理索引
-    uint32_t DepthTextureIndex;            // 深度纹理索引
-    uint32_t NormalTextureIndex;           // 法线纹理索引
+    float Time;                      // 时间
+    float WaveAmplitude;             // 波幅
+    float WaveFrequency;             // 波频
+    float WaveSpeed;                 // 波速
+    float RefractionStrength;        // 折射强度
+    float FresnelPower;              // 斯涅尔功率
+    float FoamIntensity;             // 泡泡强度
+    uint32_t ReflectionTextureIndex; // 反射纹理索引
+    uint32_t RefractionTextureIndex; // 折射纹理索引
+    uint32_t DepthTextureIndex;      // 深度纹理索引
+    uint32_t NormalTextureIndex;     // 法线纹理索引
+    float Pad;                       // 填充
 };
 
 // ============================================================================
