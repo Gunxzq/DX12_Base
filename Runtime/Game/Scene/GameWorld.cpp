@@ -12,6 +12,7 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
+#include "Renderer/Pipeline/SkyRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/LightManager.h"
 #include "Renderer/Utils/GeometryGenerator.h"
@@ -51,6 +52,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
 
     LoadTestTexture();
     CreateMaterials();
+    CreateSkybox();
     CreateTestCube();
     CreateTerrain();
 }
@@ -398,6 +400,159 @@ void GameWorld::CreateMaterials() {
     m_context->Logging->Info("[GameWorld] Material buffer created and SRV set");
 }
 
+void GameWorld::CreateSkybox() {
+    m_skyRenderer = std::make_unique<SkyRenderer>();
+    m_skyRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_skyRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
+    m_skyRenderer->Initialize();
+
+    // ========================================================================
+    // 1. 加载天空盒纹理 (snowcube1024.dds)
+    // ========================================================================
+    DDSTextureInfo ddsInfo;
+    std::wstring texturePath = L"Content/Textures/snowcube1024.dds";
+
+    if (!AssetLoader::GetInstance().LoadTextureFromFile(texturePath, ddsInfo)) {
+        m_context->Logging->Error("[GameWorld] Failed to load skybox texture");
+        return;
+    }
+
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    ID3D12Device *device = m_context->DeviceContext->GetDevice();
+
+    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+
+    if (!gpuHandle.IsValid()) {
+        m_context->Logging->Error("[GameWorld] Failed to create skybox GPU texture");
+        return;
+    }
+
+    auto &descriptorHeaps = m_context->DescriptorHeaps;
+    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+
+    if (srvIndex == UINT32_MAX) {
+        m_context->Logging->Error("[GameWorld] Failed to allocate SRV for skybox");
+        gpuMgr.Release(gpuHandle, 0);
+        return;
+    }
+
+    // 创建立方体贴图 SRV
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = ddsInfo.desc.Format;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+    srvDesc.TextureCube.MipLevels = ddsInfo.desc.MipLevels;
+    srvDesc.TextureCube.MostDetailedMip = 0;
+    srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+
+    // 注册到 TextureManager
+    TextureManager *texMgr = m_context->TextureMgr;
+    m_skyboxTextureHandle = texMgr->RegisterTexture(gpuHandle, srvIndex);
+
+    // 上传纹理数据
+    uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+    auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+    auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+    auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+    auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+    std::vector<D3D12_SUBRESOURCE_DATA> subresources = ddsInfo.subresources;
+
+    UINT64 requiredSize =
+        GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
+
+    GpuResourceHandle uploadHandle =
+        gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+    auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
+                                                         D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdList.Get()->ResourceBarrier(1, &barrier1);
+
+    UpdateSubresources(cmdList.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadHandle), 0, 0,
+                       static_cast<UINT>(subresources.size()), subresources.data());
+
+    auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    cmdList.Get()->ResourceBarrier(1, &barrier2);
+
+    cmdList.Close();
+
+    m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
+    m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+    uint64_t sequence = m_context->GetNextSequence();
+    gpuMgr.Release(uploadHandle, sequence);
+
+    m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+    m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+
+    m_context->Logging->Info("[GameWorld] Skybox texture loaded successfully");
+
+    // ========================================================================
+    // 2. 创建天空盒几何体（单位立方体）
+    // ========================================================================
+    GeometryGenerator geoGen;
+    auto skyMeshData = geoGen.CreateBox(1.0f, 1.0f, 1.0f, 0);
+
+    size_t vbSize = skyMeshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
+    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
+
+    if (vbResource) {
+        void *vbMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        vbResource->Map(0, &readRange, &vbMapped);
+        memcpy(vbMapped, skyMeshData.Vertices.data(), vbSize);
+        vbResource->Unmap(0, nullptr);
+    }
+
+    size_t ibSize = skyMeshData.Indices32.size() * sizeof(uint32_t);
+    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
+
+    if (ibResource) {
+        void *ibMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        ibResource->Map(0, &readRange, &ibMapped);
+        memcpy(ibMapped, skyMeshData.Indices32.data(), ibSize);
+        ibResource->Unmap(0, nullptr);
+    }
+
+    TriangleMesh skyTriangleMesh;
+    skyTriangleMesh.vertexBufferHandle = vbHandle;
+    skyTriangleMesh.indexBufferHandle = ibHandle;
+    skyTriangleMesh.vertexCount = static_cast<uint32_t>(skyMeshData.Vertices.size());
+    skyTriangleMesh.indexCount = static_cast<uint32_t>(skyMeshData.Indices32.size());
+    skyTriangleMesh.vertexStride = sizeof(GeometryGenerator::Vertex);
+    skyTriangleMesh.indexFormat = DXGI_FORMAT_R32_UINT;
+    skyTriangleMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    skyTriangleMesh.isGpuReady = true;
+
+    m_skyboxGeometryHandle = m_context->GeometryResourceManager->RegisterTriangleMesh(skyTriangleMesh);
+
+    if (!m_skyboxGeometryHandle.IsValid()) {
+        m_context->Logging->Error("[GameWorld] Failed to register skybox geometry");
+        return;
+    }
+
+    // ========================================================================
+    // 3. 创建天空盒 Object CB（单位矩阵，cbPerObject slot 0）
+    // ========================================================================
+    ObjectConstants skyObjCB;
+    DirectX::XMStoreFloat4x4(&skyObjCB.World, DirectX::XMMatrixIdentity());
+    DirectX::XMStoreFloat4x4(&skyObjCB.WorldInvTranspose, DirectX::XMMatrixIdentity());
+    DirectX::XMStoreFloat4x4(&skyObjCB.PrevWorld, DirectX::XMMatrixIdentity());
+    skyObjCB.MaterialIndex = 0;
+    skyObjCB.ReceiveShadow = 0;
+
+    m_skyboxObjectCBAddress = m_context->FrameResourceManager->AllocateObjectCB(&skyObjCB, sizeof(ObjectConstants));
+
+    m_context->Logging->Info("[GameWorld] Skybox created successfully");
+}
+
 void GameWorld::RegisterRotationSystem() {
     SystemRegistry::Register({.name = "CubeRotationSystem",
                               .func =
@@ -488,6 +643,19 @@ void GameWorld::RegisterCubeRenderSystem() {
                                           item.textureSRV, envMapSRV);
                  }
                  m_renderer->EndFrame();
+
+                 // ========================================================================
+                 // 绘制天空盒（在实体渲染之后、Present 屏障之前）
+                 // ========================================================================
+                 if (m_skyRenderer && m_skyboxGeometryHandle.IsValid()) {
+                     D3D12_GPU_DESCRIPTOR_HANDLE skySRV = {0};
+                     if (m_skyboxTextureHandle.IsValid()) {
+                         skySRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
+                     }
+                     m_skyRenderer->BeginFrame(cmdList, passCBAddr, skySRV);
+                     m_skyRenderer->DrawSky(cmdList, m_skyboxGeometryHandle, m_skyboxObjectCBAddress);
+                     m_skyRenderer->EndFrame();
+                 }
 
                  // 屏障：RenderTarget -> Present
                  D3D12_RESOURCE_BARRIER endBarrier = {};

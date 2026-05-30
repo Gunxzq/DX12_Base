@@ -165,14 +165,18 @@ void SkyRenderer::CreateRootSignature() {
     slotRootParameter[2].InitAsDescriptorTable(1, &envMapTable, D3D12_SHADER_VISIBILITY_PIXEL); // t10
 
     // ========================================================================
-    // 静态采样器 (只需要线性环绕)
+    // 静态采样器: s2 (线性环绕) 和 s4 (各向异性环绕)
+    // Common_PBR.hlsl 中 gSamplerAnisotropicWrap : register(s4)
     // ========================================================================
-    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1];
-    staticSamplers[0].Init(2, // register s2
+    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[2];
+    staticSamplers[0].Init(2, // register s2: gSamplerLinearWrap
                            D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                            D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    staticSamplers[1].Init(4, // register s4: gSamplerAnisotropicWrap
+                           D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(3, slotRootParameter, 1, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(3, slotRootParameter, 2, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -192,9 +196,12 @@ void SkyRenderer::CreateRootSignature() {
 void SkyRenderer::CreatePSO() {
     auto device = m_context->GetDevice();
 
-    // 输入布局: 只需要位置 (天空盒不需要法线、切线、UV)
+    // 输入布局: 位置、法线、纹理坐标 (对齐 Sky.hlsl VertexIn)
+    // GeometryGenerator::Vertex 布局: Position(12) + Normal(12) + TangentU(12) + TexC(8) = 44
     D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = {inputLayout, _countof(inputLayout)};
@@ -202,7 +209,10 @@ void SkyRenderer::CreatePSO() {
     psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsBlob->GetBufferPointer()), m_vsBlob->GetBufferSize()};
     psoDesc.PS = {reinterpret_cast<BYTE *>(m_psBlob->GetBufferPointer()), m_psBlob->GetBufferSize()};
 
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    // 天空盒从内部看，剔除正面保留背面
+    CD3DX12_RASTERIZER_DESC rasterDesc(D3D12_DEFAULT);
+    rasterDesc.CullMode = D3D12_CULL_MODE_FRONT;
+    psoDesc.RasterizerState = rasterDesc;
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 
     // 深度状态: 使用 LESS_EQUAL，允许深度等于远平面

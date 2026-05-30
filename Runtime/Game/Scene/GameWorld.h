@@ -20,6 +20,7 @@ class Registry;
 }
 namespace Renderer {
 class OpaqueRenderer;
+class SkyRenderer;
 }
 } // namespace DX12Engine
 
@@ -46,6 +47,7 @@ public:
     void LoadTestTexture();
     void CreateTerrain();
     void CreateMaterials();
+    void CreateSkybox();
 
 private:
     void RegisterRotationSystem();
@@ -61,10 +63,17 @@ private:
     DX12Engine::ECS::Registry *m_registry = nullptr;
     DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
 
+    std::unique_ptr<DX12Engine::Renderer::SkyRenderer> m_skyRenderer; // 天空盒渲染器
+
     DX12Engine::Resource::TextureHandle m_testTextureHandle; // 存储纹理句柄
     DX12Engine::Resource::MaterialHandle m_cubeMaterialHandle;
     DX12Engine::Resource::GpuResourceHandle m_materialBufferHandle; // 材质数组 GPU Buffer 句柄
     DX12Engine::ECS::Entity m_cubeEntity;
+
+    // 天空盒数据
+    DX12Engine::Resource::TextureHandle m_skyboxTextureHandle;   // 天空盒纹理 SRV
+    DX12Engine::Resource::GeometryHandle m_skyboxGeometryHandle; // 天空盒几何体
+    D3D12_GPU_VIRTUAL_ADDRESS m_skyboxObjectCBAddress = 0;       // 天空盒单位矩阵 CBV 地址
 
     // 地形数据
     DX12Engine::Resource::TerrainMeshData m_terrainMeshData;
