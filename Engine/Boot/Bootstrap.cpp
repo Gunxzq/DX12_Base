@@ -366,11 +366,6 @@ GameContext *Bootstrap::CreateContext() {
     m_context->TextureMgr = &m_textureManager;
     m_context->CullingSystem = &m_cullingSystem;
     m_context->LODSystem = &m_lodSystem;
-    m_context->RenderItemBuilder = &m_renderItemBuilder;
-    m_context->RenderItemBuilder->SetFrameResourceManager(&m_frameResourceManager);
-    m_context->RenderItemBuilder->SetMaterialManager(&m_materialManager);
-    m_context->RenderItemBuilder->SetTextureManager(&m_textureManager);
-    m_context->RenderItemBuilder->SetCameraManager(m_context->CameraMgr);
 
     if (m_frameDriver) {
         m_frameDriver->SetGameContext(m_context.get());

@@ -92,6 +92,7 @@ void FrameResourceManager::BeginFrame(uint64_t completedFence, uint64_t nextFenc
     m_skinning.Reclaim(completedFence);
     m_instance.Reclaim(completedFence);
     m_light.Reclaim(completedFence);
+    m_waterCB.Reclaim(completedFence);
 
     m_currentFence = nextFence;
 }

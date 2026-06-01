@@ -2,6 +2,9 @@
 
 #include "ECS/Core/Entity.h"
 #include "Math/BoundingVolume.h"
+#include "Renderer/RenderItemBuilder/OpaqueRenderItemBuilder.h"
+#include "Renderer/RenderItemBuilder/TRenderQueue.h"
+#include "Renderer/RenderItemBuilder/TransparentRenderItemBuilder.h"
 #include "Resource/AssetLoader/Loader/TerrainLoader.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/MaterialHandle.h"
@@ -54,6 +57,12 @@ public:
     void CreateSkybox();
     void CreateWater();
 
+    // 每帧 PreRender 阶段：收集实体并构建渲染队列
+    void BuildRenderQueue();
+
+    // 注册水常量立即回调（每帧上传水波动画数据）
+    void RegisterWaterConstantsCallback();
+
 private:
     void RegisterRotationSystem();
     void RegisterCubeRenderSystem();
@@ -72,6 +81,13 @@ private:
     DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
     std::unique_ptr<DX12Engine::Renderer::SkyRenderer> m_skyRenderer; // 天空盒渲染器
     std::unique_ptr<DX12Engine::Renderer::WaterRenderer> m_waterRenderer;
+
+    // 新的构建器和渲染队列（由 GameWorld 持有）
+    std::unique_ptr<DX12Engine::Renderer::OpaqueRenderItemBuilder> m_opaqueBuilder;
+    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::OpaqueRenderItem> m_opaqueQueue;
+
+    std::unique_ptr<DX12Engine::Renderer::TransparentRenderItemBuilder> m_transparentBuilder;
+    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::TransparentRenderItem> m_transparentQueue;
 
     DX12Engine::Resource::TextureHandle m_testTextureHandle; // 存储纹理句柄
     DX12Engine::Resource::MaterialHandle m_cubeMaterialHandle;
@@ -94,4 +110,5 @@ private:
     DX12Engine::Resource::MaterialHandle m_waterMaterialHandle;
     DX12Engine::Resource::TextureHandle m_waterTextureHandle;
     DX12Engine::ECS::Entity m_waterEntity;
+    D3D12_GPU_VIRTUAL_ADDRESS m_waterCBAddress = 0;
 };

@@ -42,9 +42,6 @@ using namespace DX12Engine::Resource;
 using namespace DX12Engine::Scheduler;
 using namespace DX12Engine::Math;
 
-using RendererGroup = std::unordered_map<uint64_t, std::vector<const RenderItem *>>;
-RendererGroup groups;
-
 GameWorld::GameWorld() = default;
 GameWorld::~GameWorld() = default;
 
@@ -53,6 +50,15 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_registry = context->Registry;
     m_renderer = renderer;
 
+    // 初始化新的 OpaqueRenderItemBuilder
+    m_opaqueBuilder = std::make_unique<OpaqueRenderItemBuilder>(m_context->FrameResourceManager, m_context->MaterialMgr,
+                                                                m_context->TextureMgr);
+
+    // 初始化新的 TransparentRenderItemBuilder（需要相机用于远到近排序）
+    m_transparentBuilder = std::make_unique<TransparentRenderItemBuilder>(
+        m_context->FrameResourceManager, m_context->MaterialMgr, m_context->TextureMgr, m_context->CameraMgr);
+
+    // 初始化水渲染器
     m_waterRenderer = std::make_unique<WaterRenderer>();
     m_waterRenderer->SetDeviceContext(m_context->DeviceContext);
     m_waterRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
@@ -67,6 +73,9 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     CreateTestCube();
     CreateTerrain();
     CreateWater();
+
+    // 注册水常量立即回调（每帧上传水波动画数据）
+    RegisterWaterConstantsCallback();
 }
 
 void GameWorld::Clear() {
@@ -78,6 +87,51 @@ void GameWorld::Clear() {
         m_registry->DestroyEntity(m_cubeEntity);
         m_cubeEntity = INVALID_ENTITY;
     }
+}
+
+void GameWorld::BuildRenderQueue() {
+    if (!m_registry)
+        return;
+
+    // 设置每帧数据
+    m_opaqueBuilder->SetCullingResult(&m_context->cullingResult);
+    m_opaqueBuilder->SetLODResult(&m_context->lodResult);
+
+    m_transparentBuilder->SetCullingResult(&m_context->cullingResult);
+    m_transparentBuilder->SetLODResult(&m_context->lodResult);
+
+    // 构建不透明渲染队列
+    m_opaqueBuilder->BuildTyped(*m_registry, m_opaqueQueue);
+
+    // 构建透明渲染队列（从远到近排序）
+    m_transparentBuilder->BuildTyped(*m_registry, m_transparentQueue);
+}
+
+void GameWorld::RegisterWaterConstantsCallback() {
+    if (!m_context || !m_context->FrameDriver)
+        return;
+
+    m_context->FrameDriver->RegisterImmediateCallback(
+        [this]() {
+            const auto &passConstants = m_context->FrameResourceManager->GetPassConstants();
+
+            WaterConstants waterCB;
+            waterCB.Time = passConstants.TotalTime;
+            waterCB.WaveAmplitude = 0.5f + sin(passConstants.TotalTime * 0.5f) * 0.2f;
+            waterCB.WaveSpeed = 1.5f;
+            waterCB.WaveFrequency = 2.0f;
+            waterCB.RefractionStrength = 0.3f;
+            waterCB.FresnelPower = 2.0f;
+            waterCB.FoamIntensity = 0.5f;
+            waterCB.ReflectionTextureIndex = 0;
+            waterCB.RefractionTextureIndex = 0;
+            waterCB.DepthTextureIndex = 0;
+            waterCB.NormalTextureIndex = 0;
+            waterCB.Pad = 0;
+
+            m_waterCBAddress =
+                m_context->FrameResourceManager->AllocateWaterCB(&waterCB, sizeof(WaterConstants));
+        });
 }
 
 void GameWorld::CreateTestCube() {
@@ -604,8 +658,7 @@ void GameWorld::RegisterCubeRenderSystem() {
         {.name = "CubeRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
-                 if (m_context->renderQueue.Empty()) {
-                     ;
+                 if (m_opaqueQueue.Empty()) {
                      return;
                  }
 
@@ -660,9 +713,8 @@ void GameWorld::RegisterCubeRenderSystem() {
                  // 开始渲染
                  m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
 
-                 // 遍历所有带 MeshComponent 和 TransformComponent 的实体并渲染
-                 const auto &renderQueue = m_context->renderQueue;
-                 for (const auto &item : renderQueue.GetItems()) {
+                 // 使用 GameWorld 自己的队列
+                 for (const auto &item : m_opaqueQueue) {
                      if (!item.IsValid())
                          continue;
                      D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}; // TODO: 从场景获取
@@ -1069,7 +1121,7 @@ void GameWorld::RegisterWaterRenderSystem() {
         {.name = "WaterRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
-                 if (m_context->transparentRenderQueue.Empty()) {
+                 if (m_transparentQueue.Empty()) {
                      return;
                  }
 
@@ -1121,13 +1173,12 @@ void GameWorld::RegisterWaterRenderSystem() {
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
-                 // 开始渲染（透明物体使用 OpaqueRenderer 但 PSO 不同？需要单独的 TransparentRenderer）
-                 m_waterRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV,
-                                             m_context->WaterCBAddress);
+                // 开始渲染
+                m_waterRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV,
+                                            m_waterCBAddress);
 
-                 // 遍历透明物体队列
-                 const auto &renderQueue = m_context->transparentRenderQueue;
-                 for (const auto &item : renderQueue.GetItems()) {
+                 // 遍历透明物体队列（使用新的 TRenderQueue<TransparentRenderItem>）
+                 for (const auto &item : m_transparentQueue.GetItems()) {
                      if (!item.IsValid())
                          continue;
                      D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};

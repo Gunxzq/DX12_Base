@@ -6,7 +6,6 @@
 #include "Platform/Windows/Window.h"
 #include "Renderer/Core/CullingSystem.h"
 #include "Renderer/Core/LODSystem.h"
-#include "Renderer/Core/RenderItemBuilder.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
@@ -87,7 +86,6 @@ private:
 
     Renderer::CullingSystem m_cullingSystem;
     Renderer::LODSystem m_lodSystem;
-    Renderer::RenderItemBuilder m_renderItemBuilder;
 
     // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问
 

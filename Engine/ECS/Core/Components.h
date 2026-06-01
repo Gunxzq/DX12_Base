@@ -38,11 +38,12 @@ struct TransformComponent {
 };
 
 // 网格组件 （GeometryHandle）
-// ECS/Core/Components.h
 struct MeshComponent {
     Resource::LODMeshHandle lodMeshHandle;
     Resource::MaterialHandle materialHandle;
     Resource::TextureHandle textureHandle;
+
+    bool receivesShadow = true;
 
     Math::BoundingVolumeVariant localBounds;
     bool IsValid() const { return lodMeshHandle.IsValid(); }

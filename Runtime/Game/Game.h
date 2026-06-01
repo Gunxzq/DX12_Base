@@ -4,7 +4,6 @@
 #include "Input/GameInputHandler.h"
 #include "Renderer/Core/CullingSystem.h"
 #include "Renderer/Core/LODSystem.h"
-#include "Renderer/Core/RenderItemBuilder.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/Scene/LightManager.h"
 #include "Scene/GameWorld.h"
