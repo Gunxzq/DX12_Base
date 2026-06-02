@@ -67,32 +67,18 @@ using FrameSyncCallback = std::function<void()>;
  *
  * 执行流程（每帧）：
  * ```
- * EarlyUpdate Phase:
- *   - 执行输入、网络接收任务
- *   - 屏障同步
- *
- * Update Phase:
- *   - 执行 Gameplay、Physics 任务（并行）
- *   - 屏障同步
- *
- * LateUpdate Phase:
- *   - 执行动画、Transform 计算
- *   - 屏障同步
- *
- * PreRender Phase:
- *   - 执行视锥剔除、LOD
- *   - 屏障同步
- *
- * Frame Sync (关键):
- *   - 调用 L4 注册的 FrameSyncCallback
- *   - L4 在此执行自己的多缓冲交换（如 TransformBuffer.Swap()）
- *
- * Render Phase:
- *   - 渲染线程读取 L4 管理的 Front Buffer
- *   - Present
+ * 1. 消息处理：ProcessMessages + Input Update
+ * 2. DAG 构建：BuildFromBuckets 从消息构建本帧任务图
+ * 3. Immediate 回调：零延迟路径（相机、UI）
+ * 4. Render Phase：渲染提交（录制命令列表）
+ * 5. Update Phases：EarlyUpdate → Update → LateUpdate → PreRender
+ * 6. Frame Sync：L4 多缓冲交换回调
  * ```
  *
- * @note L3 不管理多缓冲，只提供同步时机。多缓冲由 L4 层自行实现。
+ * 关键设计原则：
+ * - 前台不 Merge 后台图，前后台仅通过 MessageDispatcher 通信
+ * - 前台每帧从消息构建任务图，不依赖后台状态
+ * - 后台图 m_backGraph 由 BackgroundExecutor 独立管理
  */
 class FrameDriver {
 public:
@@ -223,9 +209,6 @@ private:
     Renderer::D3D12DeviceContext *m_deviceContext = nullptr;
 
     Boot::GameContext *m_gameContext = nullptr;
-
-    // 双缓冲TaskGraph（避免每帧分配）
-    TaskGraph m_backGraph; // 后台构建的图
 
     // 渲染阶段命令列表收集器（使用 Handle 避免生命周期问题）
     using CmdListHandle = typename Renderer::CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle;
