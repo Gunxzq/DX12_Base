@@ -92,9 +92,15 @@ public:
     void EndFrame();
 
     /**
-     * @brief 等待 GPU 完成所有命令
+     * @brief 等待 GPU 完成所有命令（默认等待 Graphics 队列）
      */
     void FlushCommandQueue();
+
+    /**
+     * @brief 等待 GPU 完成指定类型队列的所有命令
+     * @param type 队列类型 (DIRECT / COMPUTE / COPY)
+     */
+    void FlushCommandQueue(D3D12_COMMAND_LIST_TYPE type);
 
     // ── 描述符访问 ──
     ID3D12CommandQueue *GetCommandQueue() const;

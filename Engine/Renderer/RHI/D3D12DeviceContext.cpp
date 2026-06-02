@@ -128,6 +128,8 @@ void D3D12DeviceContext::EndFrame() {
 
 void D3D12DeviceContext::FlushCommandQueue() { m_commandManager.Flush(D3D12_COMMAND_LIST_TYPE_DIRECT); }
 
+void D3D12DeviceContext::FlushCommandQueue(D3D12_COMMAND_LIST_TYPE type) { m_commandManager.Flush(type); }
+
 ID3D12CommandQueue *D3D12DeviceContext::GetCommandQueue() const {
     CommandQueue *queue = m_commandManager.GetGraphicsQueue();
     return queue ? queue->Get() : nullptr;

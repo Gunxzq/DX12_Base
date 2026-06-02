@@ -39,6 +39,7 @@
 #include "Async/AsyncLoadHelpers.h"
 #include "Async/BackgroundExecutor.h"
 #include "Async/CombineAssetsTask.h"
+#include "Async/ResourceTransitionTask.h"
 #include "Async/TerrainGPUCreateTask.h"
 #include "Async/TerrainLoadTask.h"
 
@@ -1330,7 +1331,7 @@ void GameWorld::LoadWaterTexture() {
 // ========================================================================
 void GameWorld::LoadTerrainAsync() {
     if (!m_context || !m_registry || !m_backgroundExecutor) {
-        m_context->Logging->Error("[LoadTerrainAsync] Invalid state: context=%p, registry=%p, executor=%p",
+        m_context->Logging->Error("[LoadTerrainAsync] Invalid state: context={}, registry={}, executor={}",
                                   static_cast<const void *>(m_context), static_cast<const void *>(m_registry),
                                   static_cast<const void *>(m_backgroundExecutor.get()));
         return;
@@ -1339,7 +1340,7 @@ void GameWorld::LoadTerrainAsync() {
     static std::atomic<uint32_t> s_nextRequestId{1};
     uint32_t requestId = s_nextRequestId++;
 
-    m_context->Logging->Info("[LoadTerrainAsync] Starting async terrain loading (request=%u)...", requestId);
+    m_context->Logging->Info("[LoadTerrainAsync] Starting async terrain loading (request={})...", requestId);
 
     // 创建 terrainData，用于在 GPU 创建 System 中访问
     Async::TerrainLoadDataPtr terrainData;
@@ -1350,13 +1351,13 @@ void GameWorld::LoadTerrainAsync() {
     std::string dataKey = "TerrainLoadData_" + std::to_string(requestId);
     Resource::AssetDataManager::GetInstance().StoreTypedData(dataKey, terrainData);
 
-    m_context->Logging->Info("[LoadTerrainAsync] Data stored in AssetDataManager, terrainData=%p, key=%s (request=%u)",
-                             static_cast<const void *>(terrainData.get()), dataKey.c_str(), requestId);
+    m_context->Logging->Info("[LoadTerrainAsync] Data stored in AssetDataManager, terrainData={}, key={} (request={})",
+                             static_cast<const void *>(terrainData.get()), dataKey, requestId);
 
     // 只提交 CPU 加载任务到 BackgroundExecutor
     m_backgroundExecutor->Submit(std::move(loadTask));
 
-    m_context->Logging->Info("[LoadTerrainAsync] Task submitted to BackgroundExecutor (pending=%zu, total=%zu)",
+    m_context->Logging->Info("[LoadTerrainAsync] Task submitted to BackgroundExecutor (pending={}, total={})",
                              m_backgroundExecutor->GetPendingCount(), m_backgroundExecutor->GetTotalSubmitted());
 }
 
@@ -1368,13 +1369,14 @@ void GameWorld::RegisterTerrainSystems() {
     // ---------------------------------------------------------------
     // System A: TerrainGPUCreateSystem
     // 响应 TerrainLoaded 事件 → 在 Render 线程创建 VB/IB + 上传纹理
+    // 【优化】不再 Flush()，异步提交 GPU 命令让 GPU 自行完成
     // ---------------------------------------------------------------
     SystemRegistry::Register(
         {.name = "TerrainGPUCreateSystem",
          .func =
              [this](Registry &reg, const MessageContext &ctx) {
                  uint32_t requestId = static_cast<uint32_t>(ctx.payload >> 32);
-                 m_context->Logging->Info("[TerrainGPUCreate] Triggered by TerrainLoaded (request=%u)", requestId);
+                 m_context->Logging->Info("[TerrainGPUCreate] Triggered by TerrainLoaded (request={})", requestId);
 
                  // 从 AssetDataManager 查找对应的 TerrainLoadData（线程安全）
                  std::string dataKey = "TerrainLoadData_" + std::to_string(requestId);
@@ -1383,13 +1385,13 @@ void GameWorld::RegisterTerrainSystems() {
 
                  if (!data || data->vertices.empty()) {
                      m_context->Logging->Error("[TerrainGPUCreate] No terrain data found in AssetDataManager "
-                                               "(request=%u, key=%s, data=%p, vtx=%zu)",
-                                               requestId, dataKey.c_str(), static_cast<const void *>(data.get()),
+                                               "(request={}, key={}, data={}, vtx={})",
+                                               requestId, dataKey, static_cast<const void *>(data.get()),
                                                data ? data->vertices.size() : 0);
                      return;
                  }
 
-                 m_context->Logging->Info("[TerrainGPUCreate] Creating VB/IB: %zu vertices, %zu indices (request=%u)",
+                 m_context->Logging->Info("[TerrainGPUCreate] Creating VB/IB: {} vertices, {} indices (request={})",
                                           data->vertices.size(), data->indices.size(), requestId);
 
                  ID3D12Device *device = m_context->DeviceContext->GetDevice();
@@ -1405,7 +1407,7 @@ void GameWorld::RegisterTerrainSystems() {
                      vbRes->Map(0, nullptr, &mapped);
                      memcpy(mapped, data->vertices.data(), vbSize);
                      vbRes->Unmap(0, nullptr);
-                     m_context->Logging->Info("[TerrainGPUCreate] VB created: handle=%u, size=%zu bytes",
+                     m_context->Logging->Info("[TerrainGPUCreate] VB created: handle={}, size={} bytes",
                                               vbHandle.index, vbSize);
                  } else {
                      m_context->Logging->Error("[TerrainGPUCreate] Failed to create VB!");
@@ -1421,7 +1423,7 @@ void GameWorld::RegisterTerrainSystems() {
                      ibRes->Map(0, nullptr, &mapped);
                      memcpy(mapped, data->indices.data(), ibSize);
                      ibRes->Unmap(0, nullptr);
-                     m_context->Logging->Info("[TerrainGPUCreate] IB created: handle=%u, size=%zu bytes",
+                     m_context->Logging->Info("[TerrainGPUCreate] IB created: handle={}, size={} bytes",
                                               ibHandle.index, ibSize);
                  } else {
                      m_context->Logging->Error("[TerrainGPUCreate] Failed to create IB!");
@@ -1442,16 +1444,13 @@ void GameWorld::RegisterTerrainSystems() {
 
                  auto handle = geoMgr->RegisterTriangleMesh(mesh);
                  m_terrainGeometryHandle = handle;
-                 m_context->Logging->Info("[TerrainGPUCreate] Geometry registered: handle(idx=%u, gen=%u)",
+                 m_context->Logging->Info("[TerrainGPUCreate] Geometry registered: handle(idx={}, gen={})",
                                           handle.index, handle.generation);
 
-                 m_context->Logging->Info(
-                     "[TerrainGPUCreate] Checking terrain texture handle: valid={}, index={}, generation={}",
-                     m_terrainTextureHandle.IsValid(), m_terrainTextureHandle.index, m_terrainTextureHandle.generation);
-
                  // ---- 上传地形纹理 (如果尚未上传) ----
+                 // 【优化】不再 Flush()，异步提交命令列表，让 GPU 自行完成
                  if (!m_terrainTextureHandle.IsValid()) {
-                     m_context->Logging->Info("[TerrainGPUCreate] Uploading terrain texture...");
+                     m_context->Logging->Info("[TerrainGPUCreate] Uploading terrain texture (async)...");
                      std::wstring texturePath = L"Content/Textures/heightmap.dds";
                      DDSTextureInfo ddsInfo;
                      if (AssetLoader::GetInstance().LoadTextureFromFile(texturePath, ddsInfo)) {
@@ -1475,50 +1474,75 @@ void GameWorld::RegisterTerrainSystems() {
                                  TextureManager *texMgr = m_context->TextureMgr;
                                  m_terrainTextureHandle = texMgr->RegisterTexture(gpuHandle, srvIndex);
 
-                                 // 上传纹理数据
-                                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-                                 auto allocatorHandle =
-                                     m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
-                                 auto allocator =
-                                     m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
-                                 auto cmdListHandle =
-                                     m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-                                 auto cmdList =
-                                     m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+                                // ── Step 1: COPY 队列 — 纯拷贝纹理数据（不含 ResourceBarrier）──
+                                // COPY 队列不支持 ResourceBarrier，因此拆分为两步：
+                                //   1) COPY 队列：COMMON → COPY_DEST (pre-barrier) + UpdateSubresources
+                                //   2) ResourceTransitionTask：等待 COPY 完成后，在 DIRECT 队列做
+                                //      COPY_DEST → PIXEL_SHADER_RESOURCE 转换
+                                // 两步均异步，不阻塞主渲染
+                                auto &cmdMgr = m_context->DeviceContext->GetCommandManager();
 
-                                 std::vector<D3D12_SUBRESOURCE_DATA> subresources = ddsInfo.subresources;
-                                 UINT64 requiredSize = GetRequiredIntermediateSize(
-                                     gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
-                                 GpuResourceHandle uploadHandle = gpuMgr.CreateBuffer(
-                                     device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                                // 计算所需的上传缓冲区大小
+                                std::vector<D3D12_SUBRESOURCE_DATA> subresources = ddsInfo.subresources;
+                                UINT64 requiredSize = GetRequiredIntermediateSize(
+                                    gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
+                                GpuResourceHandle uploadHandle = gpuMgr.CreateBuffer(
+                                    device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
-                                 auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle),
-                                                                                      D3D12_RESOURCE_STATE_COMMON,
-                                                                                      D3D12_RESOURCE_STATE_COPY_DEST);
-                                 cmdList.Get()->ResourceBarrier(1, &barrier1);
+                                // ── COPY 队列命令列表 ──
+                                uint64_t copyCompletedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_COPY);
+                                auto copyAllocatorHandle =
+                                    m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_COPY>(copyCompletedFence);
+                                auto copyAllocator =
+                                    m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_COPY>(copyAllocatorHandle);
+                                auto copyCmdListHandle =
+                                    m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_COPY>(copyAllocator);
+                                auto copyCmdList =
+                                    m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_COPY>(copyCmdListHandle);
 
-                                 UpdateSubresources(cmdList.Get(), gpuMgr.GetResource(gpuHandle),
-                                                    gpuMgr.GetResource(uploadHandle), 0, 0,
-                                                    static_cast<UINT>(subresources.size()), subresources.data());
+                                // Pre-barrier: COMMON → COPY_DEST（COPY 队列支持此转换）
+                                // 注意：COMMON → COPY_DEST 是隐式布局兼容的，但显式 barrier 更安全
+                                {
+                                    auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                                        gpuMgr.GetResource(gpuHandle),
+                                        D3D12_RESOURCE_STATE_COMMON,
+                                        D3D12_RESOURCE_STATE_COPY_DEST);
+                                    copyCmdList.Get()->ResourceBarrier(1, &barrier);
+                                }
 
-                                 auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(
-                                     gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
-                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                 cmdList.Get()->ResourceBarrier(1, &barrier2);
+                                UpdateSubresources(copyCmdList.Get(), gpuMgr.GetResource(gpuHandle),
+                                                   gpuMgr.GetResource(uploadHandle), 0, 0,
+                                                   static_cast<UINT>(subresources.size()), subresources.data());
 
-                                 cmdList.Close();
-                                 m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                                                      cmdList);
-                                 m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                                copyCmdList.Close();
 
-                                 uint64_t sequence = m_context->GetNextSequence();
-                                 gpuMgr.Release(uploadHandle, sequence);
-                                 m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-                                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+                                // 提交到 COPY 队列
+                                cmdMgr.Submit(D3D12_COMMAND_LIST_TYPE_COPY, copyCmdList);
 
-                                 m_context->Logging->Info(
-                                     "[TerrainGPUCreate] Terrain texture uploaded: SRV idx=%u, handle=%u", srvIndex,
-                                     gpuHandle.index);
+                                // Signal COPY 队列，记录 copyFence
+                                uint64_t copyFence = m_context->GetNextSequence();
+                                cmdMgr.GetFenceManager().Signal(D3D12_COMMAND_LIST_TYPE_COPY,
+                                                                 cmdMgr.GetCopyQueue()->Get(),
+                                                                 copyFence);
+
+                                m_context->Logging->Info(
+                                    "[TerrainGPUCreate] COPY queue submit: copyFence={}", copyFence);
+
+                                // ── Step 2: ResourceTransitionTask — DIRECT 队列屏障转换 ──
+                                // 等待 COPY 队列完成 → COPY_DEST → PIXEL_SHADER_RESOURCE
+                                std::string transitionFenceKey = "TerrainTransitionFence_" + std::to_string(requestId);
+                                uint64_t transitionFence = Async::ResourceTransitionTaskFactory::SubmitTransition(
+                                    device, cmdMgr,
+                                    gpuMgr.GetResource(gpuHandle),
+                                    D3D12_RESOURCE_STATE_COPY_DEST,
+                                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                    copyFence,
+                                    transitionFenceKey);
+
+                                m_context->Logging->Info(
+                                    "[TerrainGPUCreate] ResourceTransition submitted: SRV idx={}, handle={}, "
+                                    "copyFence={}, transitionFence={}",
+                                    srvIndex, gpuHandle.index, copyFence, transitionFence);
                              } else {
                                  m_context->Logging->Error(
                                      "[TerrainGPUCreate] Failed to allocate SRV for terrain texture");
@@ -1534,7 +1558,7 @@ void GameWorld::RegisterTerrainSystems() {
                      m_context->Logging->Info("[TerrainGPUCreate] Terrain texture already loaded, skipping");
                  }
 
-                 // 发送 TerrainGeometryUploaded 事件（Step 3: GPU 上传完成）
+                 // 发送 TerrainGeometryUploaded 事件（通知几何体+纹理已提交 GPU）
                  uint64_t payload = (static_cast<uint64_t>(requestId) << 42) |
                                     (static_cast<uint64_t>(handle.generation) << 32) |
                                     (static_cast<uint64_t>(handle.index) & 0xFFFFFFFF);
@@ -1542,8 +1566,8 @@ void GameWorld::RegisterTerrainSystems() {
                      static_cast<uint32_t>(Event::EventType::TerrainGeometryUploadedEvent), 0, payload,
                      Event::EventPriority::P4_Background);
                  m_context->Logging->Info(
-                     "[TerrainGPUCreate] PostEvent TerrainGeometryUploaded: posted=%s (request=%u, handle=%u)",
-                     posted ? "true" : "false", requestId, handle.index);
+                     "[TerrainGPUCreate] PostEvent TerrainGeometryUploaded: posted={} (request={}, handle={})",
+                     posted, requestId, handle.index);
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Render,
@@ -1551,8 +1575,9 @@ void GameWorld::RegisterTerrainSystems() {
          .interestedMessages = {static_cast<uint32_t>(Event::EventType::TerrainLoadedEvent)}});
 
     // ---------------------------------------------------------------
-    // System A2: UploadCompletionSystem (NEW)
-    // 响应 TerrainGeometryUploaded → 轮询围栏 → Post TerrainReady
+    // System A2: TerrainUploadCompletionSystem
+    // 响应 TerrainGeometryUploaded → 检查 ResourceTransitionTask fence → Post TerrainReady
+    // 事件驱动，不阻塞主渲染：若 GPU 未完成，则 return，下帧重试
     // ---------------------------------------------------------------
     SystemRegistry::Register(
         {.name = "TerrainUploadCompletionSystem",
@@ -1562,50 +1587,68 @@ void GameWorld::RegisterTerrainSystems() {
                  Event::DecodeAssetLoadedPayload(ctx.payload, requestId, handleIdx, handleGen);
 
                  m_context->Logging->Info(
-                     "[UploadCompletion] Received TerrainGeometryUploaded (request=%u, handleIdx=%u, handleGen=%u)",
+                     "[UploadCompletion] Received TerrainGeometryUploaded (request={}, handleIdx={}, handleGen={})",
                      requestId, handleIdx, handleGen);
 
                  // 验证几何体句柄
                  if (!m_terrainGeometryHandle.IsValid() || m_terrainGeometryHandle.index != handleIdx) {
                      m_context->Logging->Warn(
-                         "[UploadCompletion] Geometry handle mismatch: expected idx=%u, got idx=%u",
+                         "[UploadCompletion] Geometry handle mismatch: expected idx={}, got idx={}",
                          m_terrainGeometryHandle.index, handleIdx);
                  }
 
-                 // 在当前帧的 Render 阶段，围栏应该已经通过（因为 Flush 是同步等待的）
-                 // 但如果需要异步检查，可以在这里轮询围栏值
-                 uint64_t completedFence = m_context->GetCompletedFence();
-                 m_context->Logging->Info("[UploadCompletion] Current completed fence: %llu", completedFence);
-
-                 // 检查纹理是否已准备好
-                 bool textureReady = m_terrainTextureHandle.IsValid();
-                 m_context->Logging->Info("[UploadCompletion] Texture ready: %s, Geometry ready: %s",
-                                          textureReady ? "true" : "false",
-                                          m_terrainGeometryHandle.IsValid() ? "true" : "false");
-
-                 if (!textureReady || !m_terrainGeometryHandle.IsValid()) {
+                 // 检查纹理句柄是否已注册
+                 if (!m_terrainTextureHandle.IsValid() || !m_terrainGeometryHandle.IsValid()) {
                      m_context->Logging->Error("[UploadCompletion] Resources not ready, skipping TerrainReady post!");
                      return;
                  }
 
-                 // 发送 TerrainReady 事件（Step 4: 资源就绪）
+                 // ── 检查 ResourceTransitionTask 的 GPU fence 是否已完成 ──
+                 // 纹理上传分两步：COPY 队列纯拷贝 + ResourceTransitionTask 屏障转换
+                 // TerrainReady 必须在屏障转换完成后才能发出（确保纹理处于 SRV 状态）
+                 auto &assetMgr = Resource::AssetDataManager::GetInstance();
+                 std::string transitionFenceKey = "TerrainTransitionFence_" + std::to_string(requestId);
+                 auto transitionFenceData = assetMgr.GetTypedData<uint64_t>(transitionFenceKey);
+
+                 if (transitionFenceData && *transitionFenceData > 0) {
+                     auto &cmdMgr = m_context->DeviceContext->GetCommandManager();
+                     bool gpuDone = cmdMgr.GetFenceManager().IsSequenceCompleted(
+                         D3D12_COMMAND_LIST_TYPE_DIRECT, *transitionFenceData);
+
+                     if (!gpuDone) {
+                         // GPU 尚未完成屏障转换，返回（事件驱动，下帧重试）
+                         m_context->Logging->Info(
+                             "[UploadCompletion] ResourceTransition not done yet, deferring "
+                             "(request={}, transitionFence={})",
+                             requestId, *transitionFenceData);
+                         return;
+                     }
+
+                     // GPU 完成，清理 fence 数据
+                     assetMgr.RemoveTypedData(transitionFenceKey);
+                     m_context->Logging->Info(
+                         "[UploadCompletion] ResourceTransition completed (request={}, transitionFence={})",
+                         requestId, *transitionFenceData);
+                 }
+
+                 // 发送 TerrainReady 事件
                  uint64_t payload = (static_cast<uint64_t>(requestId) << 42) |
                                     (static_cast<uint64_t>(m_terrainGeometryHandle.generation) << 32) |
                                     (static_cast<uint64_t>(m_terrainGeometryHandle.index) & 0xFFFFFFFF);
                  bool posted = Event::MessageDispatcher::GetInstance()->PostEvent(
                      static_cast<uint32_t>(Event::EventType::TerrainReadyEvent), 0, payload,
-                     Event::EventPriority::P3_Low);
-                 m_context->Logging->Info("[UploadCompletion] PostEvent TerrainReady: posted=%s (request=%u)",
-                                          posted ? "true" : "false", requestId);
+                     Event::EventPriority::P2_Normal);
+                 m_context->Logging->Info("[UploadCompletion] PostEvent TerrainReady: posted={} (request={})",
+                                          posted, requestId);
              },
-         .phase = TaskPhase::Update,
+         .phase = TaskPhase::Render,
          .threadType = ThreadType::Main,
          .priority = TaskPriority::Normal,
          .interestedMessages = {static_cast<uint32_t>(Event::EventType::TerrainGeometryUploadedEvent)}});
 
     // ---------------------------------------------------------------
     // System B: TerrainCombineSystem
-    // 响应 TerrainReady 事件（Step 4: 围栏通过） → 在 Main 线程创建 ECS 实体
+    // 响应 TerrainReady 事件 → 在 Main 线程创建 ECS 实体
     // ---------------------------------------------------------------
     SystemRegistry::Register(
         {.name = "TerrainCombineSystem",
@@ -1615,7 +1658,7 @@ void GameWorld::RegisterTerrainSystems() {
                  Event::DecodeAssetLoadedPayload(ctx.payload, requestId, handleIdx, handleGen);
 
                  m_context->Logging->Info(
-                     "[TerrainCombine] Triggered by TerrainReady (request=%u, handleIdx=%u, handleGen=%u)", requestId,
+                     "[TerrainCombine] Triggered by TerrainReady (request={}, handleIdx={}, handleGen={})", requestId,
                      handleIdx, handleGen);
 
                  // 从 AssetDataManager 查找对应的 TerrainLoadData 以获取包围盒（用完清理）
@@ -1630,7 +1673,7 @@ void GameWorld::RegisterTerrainSystems() {
                  Resource::LODMesh lodMesh;
                  lodMesh.lodChain = {m_terrainGeometryHandle};
                  Resource::LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
-                 m_context->Logging->Info("[TerrainCombine] LODMesh registered: lodHandle idx=%u", lodHandle.index);
+                 m_context->Logging->Info("[TerrainCombine] LODMesh registered: lodHandle idx={}", lodHandle.index);
 
                  // 创建 ECS 实体
                  auto entity = reg.CreateEntity();
@@ -1654,8 +1697,8 @@ void GameWorld::RegisterTerrainSystems() {
                  meshComp.textureHandle = m_terrainTextureHandle;
                  reg.AddComponent<ECS::MeshComponent>(entity, std::move(meshComp));
 
-                 m_context->Logging->Info("[TerrainCombine] Entity created: entity=%u, request=%u, geoHandle=%u, "
-                                          "texHandle=%u, matHandle=%u, lodHandle=%u",
+                 m_context->Logging->Info("[TerrainCombine] Entity created: entity={}, request={}, geoHandle={}, "
+                                          "texHandle={}, matHandle={}, lodHandle={}",
                                           static_cast<uint32_t>(entity), requestId, m_terrainGeometryHandle.index,
                                           m_terrainTextureHandle.index, m_terrainMaterialHandle.index, lodHandle.index);
              },
