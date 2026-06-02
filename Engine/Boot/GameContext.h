@@ -120,6 +120,18 @@ public:
 
     void FlushAllQueues();
 
+    /**
+     * @brief 等待 COPY 队列完成所有命令
+     * @note COPY 队列独立于 Graphics 队列，FlushCommandQueue() 不会等待 COPY 操作
+     */
+    void FlushCopyQueue();
+
+    /**
+     * @brief 向 COPY 队列提交命令列表
+     * @note 适用于纯 Copy 操作（CopyBufferRegion/CopyTextureRegion），不包含 ResourceBarrier
+     */
+    void SubmitToCopyQueue(Renderer::CommandList &cmdList);
+
     // ── 命令系统便捷方法（单一声明）──
     template <D3D12_COMMAND_LIST_TYPE Type>
     typename Renderer::CommandAllocatorPool<Type>::Handle GetAllocatorHandle(uint64_t currentCompleted);

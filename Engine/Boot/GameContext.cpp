@@ -99,6 +99,18 @@ void GameContext::FlushAllQueues() {
     }
 }
 
+void GameContext::FlushCopyQueue() {
+    if (DeviceContext) {
+        DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_COPY);
+    }
+}
+
+void GameContext::SubmitToCopyQueue(Renderer::CommandList &cmdList) {
+    if (DeviceContext) {
+        DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_COPY, cmdList);
+    }
+}
+
 template <D3D12_COMMAND_LIST_TYPE Type>
 typename Renderer::CommandAllocatorPool<Type>::Handle GameContext::GetAllocatorHandle(uint64_t currentCompleted) {
     if (DeviceContext) {

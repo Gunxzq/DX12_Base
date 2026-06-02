@@ -54,20 +54,20 @@ public:
 
         task.execute = [requestId, heightmapPath, width, depth, maxHeight, segments, data]() {
             auto *logger = Logger::Logger::GetInstance();
-            logger->Info("[TerrainLoadTask] Worker thread started (request=%u)", requestId);
+            logger->Info("[TerrainLoadTask] Worker thread started (request={})", requestId);
 
             // 1. 加载高度图并生成网格数据
             Resource::TerrainMeshData meshData;
             if (!Resource::AssetLoader::GetInstance().LoadTerrainFromFile(heightmapPath, width, depth, maxHeight, segments,
                                                                           meshData)) {
-                logger->Error("[TerrainLoadTask] Failed to load heightmap from file (request=%u)", requestId);
+                logger->Error("[TerrainLoadTask] Failed to load heightmap from file (request={})", requestId);
                 uint64_t payload = static_cast<uint64_t>(requestId) << 32;
                 Event::MessageDispatcher::GetInstance()->PostEvent(TERRAIN_LOAD_FAILED_EVENT_HASH, 0, payload,
                                                                    Event::EventPriority::P4_Background);
                 return;
             }
 
-            logger->Info("[TerrainLoadTask] Heightmap loaded: %zu vertices, %zu indices (request=%u)",
+            logger->Info("[TerrainLoadTask] Heightmap loaded: {} vertices, {} indices (request={})",
                          meshData.vertices.size(), meshData.indices.size(), requestId);
 
             // 拷贝数据到 shared_ptr
@@ -85,8 +85,8 @@ public:
             uint64_t payload = static_cast<uint64_t>(requestId) << 32;
             bool posted = Event::MessageDispatcher::GetInstance()->PostEvent(
                 TERRAIN_LOADED_EVENT_HASH, 0, payload, Event::EventPriority::P4_Background);
-            logger->Info("[TerrainLoadTask] PostEvent TerrainLoaded: posted=%s (request=%u)",
-                         posted ? "true" : "false", requestId);
+            logger->Info("[TerrainLoadTask] PostEvent TerrainLoaded: posted={} (request={})",
+                         posted, requestId);
         };
 
         return task;
