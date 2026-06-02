@@ -73,6 +73,9 @@ public:
     /// 获取任务数量
     size_t GetTaskCount() const { return m_tasks.size(); }
 
+    /// 获取所有任务（按拓扑排序，用于遍历）
+    std::vector<Task> GetTasks() const;
+
 private:
     struct Node {
         Task task;

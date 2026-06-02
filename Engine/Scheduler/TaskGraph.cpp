@@ -188,4 +188,20 @@ std::unordered_map<TaskId, int> TaskGraph::CalculateInDegree() const {
     return inDegree;
 }
 
+std::vector<Task> TaskGraph::GetTasks() const {
+    std::vector<Task> result;
+    result.reserve(m_tasks.size());
+
+    // 按拓扑排序获取
+    auto sortedIds = TopologicalSort();
+    for (TaskId id : sortedIds) {
+        auto it = m_tasks.find(id);
+        if (it != m_tasks.end()) {
+            result.push_back(it->second.task);
+        }
+    }
+
+    return result;
+}
+
 } // namespace DX12Engine::Scheduler

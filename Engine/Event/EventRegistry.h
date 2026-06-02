@@ -16,7 +16,29 @@ namespace Event {
     X(WindowResizeEvent, 0x00000001, P1_High)                                                                          \
     X(KeyboardInputEvent, 0x00000002, P2_Normal)                                                                       \
     X(NetworkPacketEvent, 0x00000100, P2_Normal)                                                                       \
-    X(FullscreenToggleEvent, 0x00000101, P1_High)
+    X(FullscreenToggleEvent, 0x00000101, P1_High)                                                                      \
+    /* 异步加载事件（三步数据流） */                                                                                   \
+    /* Step 2: 后台加载完成 → ResourceLoaded */                                                                        \
+    X(GeometryLoadedEvent, 0x00000200, P4_Background)                                                                  \
+    X(MaterialLoadedEvent, 0x00000201, P4_Background)                                                                  \
+    X(TextureLoadedEvent, 0x00000202, P4_Background)                                                                   \
+    X(TerrainLoadedEvent, 0x00000210, P4_Background)                                                                   \
+    /* Step 3: GPU 上传完成 → ResourceUploaded（携带围栏值） */                                                        \
+    X(GeometryUploadedEvent, 0x00000300, P4_Background)                                                                \
+    X(TextureUploadedEvent, 0x00000301, P4_Background)                                                                 \
+    X(TerrainGeometryUploadedEvent, 0x00000310, P4_Background)                                                         \
+    /* Step 4: 围栏通过 → ResourceReady */                                                                             \
+    X(GeometryReadyEvent, 0x00000400, P3_Low)                                                                          \
+    X(TextureReadyEvent, 0x00000401, P3_Low)                                                                           \
+    X(TerrainReadyEvent, 0x00000410, P3_Low)                                                                           \
+    /* 失败事件 */                                                                                                     \
+    X(TerrainLoadFailedEvent, 0x00000211, P4_Background)                                                               \
+    X(GeometryLoadFailedEvent, 0x00000220, P4_Background)                                                              \
+    X(MaterialLoadFailedEvent, 0x00000221, P4_Background)                                                              \
+    X(TextureLoadFailedEvent, 0x00000222, P4_Background)                                                               \
+    /* 加载请求与组合完成 */                                                                                   \
+    X(RequestLoadEvent, 0x00000230, P2_Normal)                                                                         \
+    X(CombineCompleteEvent, 0x00000240, P2_Normal)
 
 // ========================================================================
 // 2. 自动生成枚举 (EventType)

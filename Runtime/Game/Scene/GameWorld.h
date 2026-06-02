@@ -18,6 +18,9 @@ namespace DX12Engine {
 namespace Boot {
 class GameContext;
 }
+namespace Async {
+class BackgroundExecutor;
+}
 namespace ECS {
 class Registry;
 }
@@ -63,11 +66,23 @@ public:
     // 注册水常量立即回调（每帧上传水波动画数据）
     void RegisterWaterConstantsCallback();
 
+    // 异步地形加载（使用 TaskGraph）
+    void LoadTerrainAsync();
+
+    // 每帧 Update（清理 BackgroundExecutor 已完成任务）
+    void Update();
+
 private:
     void RegisterRotationSystem();
     void RegisterCubeRenderSystem();
     void RegisterSkyboxSystem();
     void RegisterWaterRenderSystem();
+
+    // 注册地形异步加载响应 System
+    // TerrainGPUCreateSystem:      响应 TerrainLoaded → 在 Render 线程创建 VB/IB + 上传纹理
+    // TerrainUploadCompletionSystem: 响应 TerrainGeometryUploaded → Post TerrainReady
+    // TerrainCombineSystem:        响应 TerrainReady → 在 Main 线程创建 ECS 实体
+    void RegisterTerrainSystems();
 
     void CreateTerrainMesh();
     void UploadTerrainGeometry();
@@ -103,7 +118,7 @@ private:
     DX12Engine::Resource::TerrainMeshData m_terrainMeshData;
     DX12Engine::Resource::GeometryHandle m_terrainGeometryHandle;
     DX12Engine::Resource::MaterialHandle m_terrainMaterialHandle;
-    DX12Engine::Resource::TextureHandle m_terrainTextureHandle;
+    DX12Engine::Resource::TextureHandle m_terrainTextureHandle = DX12Engine::Resource::TextureHandle::Invalid();
     DX12Engine::ECS::Entity m_terrainEntity;
 
     // 水
@@ -111,4 +126,7 @@ private:
     DX12Engine::Resource::TextureHandle m_waterTextureHandle;
     DX12Engine::ECS::Entity m_waterEntity;
     D3D12_GPU_VIRTUAL_ADDRESS m_waterCBAddress = 0;
+
+    // 后台异步执行器（纯 CPU 线程池，独立于 FrameDriver）
+    std::unique_ptr<DX12Engine::Async::BackgroundExecutor> m_backgroundExecutor;
 };

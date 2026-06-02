@@ -198,6 +198,7 @@ int Game::Run() {
 
     while (m_isRunning && !m_context->Window->ShouldClose()) {
         m_context->MainTimer->Tick();
+        m_world.Update(); // 清理 BackgroundExecutor 已完成任务
         m_context->FrameDriver->Tick();
     }
 

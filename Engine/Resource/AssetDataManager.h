@@ -4,7 +4,9 @@
 #include "Core/DataPool.h"
 #include "Core/DataPoolContext.h"
 #include "Struct/ResourceHandle.h"
+#include <any>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -59,6 +61,29 @@ public:
     uint32_t GetRefCount(const std::string &path) const;
 
     // ------------------------------------------------------------------
+    // 事件系统数据传递（线程安全，用于跨 System/lambda 传递大对象）
+    // ------------------------------------------------------------------
+
+    template <typename T> void StoreTypedData(const std::string &key, std::shared_ptr<T> data) {
+        std::unique_lock lock(m_assetMutex);
+        m_typedDataStore[key] = std::move(data);
+    }
+
+    template <typename T> std::shared_ptr<T> GetTypedData(const std::string &key) const {
+        std::shared_lock lock(m_assetMutex);
+        auto it = m_typedDataStore.find(key);
+        if (it != m_typedDataStore.end()) {
+            return std::any_cast<std::shared_ptr<T>>(it->second);
+        }
+        return nullptr;
+    }
+
+    void RemoveTypedData(const std::string &key) {
+        std::unique_lock lock(m_assetMutex);
+        m_typedDataStore.erase(key);
+    }
+
+    // ------------------------------------------------------------------
     // 调试/监控
     // ------------------------------------------------------------------
 
@@ -94,6 +119,7 @@ private:
 
     std::vector<PendingRelease> m_pendingReleases;
     mutable std::unordered_map<std::string, AssetInfo> m_assetMap; // 资产数据映射表
+    mutable std::unordered_map<std::string, std::any> m_typedDataStore; // 事件系统数据存储
     mutable std::shared_mutex m_assetMutex;
     mutable std::mutex m_pendingMutex;
 

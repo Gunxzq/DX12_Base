@@ -230,6 +230,44 @@ struct FullscreenToggleEvent {
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
 
+// ========================================================================
+// Asset Loaded Payload Utilities (RequestID + Handle)
+// ========================================================================
+
+// 自定义 64 位布局:
+// Bits 0-31:  handle.index (32 bits)
+// Bits 32-41: handle.generation (10 bits)
+// Bits 42-63: requestId (22 bits, 最大支持约 400 万并发请求)
+
+constexpr uint64_t ASSET_PAYLOAD_REQUESTID_MASK = 0x3FFFFF; // 22 bits
+constexpr uint64_t ASSET_PAYLOAD_GENERATION_MASK = 0x3FF;   // 10 bits
+constexpr uint64_t ASSET_PAYLOAD_INDEX_MASK = 0xFFFFFFFF;   // 32 bits
+
+constexpr int ASSET_PAYLOAD_REQUESTID_SHIFT = 42;
+constexpr int ASSET_PAYLOAD_GENERATION_SHIFT = 32;
+constexpr int ASSET_PAYLOAD_INDEX_SHIFT = 0;
+
+inline uint64_t MakeAssetLoadedPayload(uint32_t requestId, uint32_t handleIndex, uint32_t handleGen) {
+    uint64_t payload = 0;
+    payload |= (static_cast<uint64_t>(requestId) & ASSET_PAYLOAD_REQUESTID_MASK) << ASSET_PAYLOAD_REQUESTID_SHIFT;
+    payload |= (static_cast<uint64_t>(handleGen) & ASSET_PAYLOAD_GENERATION_MASK) << ASSET_PAYLOAD_GENERATION_SHIFT;
+    payload |= static_cast<uint64_t>(handleIndex) & ASSET_PAYLOAD_INDEX_MASK;
+    return payload;
+}
+
+inline void DecodeAssetLoadedPayload(uint64_t payload, uint32_t &outRequestId, uint32_t &outHandleIdx,
+                                     uint32_t &outHandleGen) {
+    outRequestId = static_cast<uint32_t>((payload >> ASSET_PAYLOAD_REQUESTID_SHIFT) & ASSET_PAYLOAD_REQUESTID_MASK);
+    outHandleGen = static_cast<uint32_t>((payload >> ASSET_PAYLOAD_GENERATION_SHIFT) & ASSET_PAYLOAD_GENERATION_MASK);
+    outHandleIdx = static_cast<uint32_t>(payload & ASSET_PAYLOAD_INDEX_MASK);
+}
+
+template <typename HandleType> inline HandleType DecodeAssetHandle(uint64_t payload) {
+    uint32_t idx = static_cast<uint32_t>(payload & ASSET_PAYLOAD_INDEX_MASK);
+    uint32_t gen = static_cast<uint32_t>((payload >> ASSET_PAYLOAD_GENERATION_SHIFT) & ASSET_PAYLOAD_GENERATION_MASK);
+    return HandleType::FromParts(idx, gen);
+}
+
 } // namespace Event
 
 } // namespace DX12Engine
