@@ -62,5 +62,4 @@ private:
     std::vector<T> m_items;
 };
 
-
 } // namespace DX12Engine::Renderer
