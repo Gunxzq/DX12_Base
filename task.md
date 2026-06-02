@@ -1,87 +1,129 @@
-看完你的代码，数据流动非常清晰。让我用一张图总结你当前的异步地形加载流程：
+19. 设法将地形的异步加载普适化
+20. 后台任务执行器，目前还是阻塞模式，后续需要考虑非阻塞模式
+Tick 的调用时机：
+在 GameWorld::Update() 中每帧调用。这意味着：
 
-## 当前数据流动
+后台任务完成的 GpuWorkItem 会在下一帧的 Tick 中被处理
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  GameWorld::LoadTerrainAsync()  [主线程]                                    │
-│  - 生成 requestId                                                           │
-│  - 创建 TerrainLoadDataPtr (shared_ptr)                                     │
-│  - 存储到 AssetDataManager（key: "TerrainLoadData_X"）                       │
-│  - BackgroundExecutor::Submit(TerrainLoadTask)                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  BackgroundExecutor::线程池 [Worker 线程]                                   │
-│  TerrainLoadTask::execute()                                                 │
-│  - AssetLoader::LoadTerrainFromFile()  ← 文件 I/O                           │
-│  - 生成顶点/索引数据                                                         │
-│  - 填充 shared_ptr<TerrainLoadData>                                         │
-│  - PostEvent(TerrainLoaded, requestId)  ← P4_Background                     │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  MessageDispatcher [事件系统]                                               │
-│  - TerrainLoaded 进入 P4 桶                                                 │
-│  - 下一帧 TaskGraphBuilder::BuildFromBuckets 收集                           │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  TerrainGPUCreateSystem [Render 线程]                                       │
-│  - 从 AssetDataManager 取出 TerrainLoadDataPtr                              │
-│  - GpuResourceManager::CreateBuffer() 创建 VB/IB                            │
-│  - GeometryResourceManager::RegisterTriangleMesh()                          │
-│  - 上传纹理（如果尚未加载）                                                   │
-│  - PostEvent(TerrainGeometryUploaded, requestId, handle)  ← P4_Background   │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  TerrainUploadCompletionSystem [Main 线程]                                  │
-│  - 检查围栏（但这里没有真正等待，只是读取 completedFence 打印）               │
-│  - PostEvent(TerrainReady, requestId, handle)  ← P3_Low                     │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  TerrainCombineSystem [Main 线程]                                           │
-│  - 注册 LODMesh                                                             │
-│  - 创建 ECS 实体，添加 MeshComponent                                        │
-│  - 下一帧 RenderItemBuilder 拾取 → 渲染                                     │
-└─────────────────────────────────────────────────────────────────────────────┘
+这天然引入了一帧的延迟，是设计选择，不是 bug
+
+任务积压处理：
+当前没有限制 m_gpuWorkQueue 的大小。如果突发大量加载请求，队列可能膨胀。可以加一个水位线，超过时让后台线程暂时等待。
+
+
+
+
+您说得完全正确。这是我之前分析中的一个重要遗漏。
+
+## `AssetDataManager` 的三重角色
+
+| 角色 | 用途 | 示例 |
+|------|------|------|
+| **CPU 资产存储** | 长期持有 CPU 端资源数据 | 顶点数据、解压后的纹理、音频采样 |
+| **异步加载缓冲区** | 后台线程与主线程之间传递大对象 | `StoreTypedData` / `GetTypedData` |
+| **消息系统扩展** | 事件负载太大时，存句柄而非数据 | 事件只传 `CpuResourceHandle`，数据存在 Manager 中 |
+
+## 与事件系统的配合
+
+```cpp
+// 后台线程：加载完成后存储数据
+std::vector<Vertex> vertices = ...;
+AssetDataManager::GetInstance().StoreTypedData("terrain_1_vertices", 
+    std::make_shared<std::vector<Vertex>>(std::move(vertices)));
+
+// 发送事件（只传一个字符串 key）
+PostEvent(TerrainLoaded, "terrain_1_vertices");
+
+// 主线程：响应事件时取出数据
+auto verticesPtr = AssetDataManager::GetInstance().GetTypedData<std::vector<Vertex>>(key);
+// 注册到 GeometryResourceManager...
+AssetDataManager::GetInstance().RemoveTypedData(key);
 ```
 
-## 关键观察
+**这正是您当前架构中 `TerrainReadyState` + `TerrainLoadData` 应该使用的方式。**
 
-| 组件 | 线程 | 事件优先级 | 阶段 |
-| :--- | :--- | :--- | :--- |
-| `TerrainLoadTask` | Worker | `P4_Background` | 文件 I/O |
-| `TerrainGPUCreateSystem` | Render | `P4_Background` | GPU 资源创建 |
-| `TerrainUploadCompletionSystem` | Main | `P3_Low` | 围栏检查（无实际等待） |
-| `TerrainCombineSystem` | Main | `P3_Low` | ECS 实体创建 |
+## 当前方案 vs `AssetDataManager` 方案
 
-## 问题定位
+| 当前 | `AssetDataManager` 方案 |
+|------|------------------------|
+| `TerrainLoadData` 自定义结构 | `StoreTypedData<TerrainLoadData>` |
+| `TerrainReadyState` 自定义结构 | `StoreTypedData<TerrainReadyState>` |
+| `m_terrainLoadData` 成员变量 | 通过 key 查找，无成员变量 |
+| 手动原子标志 | 复用 `CpuResourceState` |
 
-你看到的 **"第一帧上传，第四帧才显示"** 的延迟来源：
+## 结论
 
-1. **事件优先级低**：`P4_Background` 和 `P3_Low` 事件在 `TaskGraphBuilder::BuildFromBuckets` 中被处理，但每帧有预算限制（硬限制 1024 条，时间预算 1ms），可能被延迟处理
+`AssetDataManager` 已经设计为**异步数据传递的基础设施**。您当前的 `TerrainLoadData` 和 `TerrainReadyState` 完全可以被它替代，从而消除 `GameWorld` 中的临时成员变量。
 
-2. **围栏没有真正等待**：`TerrainUploadCompletionSystem` 只是读取 `GetCompletedFence()` 打印日志，没有实际等待围栏。但由于 `Flush()` 同步上传的存在，围栏实际上在第 1 帧末就已经完成了
+当前的实现是正确的验证方向，后续重构应该把这两个临时结构迁移到 `AssetDataManager` 中管理。
 
-3. **事件跨帧传播**：`TerrainGeometryUploaded` 在 `Render` 阶段发送，但 `TerrainUploadCompletionSystem` 在 `Update` 阶段处理，天然延迟 1 帧
 
-4. **`TerrainCombineSystem` 的 `phase = TaskPhase::Render`**：但 `interestedMessages` 是 `TerrainReady`，而 `TerrainReady` 在 `Update` 阶段发出，所以 `Render` 阶段的 System 要等到下一帧的 `Render` 阶段才能处理
 
-## 事件系统的优劣
 
-你的事件系统设计是**正确的**，它提供了：
-- 线程安全的跨线程通信
-- 优先级驱动的消息调度
-- 批量处理预算控制
 
-但在高频、低延迟的场景下，事件驱动会引入**可预测的帧级延迟**（通常 1-2 帧）。这是解耦的代价，对于资源加载来说通常可以接受。
 
-## 优化建议
 
-1. **提高优先级**：将 `TerrainGeometryUploaded` 和 `TerrainReady` 改为 `P2_Normal`
-2. **调整 System 阶段**：让所有相关 System 在 `Render` 阶段执行，避免跨阶段延迟
-3. **移除 `Flush()`**：初始化中的 `Flush()` 是主要卡顿源，改为异步上传
-4. **批量处理**：`TaskGraphBuilder` 的预算限制可以适当提高
+您说得完全正确。我之前的理解有偏差。
+
+## 重新理解 `AssetDataManager`
+
+`AssetDataManager` 的设计定位是：**CPU 端数据的长期存储和管理器**，不仅仅是临时缓存。
+
+```cpp
+enum class CpuResourceType : uint8_t { 
+    Unknown, Mesh, Texture, Audio, Shader, 
+    UploadBuffer, ReadbackBuffer 
+};
+```
+
+它管理的内容包括：
+- **Mesh**：顶点/索引数据（CPU 端副本，可能长期存在）
+- **Texture**：解压后的纹理数据（上传前）
+- **UploadBuffer**：上传缓冲区的句柄和状态
+- **ReadbackBuffer**：回读缓冲
+
+`CpuResourceState` 状态机：
+```
+Empty → Loading → Ready → PendingRelease → (Reclaim)
+```
+
+这是一个完整的生命周期管理。
+
+## `TerrainLoadData` 与 `AssetDataManager` 的关系
+
+| 当前方案 | `AssetDataManager` 方案 |
+|---------|------------------------|
+| `TerrainLoadData` 持有 `vector<Vertex>` | `AssetDataManager` 通过 `RegisterData` 存储同样的数据 |
+| `m_terrainLoadData` 成员变量 | `cpuHandle` 存储在 `AssetDataManager` 中 |
+| 手动管理生命周期 | 通过 `CpuResourceState` 自动管理 |
+
+**理论上，`TerrainLoadData` 完全可以被 `AssetDataManager` 替代。**
+
+## 为什么当前绕过了？
+
+因为：
+1. **传递路径长**：后台线程需要把几何体数据传给主线程，`AssetDataManager` 的 `StoreTypedData` 可以做到，但需要额外编码
+2. **`TerrainLoadData` 更简单直接**：`shared_ptr` + 原子标志，实现快速验证
+3. **异步架构验证期**：先跑通流程，再整合到正式系统
+
+## 长期重构方向
+
+```cpp
+// 后台线程
+CpuResourceHandle handle = assetDataMgr.AllocateSlot(CpuResourceType::Mesh, poolId);
+assetDataMgr.RegisterData(handle, data->vertices.data(), data->vertices.size() * sizeof(Vertex));
+assetDataMgr.SetState(handle, CpuResourceState::Ready);
+
+// 主线程
+if (assetDataMgr.GetState(handle) == CpuResourceState::Ready) {
+    void* vertices = assetDataMgr.GetData(handle);
+    // 注册到 GeometryResourceManager...
+    assetDataMgr.ScheduleRelease(handle, fenceValue);
+}
+```
+
+这样 `TerrainLoadData` 和 `TerrainReadyState` 都不再需要，统一由 `AssetDataManager` 管理。
+
+## 结论
+
+您是对的。当前 `TerrainLoadData` 和 `TerrainReadyState` 是验证期的临时方案，长期应该融入 `AssetDataManager` 和 `GpuResourceManager` 的现有状态系统。但作为架构验证，当前方式完全可接受——**先跑通，再重构**。
