@@ -56,7 +56,8 @@ void CommandManager::Initialize(ID3D12Device *device, uint32_t frameCount) {
 }
 
 void CommandManager::Shutdown() {
-    Flush();
+    // 等待所有队列完成（DIRECT + COMPUTE + COPY），防止资源被提前释放
+    FlushAllQueues();
 
     // 清理所有 Map 容器，自动调用 unique_ptr 析构
     m_queues.clear();
