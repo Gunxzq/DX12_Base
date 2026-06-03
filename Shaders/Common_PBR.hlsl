@@ -56,13 +56,13 @@ cbuffer cbPass : register(b1)
     float gFarPlane;
     float gAspectRatio;
     uint gFrameCount;
-    float4 gAmbientLight;
     float4 gPad[3];
 }
 
 cbuffer cbLights : register(b2)
 {
     Light gLights[256];
+    float4 gAmbientLight;
     uint gNumDirLights;
     uint gNumPointLights;
     uint gNumSpotLights;

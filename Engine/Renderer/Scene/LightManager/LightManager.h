@@ -76,8 +76,8 @@ public:
     void SetSpotLight(uint32_t index, const Light &light);
     void RemoveSpotLight(uint32_t index);
 
-    void SetShadowParams(uint32_t lightIndex, LightType type, float bias, float normalBias, float strength,
-                         uint32_t resolution);
+    // void SetShadowParams(uint32_t lightIndex, LightType type, float bias, float normalBias, float strength,
+    //                      uint32_t resolution);
 
     // ========================================================================
     // 数据访问
@@ -97,61 +97,62 @@ public:
     // GPU 上传
     // ========================================================================
     D3D12_GPU_VIRTUAL_ADDRESS GetLightCBAddress() const { return m_lightCBAddress; }
-    D3D12_GPU_VIRTUAL_ADDRESS GetDirShadowAddress() const { return m_dirShadowAddress; }
-    D3D12_GPU_VIRTUAL_ADDRESS GetPointShadowAddress() const { return m_pointShadowAddress; }
-    D3D12_GPU_VIRTUAL_ADDRESS GetSpotShadowAddress() const { return m_spotShadowAddress; }
+    // D3D12_GPU_VIRTUAL_ADDRESS GetDirShadowAddress() const { return m_dirShadowAddress; }
+    // D3D12_GPU_VIRTUAL_ADDRESS GetPointShadowAddress() const { return m_pointShadowAddress; }
+    // D3D12_GPU_VIRTUAL_ADDRESS GetSpotShadowAddress() const { return m_spotShadowAddress; }
 
-    // ========================================================================
-    // 阴影贴图资源访问（供 ShadowRenderer 使用）
-    // ========================================================================
-    const DirShadowResources &GetDirShadowResources() const { return m_dirShadow; }
-    DirShadowResources &GetDirShadowResources() { return m_dirShadow; }
-    const PointShadowResources &GetPointShadowResources(uint32_t index) const { return m_pointShadowResources[index]; }
-    const SpotShadowResources &GetSpotShadowResources(uint32_t index) const { return m_spotShadowResources[index]; }
+    // // ========================================================================
+    // // 阴影贴图资源访问（供 ShadowRenderer 使用）
+    // // ========================================================================
+    // const DirShadowResources &GetDirShadowResources() const { return m_dirShadow; }
+    // DirShadowResources &GetDirShadowResources() { return m_dirShadow; }
+    // const PointShadowResources &GetPointShadowResources(uint32_t index) const { return m_pointShadowResources[index];
+    // } const SpotShadowResources &GetSpotShadowResources(uint32_t index) const { return m_spotShadowResources[index];
+    // }
 
-    // 阴影数据 StructuredBuffer 的 GPU 描述符句柄 (t11~t13, space1)
-    D3D12_GPU_DESCRIPTOR_HANDLE GetShadowDataSRV() const { return m_shadowDataSRV; }
+    // // 阴影数据 StructuredBuffer 的 GPU 描述符句柄 (t11~t13, space1)
+    // D3D12_GPU_DESCRIPTOR_HANDLE GetShadowDataSRV() const { return m_shadowDataSRV; }
 
-    // 阴影贴图纹理数组的 GPU 描述符句柄 (t14/t20/t26, space1)
-    D3D12_GPU_DESCRIPTOR_HANDLE GetShadowMapSRV() const { return m_shadowMapSRV; }
+    // // 阴影贴图纹理数组的 GPU 描述符句柄 (t14/t20/t26, space1)
+    // D3D12_GPU_DESCRIPTOR_HANDLE GetShadowMapSRV() const { return m_shadowMapSRV; }
 
-    const std::vector<DirLightShadowConstants> &GetDirShadowConstants() const { return m_dirShadowConstants; }
-    const std::vector<PointLightShadowConstants> &GetPointShadowConstants() const { return m_pointShadowConstants; }
-    const std::vector<SpotLightShadowConstants> &GetSpotShadowConstants() const { return m_spotShadowConstants; }
+    // const std::vector<DirLightShadowConstants> &GetDirShadowConstants() const { return m_dirShadowConstants; }
+    // const std::vector<PointLightShadowConstants> &GetPointShadowConstants() const { return m_pointShadowConstants; }
+    // const std::vector<SpotLightShadowConstants> &GetSpotShadowConstants() const { return m_spotShadowConstants; }
 
-    bool HasDirShadow() const { return m_dirShadow.isValid && !m_dirShadowConstants.empty(); }
-    bool HasPointShadow(uint32_t index) const {
-        return index < m_pointShadowResources.size() && m_pointShadowResources[index].isValid &&
-               index < m_pointShadowConstants.size();
-    }
-    bool HasSpotShadow(uint32_t index) const {
-        return index < m_spotShadowResources.size() && m_spotShadowResources[index].isValid &&
-               index < m_spotShadowConstants.size();
-    }
+    // bool HasDirShadow() const { return m_dirShadow.isValid && !m_dirShadowConstants.empty(); }
+    // bool HasPointShadow(uint32_t index) const {
+    //     return index < m_pointShadowResources.size() && m_pointShadowResources[index].isValid &&
+    //            index < m_pointShadowConstants.size();
+    // }
+    // bool HasSpotShadow(uint32_t index) const {
+    //     return index < m_spotShadowResources.size() && m_spotShadowResources[index].isValid &&
+    //            index < m_spotShadowConstants.size();
+    // }
 
     // 调试辅助
     // ========================================================================
     void CreateTestLights();
 
     // 阴影贴图
-    void CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint32_t resolution);
-    void CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t resolution);
-    void CreateShadowMapForSpotLight(uint32_t lightIndex, uint32_t resolution);
-    void ReleaseShadowMap(DirShadowResources &shadow, uint64_t fence);
-    void ReleaseShadowMap(PointShadowResources &shadow, uint64_t fence);
-    void ReleaseShadowMap(SpotShadowResources &shadow, uint64_t fence);
+    // void CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint32_t resolution);
+    // void CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t resolution);
+    // void CreateShadowMapForSpotLight(uint32_t lightIndex, uint32_t resolution);
+    // void ReleaseShadowMap(DirShadowResources &shadow, uint64_t fence);
+    // void ReleaseShadowMap(PointShadowResources &shadow, uint64_t fence);
+    // void ReleaseShadowMap(SpotShadowResources &shadow, uint64_t fence);
 
 private:
     void RebuildLightConstants();
 
-    // 重建阴影常量数组
-    void RebuildShadowConstants(const DirectX::XMFLOAT3 &cameraPos);
+    // // 重建阴影常量数组
+    // void RebuildShadowConstants(const DirectX::XMFLOAT3 &cameraPos);
 
-    // 计算单个光源的阴影 VP 矩阵
-    void ComputeDirShadowMatrix(const Light &light, DirLightShadowConstants &outConstants,
-                                const DirectX::XMFLOAT3 &cameraPos);
-    void ComputePointShadowMatrices(const Light &light, PointLightShadowConstants &outConstants);
-    void ComputeSpotShadowMatrix(const Light &light, SpotLightShadowConstants &outConstants);
+    // // 计算单个光源的阴影 VP 矩阵
+    // void ComputeDirShadowMatrix(const Light &light, DirLightShadowConstants &outConstants,
+    //                             const DirectX::XMFLOAT3 &cameraPos);
+    // void ComputePointShadowMatrices(const Light &light, PointLightShadowConstants &outConstants);
+    // void ComputeSpotShadowMatrix(const Light &light, SpotLightShadowConstants &outConstants);
 
 private:
     // 光源常量
@@ -160,16 +161,16 @@ private:
     std::vector<Light> m_dirLights;
 
     // 阴影常量
-    std::vector<DirLightShadowConstants> m_dirShadowConstants;
-    std::vector<PointLightShadowConstants> m_pointShadowConstants;
-    std::vector<SpotLightShadowConstants> m_spotShadowConstants;
+    // std::vector<DirLightShadowConstants> m_dirShadowConstants;
+    // std::vector<PointLightShadowConstants> m_pointShadowConstants;
+    // std::vector<SpotLightShadowConstants> m_spotShadowConstants;
     LightConstants m_lightConstants = {}; // 光源常量数据
 
     // GPU 地址
-    D3D12_GPU_VIRTUAL_ADDRESS m_lightCBAddress = 0;     // 光源常量缓冲区地址
-    D3D12_GPU_VIRTUAL_ADDRESS m_dirShadowAddress = 0;   // 方向光阴影缓冲区地址
-    D3D12_GPU_VIRTUAL_ADDRESS m_pointShadowAddress = 0; // 点光源阴影缓冲区地址
-    D3D12_GPU_VIRTUAL_ADDRESS m_spotShadowAddress = 0;  // 聚光灯阴影缓冲区地址
+    D3D12_GPU_VIRTUAL_ADDRESS m_lightCBAddress = 0; // 光源常量缓冲区地址
+    // D3D12_GPU_VIRTUAL_ADDRESS m_dirShadowAddress = 0;   // 方向光阴影缓冲区地址
+    // D3D12_GPU_VIRTUAL_ADDRESS m_pointShadowAddress = 0; // 点光源阴影缓冲区地址
+    // D3D12_GPU_VIRTUAL_ADDRESS m_spotShadowAddress = 0;  // 聚光灯阴影缓冲区地址
 
     // 脏标记
     bool m_lightDirty = true;
@@ -182,32 +183,26 @@ private:
 
     // 内部 RingBuffer
     RingBuffer m_lightBuffer;
-
-    // 或者分开三个阴影缓冲区
-    RingBuffer m_dirShadowBuffer;
-    RingBuffer m_pointShadowBuffer;
-    RingBuffer m_spotShadowBuffer;
+    // RingBuffer m_dirShadowBuffer;
+    // RingBuffer m_pointShadowBuffer;
+    // RingBuffer m_spotShadowBuffer;
 
     // 阴影贴图资源（单张，非 vector）
-    DirShadowResources m_dirShadow; // 方向光阴影（可选，取决于方向光是否投射阴影）
+    // DirShadowResources m_dirShadow;
+    // std::vector<PointShadowResources> m_pointShadowResources;
+    // std::vector<SpotShadowResources> m_spotShadowResources;
 
-    // 点光源阴影（每个投射阴影的点光源对应一个）
-    std::vector<PointShadowResources> m_pointShadowResources;
+    // // 阴影数据/贴图 SRV（供 OpaqueRenderer 绑定到根签名 slot 6, slot 7）
+    // D3D12_GPU_DESCRIPTOR_HANDLE m_shadowDataSRV = {}; // t11~t13 StructuredBuffer
+    // D3D12_GPU_DESCRIPTOR_HANDLE m_shadowMapSRV = {};  // t14/t20/t26 TextureArray
 
-    // 聚光源阴影
-    std::vector<SpotShadowResources> m_spotShadowResources;
-
-    // 阴影数据/贴图 SRV（供 OpaqueRenderer 绑定到根签名 slot 6, slot 7）
-    D3D12_GPU_DESCRIPTOR_HANDLE m_shadowDataSRV = {};  // t11~t13 StructuredBuffer
-    D3D12_GPU_DESCRIPTOR_HANDLE m_shadowMapSRV = {};   // t14/t20/t26 TextureArray
-
-    // 阴影数据 StructuredBuffer 资源句柄 (UPLOAD 堆)
-    Resource::GpuResourceHandle m_dirShadowDataBufferHandle = {};
-    Resource::GpuResourceHandle m_pointShadowDataBufferHandle = {};
-    Resource::GpuResourceHandle m_spotShadowDataBufferHandle = {};
+    // // 阴影数据 StructuredBuffer 资源句柄 (UPLOAD 堆)
+    // Resource::GpuResourceHandle m_dirShadowDataBufferHandle = {};
+    // Resource::GpuResourceHandle m_pointShadowDataBufferHandle = {};
+    // Resource::GpuResourceHandle m_spotShadowDataBufferHandle = {};
 
     // SRV 描述符槽位
-    uint32_t m_shadowDataSrvBaseSlot = UINT32_MAX;  // t11 基础槽位（t11, t12, t13 连续）
-    uint32_t m_shadowMapSrvDirSlot = UINT32_MAX;     // t14 方向光阴影贴图槽位
+    uint32_t m_shadowDataSrvBaseSlot = UINT32_MAX; // t11 基础槽位（t11, t12, t13 连续）
+    uint32_t m_shadowMapSrvDirSlot = UINT32_MAX;   // t14 方向光阴影贴图槽位
 };
 } // namespace DX12Engine::Renderer

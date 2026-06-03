@@ -57,7 +57,6 @@ public:
 
     void CreateMaterials();
 
-    void CreateTerrain();
     void CreateTestCube();
     void CreateSkybox();
     void CreateWater();
@@ -107,7 +106,7 @@ private:
     DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
     std::unique_ptr<DX12Engine::Renderer::SkyRenderer> m_skyRenderer; // 天空盒渲染器
     std::unique_ptr<DX12Engine::Renderer::WaterRenderer> m_waterRenderer;
-    std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer; // 阴影渲染器
+    // std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer; // 阴影渲染器
 
     // 新的构建器和渲染队列（由 GameWorld 持有）
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderItemBuilder> m_opaqueBuilder;

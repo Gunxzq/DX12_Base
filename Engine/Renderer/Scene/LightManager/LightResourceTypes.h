@@ -6,15 +6,15 @@ namespace DX12Engine::Renderer {
 
 // 光源
 struct Light {
-    DirectX::XMFLOAT4 Strength   = {0.0f, 0.0f, 0.0f, 0.0f};
-    DirectX::XMFLOAT4 Direction  = {0.0f, 0.0f, 0.0f, 0.0f};
-    DirectX::XMFLOAT4 Position   = {0.0f, 0.0f, 0.0f, 0.0f};
-    float FalloffStart           = 1.0f;
-    float FalloffEnd             = 10.0f;
-    float SpotPower              = 0.0f;
-    float Range                  = 10.0f;
-    int ShadowMapIndex           = -1;
-    float Pad                    = 0.0f;
+    DirectX::XMFLOAT4 Strength;
+    DirectX::XMFLOAT4 Direction;
+    DirectX::XMFLOAT4 Position;
+    float FalloffStart;
+    float FalloffEnd;
+    float SpotPower;
+    float Range;
+    int ShadowMapIndex;
+    float Pad[3];
 };
 
 struct LightConstants {

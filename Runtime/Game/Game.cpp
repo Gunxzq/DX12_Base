@@ -62,8 +62,8 @@ bool Game::Initialize() {
     LightManager::GetInstance().Initialize(m_context->DeviceContext->GetDevice(), m_context->DescriptorHeaps);
     LightManager::GetInstance().CreateTestLights(); // 创建测试光源
 
-    // 为主方向光预创建阴影贴图（2048x2048）
-    LightManager::GetInstance().CreateShadowMapForDirectionalLight(0, 2048);
+    // // 为主方向光预创建阴影贴图（2048x2048）
+    // LightManager::GetInstance().CreateShadowMapForDirectionalLight(0, 2048);
 
     // 5. 注册引擎级系统（窗口大小变化、全屏切换等）
     RegisterEngineSystems();
