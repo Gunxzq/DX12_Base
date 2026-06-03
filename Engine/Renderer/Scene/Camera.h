@@ -45,9 +45,9 @@ struct Camera {
     XMMATRIX PrevViewProjMatrix; // 上一帧的 ViewProj
 
     struct {
-        bool bFollowTarget : 1;   // 是否跟随某个实体（第三人称）
-        bool bLockPitch : 1;      // 是否锁定俯仰角（FPS 常用）
-        bool bSmoothMovement : 1; // 是否启用位置平滑插值
+        bool bFollowTarget : 1 = false;   // 是否跟随某个实体（第三人称）
+        bool bLockPitch : 1 = false;      // 是否锁定俯仰角（FPS 常用）
+        bool bSmoothMovement : 1 = false; // 是否启用位置平滑插值
     } Flags;
 
     XMFLOAT3 TargetOffset = {0.0f, 2.0f, -5.0f};

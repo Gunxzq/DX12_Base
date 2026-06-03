@@ -71,6 +71,7 @@ ComPtr<ID3DBlob> d3dUtil::CompileShader(const std::wstring &filename, const D3D_
     UINT compileFlags = 0;
 #if defined(DEBUG) || defined(_DEBUG)
     compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    compileFlags |= D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
 #endif
 
     HRESULT hr = S_OK;

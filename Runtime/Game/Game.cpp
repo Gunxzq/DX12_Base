@@ -4,6 +4,7 @@
 #include "Framework/SystemRegistry.h"
 #include "Platform/Input/InputSystem.h"
 #include "Platform/Windows/Window.h"
+#include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Resource/AssetLoader/AssetLoader.h"
@@ -20,6 +21,7 @@ using namespace DX12Engine::DebugUI;
 using namespace DX12Engine::Scheduler;
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Input;
+using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Math;
 using namespace DX12Engine::ECS;
 
@@ -57,8 +59,11 @@ bool Game::Initialize() {
     }
 
     // 初始化 LightManager
-    LightManager::GetInstance().Initialize();
+    LightManager::GetInstance().Initialize(m_context->DeviceContext->GetDevice(), m_context->DescriptorHeaps);
     LightManager::GetInstance().CreateTestLights(); // 创建测试光源
+
+    // 为主方向光预创建阴影贴图（2048x2048）
+    LightManager::GetInstance().CreateShadowMapForDirectionalLight(0, 2048);
 
     // 5. 注册引擎级系统（窗口大小变化、全屏切换等）
     RegisterEngineSystems();
@@ -75,7 +80,7 @@ bool Game::Initialize() {
                 m_context->CameraMgr->UpdateMainCamera();
 
                 const auto &camera = m_context->CameraMgr->GetMainCamera();
-                auto &passConstants = m_context->FrameResourceManager->GetPassConstants();
+                PassConstants &passConstants = m_context->FrameResourceManager->GetPassConstants();
 
                 // 存储矩阵
                 XMStoreFloat4x4(&passConstants.View, camera.ViewMatrix);
@@ -91,13 +96,12 @@ bool Game::Initialize() {
                 passConstants.FarPlane = camera.FarPlane;
                 passConstants.AspectRatio = camera.AspectRatio;
                 passConstants.FrameCount = m_context->FrameDriver->GetFrameStats().frameNumber;
-                passConstants.AmbientLight = {0.4f, 0.45f, 0.5f, 1.0f}; // 环境光：模拟天空散射
 
                 // ========================================================================
-                // 上传光源数据到 GPU（太阳方向光 + 环境光，无点光源）
+                // 上传光源数据到 GPU（使用 UpdateAndUpload，内部脏标记自动判断是否更新）
+                // 传入相机位置用于方向光阴影矩阵计算
                 // ========================================================================
-                D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress =
-                    LightManager::GetInstance().UpdateAndUpload(m_context->FrameResourceManager);
+                LightManager::GetInstance().UpdateAndUpload(m_context->GetNextFence(), camera.Position);
 
                 m_context->FrameResourceManager->UpdatePassConstants();
             },
@@ -177,8 +181,6 @@ void Game::RegisterEngineSystems() {
                                       // 串行执行：剔除 + LOD
                                       m_context->CullingSystem->Execute(reg, m_context->cullingResult);
                                       m_context->LODSystem->Execute(reg, m_context->lodResult);
-
-                                      // 使用 GameWorld 的新构建器
                                       m_world.BuildRenderQueue();
                                   },
                               .phase = TaskPhase::PreRender,

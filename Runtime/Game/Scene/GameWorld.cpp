@@ -16,12 +16,13 @@
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
 
 #include "Renderer/Pipeline/OpaqueRenderer.h"
+#include "Renderer/Pipeline/ShadowRenderer.h"
 #include "Renderer/Pipeline/SkyRenderer.h"
 #include "Renderer/Pipeline/WaterRenderer.h"
 
 #include "Renderer/RHI/Command/CommandManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
-#include "Renderer/Scene/LightManager.h"
+#include "Renderer/Scene/LightManager/LightManager.h"
 #include "Renderer/Utils/GeometryGenerator.h"
 #include "Resource/Asset/LODMesh.h"
 #include "Resource/AssetDataManager.h"
@@ -78,6 +79,13 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_waterRenderer->SetMaterialManager(m_context->MaterialMgr);
     m_waterRenderer->Initialize();
 
+    // 初始化阴影渲染器
+    m_shadowRenderer = std::make_unique<ShadowRenderer>();
+    m_shadowRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_shadowRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
+    m_shadowRenderer->SetDescriptorHeaps(m_context->DescriptorHeaps);
+    m_shadowRenderer->Initialize();
+
     LoadTestTexture();
     LoadWaterTexture();
 
@@ -99,6 +107,9 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
 
     // 注册水常量立即回调（每帧上传水波动画数据）
     RegisterWaterConstantsCallback();
+
+    // 注册阴影渲染系统
+    RegisterShadowRenderSystem();
 }
 
 void GameWorld::Clear() {
@@ -726,14 +737,20 @@ void GameWorld::RegisterCubeRenderSystem() {
                  // 获取材质数组 SRV
                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
+                 // 获取阴影数据 StructuredBuffer SRV (t11~t13, slot 6) 和阴影贴图纹理 SRV (t14, slot 7)
+                 auto &lightMgr = LightManager::GetInstance();
+                 D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV = lightMgr.GetShadowDataSRV();
+                 D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = lightMgr.GetShadowMapSRV();
+
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
                      m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
 
                  //  一个堆
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
-                 // 开始渲染
-                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
+                 // 开始渲染（传入阴影数据和阴影贴图 SRV）
+                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV,
+                                        shadowDataSRV, shadowMapSRV);
 
                  // 使用 GameWorld 自己的队列
                  for (const auto &item : m_opaqueQueue) {
@@ -936,17 +953,6 @@ void GameWorld::RegisterWaterRenderSystem() {
              [this](Registry &registry, const MessageContext &ctx) {
                  if (m_transparentQueue.Empty()) {
                      return;
-                 }
-
-                 //  每二十帧输出一次
-                 static int frameCount = 0;
-                 frameCount++;
-                 if (frameCount % 20 == 0) {
-                     auto &transform = registry.GetComponent<TransformComponent>(m_waterEntity);
-                     std::wstring debugStr = std::wstring(L"Water position: ") + std::to_wstring(transform.position.x) +
-                                             L", " + std::to_wstring(transform.position.y) + L", " +
-                                             std::to_wstring(transform.position.z) + L"\n";
-                     OutputDebugStringW(debugStr.c_str());
                  }
 
                  // 获取命令列表等渲染资源
@@ -1356,6 +1362,74 @@ void GameWorld::RegisterTerrainSystems() {
          .threadType = ThreadType::Main,
          .priority = TaskPriority::Normal,
          .interestedMessages = {static_cast<uint32_t>(Event::EventType::TerrainReadyEvent)}});
+}
+
+void GameWorld::RegisterShadowRenderSystem() {
+    SystemRegistry::Register(
+        {.name = "ShadowRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 auto &lightMgr = LightManager::GetInstance();
+
+                 // ================================================================
+                 // 获取命令列表
+                 // ================================================================
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+                 // ================================================================
+                 // 设置描述符堆
+                 // ================================================================
+                 ID3D12DescriptorHeap *descriptorHeaps[] = {
+                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+
+                 // ================================================================
+                 // 渲染方向光阴影贴图（主光源）
+                 // ================================================================
+                 if (lightMgr.HasDirShadow()) {
+                     const auto &shadowRes = lightMgr.GetDirShadowResources();
+
+                     // 渲染方向光阴影（目前只支持 1 个方向光）
+                     D3D12_GPU_VIRTUAL_ADDRESS dirShadowAddr = lightMgr.GetDirShadowAddress();
+                     if (dirShadowAddr != 0 && shadowRes.isValid) {
+
+                         m_shadowRenderer->RenderDirectionalShadow(cmdList, dirShadowAddr, shadowRes);
+
+                         // 遍历不透明队列中的物体，绘制阴影
+                         for (const auto &item : m_opaqueQueue) {
+                             // 继续处理 item
+                             if (!item.IsValid())
+                                 continue;
+                             m_shadowRenderer->DrawShadowMesh(cmdList, item.geometryHandle, item.worldMatrix,
+                                                              item.objectCBAddress);
+                         }
+
+                         // 结束阴影 Pass，过渡深度资源到 SRV 状态供主 Pass 采样
+                         m_shadowRenderer->EndShadowPass(cmdList, shadowRes.textureHandle);
+                     } else {
+                         // 日志dirShadowAddr,shadowRes
+                         m_context->Logging->Warn("Directional shadow resources not ready: addr={}, valid={}",
+                                                  dirShadowAddr, shadowRes.isValid);
+                     }
+                 }
+
+                 // TODO: 点光源和聚光灯阴影
+
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PrePass, cmdListHandle);
+
+                 uint64_t sequence = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Main,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::PrePass,
+         .alwaysRun = true});
 }
 
 void GameWorld::Update() {

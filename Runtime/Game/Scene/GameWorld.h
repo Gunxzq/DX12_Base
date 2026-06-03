@@ -29,6 +29,7 @@ namespace Renderer {
 class OpaqueRenderer;
 class SkyRenderer;
 class WaterRenderer;
+class ShadowRenderer;
 } // namespace Renderer
 } // namespace DX12Engine
 
@@ -67,6 +68,9 @@ public:
     // 注册水常量立即回调（每帧上传水波动画数据）
     void RegisterWaterConstantsCallback();
 
+    // 注册阴影渲染系统
+    void RegisterShadowRenderSystem();
+
     // 异步地形加载（使用 TaskGraph）
     void LoadTerrainAsync();
 
@@ -103,6 +107,7 @@ private:
     DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
     std::unique_ptr<DX12Engine::Renderer::SkyRenderer> m_skyRenderer; // 天空盒渲染器
     std::unique_ptr<DX12Engine::Renderer::WaterRenderer> m_waterRenderer;
+    std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer; // 阴影渲染器
 
     // 新的构建器和渲染队列（由 GameWorld 持有）
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderItemBuilder> m_opaqueBuilder;

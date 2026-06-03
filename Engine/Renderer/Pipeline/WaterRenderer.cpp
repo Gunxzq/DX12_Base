@@ -124,6 +124,7 @@ void WaterRenderer::DrawWater(CommandList &cmdList, Resource::GeometryHandle geo
 
 void WaterRenderer::LoadShaders() {
     UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    compileFlags |= D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
 
     Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
     HRESULT hr;

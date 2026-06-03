@@ -277,6 +277,7 @@ bool FrameDriver::Tick() {
     ExecuteRenderPhase(RenderPhase::Opaque, 0);
     ExecuteRenderPhase(RenderPhase::Transparent, 0);
     ExecuteRenderPhase(RenderPhase::PostProcess, 0);
+    ExecuteRenderPhase(RenderPhase::FSR3_Upscale, 0);
     ExecuteRenderPhase(RenderPhase::UI, 0);
 
     // ========================================================================

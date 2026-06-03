@@ -12,11 +12,12 @@ enum class RenderPhase : uint8_t {
     BeginBarrier,
 
     // 用户阶段
-    PrePass,     // 阴影、深度、遮挡剔除
-    Opaque,      // 不透明物体
-    Transparent, // 透明物体
-    PostProcess, // 后处理
-    UI,          // 界面
+    PrePass,      // 阴影、深度、遮挡剔除
+    Opaque,       // 不透明物体
+    Transparent,  // 透明物体
+    PostProcess,  // 后处理
+    FSR3_Upscale, // FSR3 超采样
+    UI,           // 界面
 
     // 帧结束屏障（引擎内部使用）
     EndBarrier,

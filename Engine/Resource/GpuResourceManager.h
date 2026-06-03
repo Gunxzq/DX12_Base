@@ -26,6 +26,10 @@ public:
 
     GpuResourceHandle CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
                                       D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
+
+    GpuResourceHandle CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
+                                      const D3D12_CLEAR_VALUE &clearValue,
+                                      D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
     ID3D12Resource *GetResource(GpuResourceHandle handle) const;
 
     void Release(GpuResourceHandle handle, uint64_t fenceValue);

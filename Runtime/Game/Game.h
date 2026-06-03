@@ -5,7 +5,7 @@
 #include "Renderer/Core/CullingSystem.h"
 #include "Renderer/Core/LODSystem.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
-#include "Renderer/Scene/LightManager.h"
+#include "Renderer/Scene/LightManager/LightManager.h"
 #include "Scene/GameWorld.h"
 #include <memory>
 

@@ -63,7 +63,9 @@ void OpaqueRenderer::Update(float deltaTime) {
 
 void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                                D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV) {
+                                D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
+                                D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV,
+                                D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
     if (!m_pso || !m_rootSignature)
         return;
 
@@ -72,9 +74,19 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
     cmdList.Get()->SetGraphicsRootConstantBufferView(2, lightCBAddress);
 
-    // 绑定材质数组 SRV (slot 3)
+    // 绑定材质数组 SRV (slot 3, t0,space1)
     if (materialBufferSRV.ptr != 0) {
         cmdList.Get()->SetGraphicsRootDescriptorTable(3, materialBufferSRV);
+    }
+
+    // 绑定阴影数据 StructuredBuffer (slot 6, t11~t13,space1)
+    if (shadowDataSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(6, shadowDataSRV);
+    }
+
+    // 绑定阴影贴图纹理数组 (slot 7, t14/t20/t26,space1)
+    if (shadowMapSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(7, shadowMapSRV);
     }
 }
 
@@ -137,6 +149,7 @@ void OpaqueRenderer::EndFrame() {
 void OpaqueRenderer::LoadShaders() {
 
     UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    compileFlags |= D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
 
     Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
     HRESULT hr;
@@ -184,15 +197,17 @@ void OpaqueRenderer::CreateRootSignature() {
     auto device = m_context->GetDevice();
 
     // ========================================================================
-    // 根参数布局 (对齐 Common_PBR.hlsl):
+    // 根参数布局 (对齐 Common_PBR.hlsl + ShadowSampling.hlsl):
     //   slot 0: b0 cbPerObject      (CBV)
     //   slot 1: b1 cbPass           (CBV)
     //   slot 2: b2 cbLights         (CBV)
     //   slot 3: t0,space1           StructuredBuffer<MaterialData> (SRV 描述符表)
     //   slot 4: t0                  纹理 SRV (描述符表)
     //   slot 5: t10                 环境贴图 SRV (描述符表)
+    //   slot 6: t11~t13,space1      阴影数据 StructuredBuffer (描述符表)
+    //   slot 7: t14/t20/t26,space1  阴影贴图纹理数组 (描述符表)
     // ========================================================================
-    CD3DX12_ROOT_PARAMETER slotRootParameter[6];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[8];
 
     CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
@@ -203,17 +218,35 @@ void OpaqueRenderer::CreateRootSignature() {
     CD3DX12_DESCRIPTOR_RANGE envMapTable;
     envMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
-    slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL); // b0: cbPerObject
-    slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL); // b1: cbPass
-    slotRootParameter[2].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL); // b2: cbLights
+    // 阴影数据 StructuredBuffer: t11(DirShadowData), t12(PointShadowData), t13(SpotShadowData), space1
+    CD3DX12_DESCRIPTOR_RANGE shadowDataRange;
+    shadowDataRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 11, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+
+    // 阴影贴图纹理数组: t14(DirShadowMaps), t20(PointShadowMaps), t26(SpotShadowMaps), space1
+    // 由于寄存器不连续，需要用两个 range 或分开绑定。这里使用两个 range:
+    CD3DX12_DESCRIPTOR_RANGE shadowMapRanges[2];
+    shadowMapRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 14, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+    shadowMapRanges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 26, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+    // 注意: t20(PointShadowMaps) 是 TextureCube，SRV 维度不同，需要单独 range
+    // 实际上 t14,t20,t26 不连续，HLSL 中是无界数组声明。在 C++ 侧，我们绑定 3 个 range
+    CD3DX12_DESCRIPTOR_RANGE shadowMapRanges3[3];
+    shadowMapRanges3[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 14, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND); // t14: DirShadowMaps
+    shadowMapRanges3[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 20, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND); // t20: PointShadowMaps
+    shadowMapRanges3[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 26, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND); // t26: SpotShadowMaps
+
+    slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL);   // b0: cbPerObject
+    slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);   // b1: cbPass
+    slotRootParameter[2].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL);   // b2: cbLights
     slotRootParameter[3].InitAsDescriptorTable(1, &materialBufferRange, D3D12_SHADER_VISIBILITY_PIXEL); // t0,space1
     slotRootParameter[4].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);            // t0
     slotRootParameter[5].InitAsDescriptorTable(1, &envMapTable, D3D12_SHADER_VISIBILITY_PIXEL);         // t10
+    slotRootParameter[6].InitAsDescriptorTable(1, &shadowDataRange, D3D12_SHADER_VISIBILITY_PIXEL);     // t11~t13,space1
+    slotRootParameter[7].InitAsDescriptorTable(3, shadowMapRanges3, D3D12_SHADER_VISIBILITY_PIXEL);     // t14,t20,t26,space1
 
     // ========================================================================
-    // 静态采样器 (对齐 Common_PBR.hlsl: s0~s5 + s10)
+    // 静态采样器 (对齐 Common_PBR.hlsl + ShadowSampling.hlsl: s0~s5, s10, s11)
     // ========================================================================
-    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[7];
+    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[8];
 
     staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                            D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
@@ -230,8 +263,13 @@ void OpaqueRenderer::CreateRootSignature() {
     // s10: 环境贴图采样器
     staticSamplers[6].Init(10, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                            D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    // s11: 阴影比较采样器
+    staticSamplers[7].Init(11, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT,
+                           D3D12_TEXTURE_ADDRESS_MODE_BORDER, D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+                           D3D12_TEXTURE_ADDRESS_MODE_BORDER, 0.0f, 0, D3D12_COMPARISON_FUNC_LESS_EQUAL,
+                           D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(6, slotRootParameter, 7, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(8, slotRootParameter, 8, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
