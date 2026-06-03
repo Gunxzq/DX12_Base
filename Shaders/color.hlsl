@@ -1,4 +1,5 @@
 #include "Common_PBR.hlsl"
+#include "ShadowSampling.hlsl"
 
 Texture2D gTexture : register(t0);
 
@@ -60,7 +61,16 @@ float4 PS(VertexOut pin) : SV_Target
     // 直接光照
     float3 directLight = 0;
     for (uint i = 0; i < gNumDirLights; ++i)
-        directLight += ComputeDirectionalLight(gLights[i], mat, N, V);
+    {
+        float3 lightContrib = ComputeDirectionalLight(gLights[i], mat, N, V);
+        if (gLights[i].ShadowMapIndex >= 0 && gReceiveShadow)
+        {
+            float shadow = SampleDirShadow(gLights[i].ShadowMapIndex, pin.WorldPos, N, gLights[i].Direction.xyz);
+            lightContrib *= shadow;
+        }
+
+        directLight += lightContrib;
+    }
     for (uint j = gNumDirLights; j < gNumDirLights + gNumPointLights; ++j)
         directLight += ComputePointLight(gLights[j], mat, pin.WorldPos, N, V);
     for (uint k = gNumDirLights + gNumPointLights; k < gNumDirLights + gNumPointLights + gNumSpotLights; ++k)

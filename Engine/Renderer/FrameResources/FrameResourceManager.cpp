@@ -50,7 +50,6 @@ void FrameResourceManager::Initialize(ID3D12Device *device, DescriptorHeapCollec
     m_objectCB.Initialize(device, DEFAULT_BUFFER_SIZE);
     m_skinning.Initialize(device, DEFAULT_BUFFER_SIZE);
     m_instance.Initialize(device, DEFAULT_BUFFER_SIZE);
-    m_light.Initialize(device, DEFAULT_BUFFER_SIZE);
     m_waterCB.Initialize(device, DEFAULT_BUFFER_SIZE);
 
     m_passConstants = {};
@@ -68,7 +67,6 @@ void FrameResourceManager::Shutdown() {
     m_skinning.Shutdown();
     m_instance.Shutdown();
     m_waterCB.Shutdown();
-    m_light.Shutdown();
 
     if (m_passCBResource) {
         if (m_passCBMapped) {
@@ -91,7 +89,6 @@ void FrameResourceManager::BeginFrame(uint64_t completedFence, uint64_t nextFenc
     m_objectCB.Reclaim(completedFence);
     m_skinning.Reclaim(completedFence);
     m_instance.Reclaim(completedFence);
-    m_light.Reclaim(completedFence);
     m_waterCB.Reclaim(completedFence);
 
     m_currentFence = nextFence;
@@ -146,12 +143,6 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateInstance(const void *dat
     if (!m_initialized)
         return 0;
     return AllocateWithRetry(m_instance, data, size, m_currentFence);
-}
-
-D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateLight(const void *data, uint32_t size) {
-    if (!m_initialized)
-        return 0;
-    return AllocateWithRetry(m_light, data, size, m_currentFence);
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateWaterCB(const void *data, uint32_t size) {

@@ -25,7 +25,6 @@ struct PassConstants {
     float FarPlane;                   // 远裁剪平面
     float AspectRatio;                // 屏幕宽高比
     uint32_t FrameCount;              // 帧计数
-    DirectX::XMFLOAT4 AmbientLight;   // 环境光 (RGB, Intensity)
     float Pad[3];
 };
 
@@ -73,49 +72,6 @@ struct MaterialConstants {
     uint32_t EmissiveTextureIndex;          // 自发光颜色纹理索引
     uint32_t OcclusionTextureIndex;         // 遮挡纹理索引
     float MatPad[2];                        // 填充
-};
-
-// ============================================================================
-// 5. Light Constants（光源）
-// ============================================================================
-
-struct Light {
-    DirectX::XMFLOAT4 Strength;
-    DirectX::XMFLOAT4 Direction;
-    DirectX::XMFLOAT4 Position;
-    float FalloffStart;
-    float FalloffEnd;
-    float SpotPower;
-    float Range;
-    float CastShadow;
-    float ShadowBias;
-    float ShadowMapIndex;
-    float Pad;
-};
-
-struct LightConstants {
-    Light Lights[256];
-    uint32_t NumDirLights;
-    uint32_t NumPointLights;
-    uint32_t NumSpotLights;
-    float Pad[5];
-};
-
-// ============================================================================
-// 6. Shadow Constants（阴影）
-// ============================================================================
-
-struct ShadowConstants {
-    DirectX::XMFLOAT4X4 LightViewProj; // 光源视图投影矩阵
-    DirectX::XMFLOAT3 LightDir;        // 光源方向
-    float ShadowMapSize;               // 阴影贴图大小
-    float ShadowBias;                  // 阴影偏移
-    float NormalBias;                  // 法线偏移
-    float CascadeSplit0;               // 级联分割0
-    float CascadeSplit1;               // 级联分割1
-    float CascadeSplit2;               // 级联分割2
-    uint32_t CascadeCount;             // 级联计数
-    float Pad[3];
 };
 
 // ============================================================================

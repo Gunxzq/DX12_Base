@@ -1,6 +1,8 @@
 #ifndef COMMON_PBR_HLSL
 #define COMMON_PBR_HLSL
 
+#pragma enable_unbounded_descriptor_tables
+
 #include "LightingUtil.hlsl"
 
 // =================================================================================================
@@ -82,7 +84,7 @@ SamplerState gSamplerLinearWrap : register(s2);
 SamplerState gSamplerLinearClamp : register(s3);
 SamplerState gSamplerAnisotropicWrap : register(s4);
 SamplerState gSamplerAnisotropicClamp : register(s5);
-
+SamplerComparisonState gShadowSampler : register(s11);
 SamplerState gSampler : register(s2);
 
 // =================================================================================================
