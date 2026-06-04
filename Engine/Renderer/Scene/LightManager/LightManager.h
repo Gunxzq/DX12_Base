@@ -101,20 +101,16 @@ public:
     // D3D12_GPU_VIRTUAL_ADDRESS GetPointShadowAddress() const { return m_pointShadowAddress; }
     // D3D12_GPU_VIRTUAL_ADDRESS GetSpotShadowAddress() const { return m_spotShadowAddress; }
 
-    // // ========================================================================
-    // // 阴影贴图资源访问（供 ShadowRenderer 使用）
-    // // ========================================================================
+    // ========================================================================
+    // 阴影贴图资源访问（供 ShadowRenderer / OpaqueRenderer 使用）
+    // ========================================================================
     const DirShadowResources &GetDirShadowResources() const { return m_dirShadow; }
-    // DirShadowResources &GetDirShadowResources() { return m_dirShadow; }
-    // const PointShadowResources &GetPointShadowResources(uint32_t index) const { return m_pointShadowResources[index];
-    // } const SpotShadowResources &GetSpotShadowResources(uint32_t index) const { return m_spotShadowResources[index];
-    // }
 
-    // // 阴影数据 StructuredBuffer 的 GPU 描述符句柄 (t11~t13, space1)
-    // D3D12_GPU_DESCRIPTOR_HANDLE GetShadowDataSRV() const { return m_shadowDataSRV; }
+    // 阴影数据 StructuredBuffer 的 GPU 描述符句柄 (t11, space1)
+    D3D12_GPU_DESCRIPTOR_HANDLE GetShadowDataSRV() const { return m_shadowDataSRV; }
 
-    // // 阴影贴图纹理数组的 GPU 描述符句柄 (t14/t20/t26, space1)
-    // D3D12_GPU_DESCRIPTOR_HANDLE GetShadowMapSRV() const { return m_shadowMapSRV; }
+    // 阴影贴图纹理的 GPU 描述符句柄 (t14, space1)
+    D3D12_GPU_DESCRIPTOR_HANDLE GetShadowMapSRV() const { return m_shadowMapSRV; }
 
     // const std::vector<DirLightShadowConstants> &GetDirShadowConstants() const { return m_dirShadowConstants; }
     // const std::vector<PointLightShadowConstants> &GetPointShadowConstants() const { return m_pointShadowConstants; }
@@ -192,14 +188,12 @@ private:
     // std::vector<PointShadowResources> m_pointShadowResources;
     // std::vector<SpotShadowResources> m_spotShadowResources;
 
-    // // 阴影数据/贴图 SRV（供 OpaqueRenderer 绑定到根签名 slot 6, slot 7）
-    // D3D12_GPU_DESCRIPTOR_HANDLE m_shadowDataSRV = {}; // t11~t13 StructuredBuffer
-    // D3D12_GPU_DESCRIPTOR_HANDLE m_shadowMapSRV = {};  // t14/t20/t26 TextureArray
+    // 阴影数据/贴图 SRV（供 OpaqueRenderer 绑定到根签名 slot 6, slot 7）
+    D3D12_GPU_DESCRIPTOR_HANDLE m_shadowDataSRV = {}; // t11 StructuredBuffer (DirShadowData)
+    D3D12_GPU_DESCRIPTOR_HANDLE m_shadowMapSRV = {};  // t14 Texture2D (方向光阴影贴图)
 
-    // // 阴影数据 StructuredBuffer 资源句柄 (UPLOAD 堆)
-    // Resource::GpuResourceHandle m_dirShadowDataBufferHandle = {};
-    // Resource::GpuResourceHandle m_pointShadowDataBufferHandle = {};
-    // Resource::GpuResourceHandle m_spotShadowDataBufferHandle = {};
+    // 阴影数据 StructuredBuffer 资源句柄 (UPLOAD 堆)
+    Resource::GpuResourceHandle m_dirShadowDataBufferHandle = {};
 
     // SRV 描述符槽位
     uint32_t m_shadowDataSrvBaseSlot = UINT32_MAX; // t11 基础槽位（t11, t12, t13 连续）

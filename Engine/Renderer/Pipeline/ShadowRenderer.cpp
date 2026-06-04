@@ -45,6 +45,15 @@ void ShadowRenderer::EndFrame() {
 // 阴影 Pass 接口
 // ============================================================================
 
+/**
+ * @brief 开始阴影渲染
+ * @param cmdList 命令列表
+ * @param lightCBAddress 光源常量缓冲区地址
+ * @param dsvHandle 深度模板视图句柄-也就是渲染目标
+ * @param width 宽度
+ * @param height 高度
+ * @date 2026-06-04
+ */
 void ShadowRenderer::Begin(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
                            D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle, uint32_t width, uint32_t height) {
     if (!m_pso || !m_rootSignature) {
@@ -204,10 +213,10 @@ void ShadowRenderer::CreatePSO() {
     // 光栅化状态：增加深度偏移减少阴影痤疮
     // ========================================================================
     D3D12_RASTERIZER_DESC rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    rasterizerDesc.DepthBias = 100000; // 深度偏移常量
+    rasterizerDesc.DepthBias = 100; // 必须为 0
     rasterizerDesc.DepthBiasClamp = 0.0f;
-    rasterizerDesc.SlopeScaledDepthBias = 1.0f;
-    rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK; // 背面剔除
+    rasterizerDesc.SlopeScaledDepthBias = 1.0f; // 龙书使用的值
+    rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
 
     // ========================================================================
     // 混合状态：无颜色输出，无需配置

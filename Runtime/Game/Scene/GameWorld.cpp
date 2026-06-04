@@ -90,6 +90,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
 
     CreateMaterials();
     CreateSkybox();
+    CreateGroundPlane();
     CreateTestCube();
 
     // 创建后台异步执行器（类比帧驱动器，2 个工作线程）
@@ -123,6 +124,12 @@ void GameWorld::Clear() {
     }
     m_cubeEntities.clear();
     m_cubeEntity = INVALID_ENTITY;
+
+    // 移除地面平面
+    if (m_groundPlaneEntity != INVALID_ENTITY) {
+        m_registry->DestroyEntity(m_groundPlaneEntity);
+        m_groundPlaneEntity = INVALID_ENTITY;
+    }
 }
 
 void GameWorld::BuildRenderQueue() {
@@ -168,6 +175,87 @@ void GameWorld::RegisterWaterConstantsCallback() {
     });
 }
 
+void GameWorld::CreateGroundPlane() {
+    if (!m_registry || !m_renderer || !m_context)
+        return;
+
+    // 1. 生成 10x10 平面几何体（XZ 平面，法线朝上）
+    GeometryGenerator geoGen;
+    auto meshData = geoGen.CreateGrid(10.0f, 10.0f, 10, 10); // 10x10 平面，2x2 顶点
+
+    // 2. 创建 GPU 资源
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto device = m_context->DeviceContext->GetDevice();
+
+    size_t vbSize = meshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
+    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
+    if (vbResource) {
+        void *vbMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        vbResource->Map(0, &readRange, &vbMapped);
+        memcpy(vbMapped, meshData.Vertices.data(), vbSize);
+        vbResource->Unmap(0, nullptr);
+    }
+
+    size_t ibSize = meshData.Indices32.size() * sizeof(uint32_t);
+    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
+    if (ibResource) {
+        void *ibMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        ibResource->Map(0, &readRange, &ibMapped);
+        memcpy(ibMapped, meshData.Indices32.data(), ibSize);
+        ibResource->Unmap(0, nullptr);
+    }
+
+    // 3. 构建 TriangleMesh
+    TriangleMesh planeMesh;
+    planeMesh.vertexBufferHandle = vbHandle;
+    planeMesh.indexBufferHandle = ibHandle;
+    planeMesh.vertexCount = static_cast<uint32_t>(meshData.Vertices.size());
+    planeMesh.indexCount = static_cast<uint32_t>(meshData.Indices32.size());
+    planeMesh.vertexStride = sizeof(GeometryGenerator::Vertex);
+    planeMesh.indexFormat = DXGI_FORMAT_R32_UINT;
+    planeMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    planeMesh.isGpuReady = true;
+
+    // 包围盒：10x10 平面在 XZ，Y=0
+    BoundingAABB bounds;
+    bounds.min = XMFLOAT3(-5.0f, 0.0f, -5.0f);
+    bounds.max = XMFLOAT3(5.0f, 0.0f, 5.0f);
+
+    auto &geoMgr = m_context->GeometryResourceManager;
+    GeometryHandle geoHandle = geoMgr->RegisterTriangleMesh(planeMesh);
+    if (!geoHandle.IsValid()) {
+        OutputDebugStringW(L"[ERROR] RegisterTriangleMesh for ground plane failed!\n");
+        return;
+    }
+
+    // 4. 创建 LODMesh
+    LODMesh lodMesh;
+    lodMesh.lodChain = {geoHandle};
+    LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
+
+    // 5. 创建实体 — 平面放在 Y=5.0f，立方体底部与之重合
+    m_groundPlaneEntity = m_registry->CreateEntity();
+
+    XMFLOAT3 position(0.0f, 10.0f, 0.0f);
+    XMFLOAT3 rotation(0.0f, 0.0f, 0.0f);
+    XMFLOAT3 scale(1.0f, 1.0f, 1.0f);
+    m_registry->AddComponent<TransformComponent>(m_groundPlaneEntity, position, rotation, scale);
+
+    MeshComponent meshComp;
+    meshComp.lodMeshHandle = lodHandle;
+    meshComp.localBounds = bounds;
+    meshComp.materialHandle = m_cubeMaterialHandle; // 复用立方体材质
+    meshComp.textureHandle = m_testTextureHandle;
+    meshComp.receivesShadow = true;
+    m_registry->AddComponent<MeshComponent>(m_groundPlaneEntity, std::move(meshComp));
+
+    OutputDebugStringW(L"[GameWorld] Ground plane created at Y=5.0 (10x10)\n");
+}
+
 void GameWorld::CreateTestCube() {
     if (!m_registry || !m_renderer || !m_context) {
         return;
@@ -175,7 +263,7 @@ void GameWorld::CreateTestCube() {
 
     // 1. 创建立方体几何数据
     GeometryGenerator geoGen;
-    auto meshData = geoGen.CreateBox(1.0f, 1.0f, 1.0f, 0);
+    auto meshData = geoGen.CreateBox(1.0f, 1.0f, 1.0f, 0.0f);
 
     // 2. 创建 GPU 资源（直接使用 GeometryGenerator::Vertex）
     auto &gpuMgr = GpuResourceManager::GetInstance();
@@ -238,27 +326,29 @@ void GameWorld::CreateTestCube() {
         return;
     }
 
-    // 4. 创建多个立方体实体，分布在不同位置
+    // 平面在 Y=5.0f，立方体底部 = 平面Y + 立方体半高 = 5.0 + scale*0.5
+    constexpr float PLANE_Y = 10.0f;
+
     struct CubePlacement {
         XMFLOAT3 position;
         XMFLOAT3 rotation;
         XMFLOAT3 scale;
     };
 
-    // 不同位置、不同大小的立方体，产生明显的阴影层次
+    // 不同位置、不同大小的立方体，底部均落在 Y=5.0 平面上
     const std::vector<CubePlacement> cubePlacements = {
-        // 第一个：中心偏前，标准大小 — 原始立方体位置
-        {{0.0f, 15.0f, 5.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}},
-        // 第二个：右前方，放大 2 倍，更容易看到阴影
-        {{8.0f, 10.0f, 10.0f}, {0.0f, 0.0f, 0.0f}, {2.0f, 2.0f, 2.0f}},
-        // 第三个：左前方，略高
-        {{-7.0f, 12.0f, 8.0f}, {0.0f, 0.0f, 0.0f}, {1.5f, 1.5f, 1.5f}},
-        // 第四个：后方，不同高度
-        {{0.0f, 8.0f, -8.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}},
-        // 第五个：远右侧，贴近地面 — 阴影会投射在地形上
-        {{15.0f, 3.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {3.0f, 3.0f, 3.0f}},
-        // 第六个：远左侧
-        {{-14.0f, 5.0f, -3.0f}, {0.0f, 0.0f, 0.0f}, {2.0f, 2.0f, 2.0f}},
+        // 第一个：中心偏前，标准大小 — cube bottom = 5.0 + 0.5*1 = 5.5
+        {{0.0f, PLANE_Y + 0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+        // 第二个：右前方，放大 2 倍 — bottom = 5.0 + 0.5*2 = 6.0
+        {{3.0f, PLANE_Y + 1.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {2.0f, 2.0f, 2.0f}},
+        // 第三个：左前方，1.5倍 — bottom = 5.0 + 0.5*1.5 = 5.75
+        {{-3.0f, PLANE_Y + 0.75f, 1.0f}, {0.0f, 0.0f, 0.0f}, {1.5f, 1.5f, 1.5f}},
+        // 第四个：后方，标准大小 — bottom = 5.5
+        {{0.0f, PLANE_Y + 0.5f, -3.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+        // 第五个：右侧，3倍 — bottom = 5.0 + 0.5*3 = 6.5
+        {{3.0f, PLANE_Y + 1.5f, -1.0f}, {0.0f, 0.0f, 0.0f}, {3.0f, 3.0f, 3.0f}},
+        // 第六个：左侧，2倍 — bottom = 6.0
+        {{-3.0f, PLANE_Y + 1.0f, -2.0f}, {0.0f, 0.0f, 0.0f}, {2.0f, 2.0f, 2.0f}},
     };
 
     m_cubeEntities.clear();
@@ -291,7 +381,7 @@ void GameWorld::CreateTestCube() {
     m_cubeEntity = m_cubeEntities.empty() ? INVALID_ENTITY : m_cubeEntities[0];
 
     // 注册旋转系统
-    RegisterRotationSystem();
+    // RegisterRotationSystem();
     // 注册立方体渲染系统
     RegisterCubeRenderSystem();
 }
@@ -757,10 +847,10 @@ void GameWorld::RegisterCubeRenderSystem() {
                  // 获取材质数组 SRV
                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
-                 // 获取阴影数据 StructuredBuffer SRV (t11~t13, slot 6) 和阴影贴图纹理 SRV (t14, slot 7)
-                 //  auto &lightMgr = LightManager::GetInstance();
-                 //  D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV = lightMgr.GetShadowDataSRV();
-                 //  D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = lightMgr.GetShadowMapSRV();
+                 // 获取阴影数据 StructuredBuffer SRV (t11,space1) 和阴影贴图纹理 SRV (t14,space1)
+                 auto &lightMgr = LightManager::GetInstance();
+                 D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV = lightMgr.GetShadowDataSRV();
+                 D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = lightMgr.GetShadowMapSRV();
 
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
                      m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
@@ -769,10 +859,8 @@ void GameWorld::RegisterCubeRenderSystem() {
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
                  // 开始渲染（传入阴影数据和阴影贴图 SRV）
-                 //  m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
-                 //                         shadowMapSRV);
-
-                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
+                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
+                                        shadowMapSRV);
 
                  // 使用 GameWorld 自己的队列
                  for (const auto &item : m_opaqueQueue) {
@@ -1392,24 +1480,11 @@ void GameWorld::RegisterShadowRenderSystem() {
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
                  auto &lightMgr = LightManager::GetInstance();
+                 D3D12_GPU_VIRTUAL_ADDRESS dirShadowAddr = lightMgr.GetDirShadowAddress();
+                 const auto &shadowRes = lightMgr.GetDirShadowResources();
 
                  // 检查方向光阴影是否可用
-                 if (!lightMgr.HasDirShadow()) {
-                     return;
-                 }
-
-                 const auto &shadowRes = lightMgr.GetDirShadowResources();
-                 if (!shadowRes.isValid) {
-                     return;
-                 }
-
-                 D3D12_GPU_VIRTUAL_ADDRESS dirShadowAddr = lightMgr.GetDirShadowAddress();
-                 if (dirShadowAddr == 0) {
-                     return;
-                 }
-
-                 // 如果场景中没有不透明物体，跳过阴影渲染
-                 if (m_opaqueQueue.Empty()) {
+                 if (!lightMgr.HasDirShadow() || !shadowRes.isValid || dirShadowAddr == 0 || m_opaqueQueue.Empty()) {
                      return;
                  }
 
@@ -1449,6 +1524,7 @@ void GameWorld::RegisterShadowRenderSystem() {
                  // ================================================================
                  // 开始阴影 Pass
                  // ================================================================
+                 //  DSV被设置为渲染目标，深度信息会被写入shadowRes
                  m_shadowRenderer->Begin(cmdList, dirShadowAddr, dsvHandle, shadowRes.resolution, shadowRes.resolution);
 
                  // ================================================================
@@ -1490,14 +1566,6 @@ void GameWorld::RegisterShadowRenderSystem() {
          .renderPhase = RenderPhase::PrePass,
          .alwaysRun = true});
 }
-
-// 3. 在 LightManager.h 中添加缺失的接口（如果还没有）
-// 在 LightManager 类的 public 部分添加：
-// bool HasDirShadow() const { return m_dirShadow.isValid && !m_dirShadowConstants.empty(); }
-// const DirShadowResources &GetDirShadowResources() const { return m_dirShadow; }
-
-// 4. 在 Game.cpp 中创建阴影贴图（在 LightManager 初始化后）
-// LightManager::GetInstance().CreateShadowMapForDirectionalLight(0, 2048, m_context->GetNextFence());
 
 void GameWorld::Update() {
     if (m_backgroundExecutor) {

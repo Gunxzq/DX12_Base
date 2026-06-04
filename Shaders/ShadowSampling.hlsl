@@ -12,7 +12,7 @@
 
 struct DirShadowData
 {
-    float4x4 LightViewProj;
+    row_major float4x4 LightViewProj; // 与 CPU DirLightShadowConstants row-major 布局一致
     float ShadowMapSize;
     float Bias;
     float NormalBias;
@@ -23,7 +23,7 @@ struct DirShadowData
 
 struct PointShadowData
 {
-    float4x4 LightViewProj[6];
+    row_major float4x4 LightViewProj[6];
     float3 LightPosition;
     float ShadowMapSize;
     float Bias;
@@ -36,7 +36,7 @@ struct PointShadowData
 
 struct SpotShadowData
 {
-    float4x4 LightViewProj;
+    row_major float4x4 LightViewProj;
     float ShadowMapSize;
     float Bias;
     float NormalBias;
@@ -68,7 +68,7 @@ float2 ComputeShadowUV(float4 shadowPos)
     // 透视除法
     float3 proj = shadowPos.xyz / shadowPos.w;
     // 从 [-1,1] 映射到 [0,1]
-    float2 uv = proj.xy * 0.5f + 0.5f;
+    float2 uv = float2(proj.x * 0.5f + 0.5f, 1.0f - (proj.y * 0.5f + 0.5f));
     return uv;
 }
 
@@ -77,15 +77,20 @@ float SampleDirShadow(uint shadowIdx, float3 worldPos, float3 normal, float3 lig
 {
     DirShadowData shadow = gDirShadows[shadowIdx];
 
-    // 变换到光源裁剪空间
-    float4 shadowPos = mul(float4(worldPos, 1.0f), shadow.LightViewProj);
+    // 法线偏移（在变换前应用）
+    float3 offsetWorldPos = worldPos + lightDir * shadow.NormalBias;
+    float4 shadowPos = mul(float4(offsetWorldPos, 1.0f), shadow.LightViewProj);
 
-    // 超出阴影范围
-    if (shadowPos.z < 0.0f || shadowPos.z > 1.0f)
+    // 透视除法
+    float3 projCoords = shadowPos.xyz / shadowPos.w;
+
+    // 超出阴影范围检查（使用归一化后的坐标）
+    if (projCoords.z < 0.0f || projCoords.z > 1.0f)
     {
         return 1.0f;
     }
 
+    // UV 坐标：从 [-1,1] 映射到 [0,1]，且翻转 Y（因为 DX 纹理坐标原点在左上角）
     float2 uv = ComputeShadowUV(shadowPos);
 
     // 边界检查
@@ -94,14 +99,7 @@ float SampleDirShadow(uint shadowIdx, float3 worldPos, float3 normal, float3 lig
         return 1.0f;
     }
 
-    // 法线偏移（减少阴影痤疮）
-    float normalBias = shadow.NormalBias;
-    float3 offset = normal * normalBias;
-    shadowPos = mul(float4(worldPos + offset, 1.0f), shadow.LightViewProj);
-    uv = ComputeShadowUV(shadowPos);
-
-    // 深度比较值
-    float compareDepth = shadowPos.z;
+    float compareDepth = projCoords.z;
 
     // PCF 采样
     float shadowFactor = 0.0f;

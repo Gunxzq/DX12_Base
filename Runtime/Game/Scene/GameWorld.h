@@ -58,6 +58,7 @@ public:
     void CreateMaterials();
 
     void CreateTestCube();
+    void CreateGroundPlane();
     void CreateSkybox();
     void CreateWater();
 
@@ -120,6 +121,10 @@ private:
     DX12Engine::Resource::GpuResourceHandle m_materialBufferHandle; // 材质数组 GPU Buffer 句柄
     DX12Engine::ECS::Entity m_cubeEntity;
     std::vector<DX12Engine::ECS::Entity> m_cubeEntities;    // 多个立方体实体
+
+    // 地面平面
+    DX12Engine::ECS::Entity m_groundPlaneEntity;
+    DX12Engine::Resource::MaterialHandle m_groundPlaneMaterialHandle;
 
     // 天空盒数据
     DX12Engine::Resource::TextureHandle m_skyboxTextureHandle;   // 天空盒纹理 SRV

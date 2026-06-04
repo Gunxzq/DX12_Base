@@ -62,8 +62,8 @@ void OpaqueRenderer::Update(float deltaTime) {
 // ========================================================================
 
 void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
-                                D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                                D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV) {
+                                D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
+                                D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
     if (!m_pso || !m_rootSignature)
         return;
 
@@ -75,6 +75,16 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
     // 绑定材质数组 SRV (slot 3)
     if (materialBufferSRV.ptr != 0) {
         cmdList.Get()->SetGraphicsRootDescriptorTable(3, materialBufferSRV);
+    }
+
+    // 绑定阴影数据 StructuredBuffer SRV (slot 6, t11,space1)
+    if (shadowDataSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(6, shadowDataSRV);
+    }
+
+    // 绑定阴影贴图 SRV (slot 7, t14,space1)
+    if (shadowMapSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(7, shadowMapSRV);
     }
 }
 
@@ -136,7 +146,7 @@ void OpaqueRenderer::EndFrame() {
 
 void OpaqueRenderer::LoadShaders() {
 
-    UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
 
     Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
     HRESULT hr;
@@ -184,15 +194,17 @@ void OpaqueRenderer::CreateRootSignature() {
     auto device = m_context->GetDevice();
 
     // ========================================================================
-    // 根参数布局 (对齐 Common_PBR.hlsl):
+    // 根参数布局 (对齐 Common_PBR.hlsl + ShadowSampling.hlsl):
     //   slot 0: b0 cbPerObject      (CBV)
     //   slot 1: b1 cbPass           (CBV)
     //   slot 2: b2 cbLights         (CBV)
     //   slot 3: t0,space1           StructuredBuffer<MaterialData> (SRV 描述符表)
     //   slot 4: t0                  纹理 SRV (描述符表)
     //   slot 5: t10                 环境贴图 SRV (描述符表)
+    //   slot 6: t11,space1          StructuredBuffer<DirShadowData> (SRV 描述符表)
+    //   slot 7: t14,space1          Texture2D 阴影贴图 (SRV 描述符表)
     // ========================================================================
-    CD3DX12_ROOT_PARAMETER slotRootParameter[6];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[8];
 
     CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
@@ -203,17 +215,25 @@ void OpaqueRenderer::CreateRootSignature() {
     CD3DX12_DESCRIPTOR_RANGE envMapTable;
     envMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
+    CD3DX12_DESCRIPTOR_RANGE shadowDataTable;
+    shadowDataTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 11, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+
+    CD3DX12_DESCRIPTOR_RANGE shadowMapTable;
+    shadowMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 14, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+
     slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL); // b0: cbPerObject
     slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL); // b1: cbPass
     slotRootParameter[2].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL); // b2: cbLights
     slotRootParameter[3].InitAsDescriptorTable(1, &materialBufferRange, D3D12_SHADER_VISIBILITY_PIXEL); // t0,space1
     slotRootParameter[4].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);            // t0
     slotRootParameter[5].InitAsDescriptorTable(1, &envMapTable, D3D12_SHADER_VISIBILITY_PIXEL);         // t10
+    slotRootParameter[6].InitAsDescriptorTable(1, &shadowDataTable, D3D12_SHADER_VISIBILITY_PIXEL);     // t11,space1
+    slotRootParameter[7].InitAsDescriptorTable(1, &shadowMapTable, D3D12_SHADER_VISIBILITY_PIXEL);      // t14,space1
 
     // ========================================================================
-    // 静态采样器 (对齐 Common_PBR.hlsl: s0~s5 + s10)
+    // 静态采样器 (对齐 Common_PBR.hlsl: s0~s5 + s10 + s11)
     // ========================================================================
-    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[7];
+    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[8];
 
     staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                            D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
@@ -230,8 +250,13 @@ void OpaqueRenderer::CreateRootSignature() {
     // s10: 环境贴图采样器
     staticSamplers[6].Init(10, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                            D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    // s11: 阴影比较采样器
+    staticSamplers[7].Init(11, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+                           D3D12_TEXTURE_ADDRESS_MODE_BORDER, D3D12_TEXTURE_ADDRESS_MODE_BORDER, 0.0f, 0,
+                           D3D12_COMPARISON_FUNC_LESS_EQUAL, D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK, 0.0f, 0.0f,
+                           D3D12_SHADER_VISIBILITY_PIXEL);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(6, slotRootParameter, 7, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(8, slotRootParameter, 8, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
