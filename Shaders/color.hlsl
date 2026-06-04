@@ -7,6 +7,21 @@
 
 Texture2D gTexture : register(t0);
 
+// =========================================================================
+// 实例化模式：StructuredBuffer 替代 cbPerObject
+// =========================================================================
+#ifdef USE_INSTANCING
+struct InstanceData
+{
+    row_major float4x4 World;
+    row_major float4x4 WorldInvTranspose;
+    uint MaterialIndex;
+    uint ReceiveShadow;
+};
+
+StructuredBuffer<InstanceData> gInstanceData : register(t12, space1);
+#endif
+
 struct VertexIn
 {
     float3 PosL : POSITION;
@@ -22,23 +37,50 @@ struct VertexOut
     float3 WorldNormal : NORMAL;
     float3 WorldTangent : TANGENT;
     float2 TexCoord : TEXCOORD;
+#ifdef USE_INSTANCING
+    nointerpolation uint InstanceIndex : INSTANCE_INDEX;
+#endif
 };
 
-VertexOut VS(VertexIn vin)
+VertexOut VS(VertexIn vin
+#ifdef USE_INSTANCING
+             ,
+             uint instanceID : SV_InstanceID
+#endif
+)
 {
     VertexOut vout;
-    float4 worldPos = mul(float4(vin.PosL, 1.0f), gWorld);
+
+#ifdef USE_INSTANCING
+    InstanceData inst = gInstanceData[instanceID];
+    float4x4 world = inst.World;
+    float4x4 worldInvTrans = inst.WorldInvTranspose;
+    vout.InstanceIndex = instanceID;
+#else
+    float4x4 world = gWorld;
+    float4x4 worldInvTrans = gWorldInvTrans;
+#endif
+
+    float4 worldPos = mul(float4(vin.PosL, 1.0f), world);
     vout.WorldPos = worldPos.xyz;
     vout.PosH = mul(worldPos, gViewProj);
-    vout.WorldNormal = normalize(mul(vin.NormalL, (float3x3)gWorldInvTrans));
-    vout.WorldTangent = normalize(mul(vin.TangentL, (float3x3)gWorld));
+    vout.WorldNormal = normalize(mul(vin.NormalL, (float3x3)worldInvTrans));
+    vout.WorldTangent = normalize(mul(vin.TangentL, (float3x3)world));
     vout.TexCoord = clamp(vin.TexCoord, 0.0f, 0.999f);
     return vout;
 }
 
 float4 PS(VertexOut pin) : SV_Target
 {
-    MaterialData matData = gMaterialData[gMaterialIndex];
+#ifdef USE_INSTANCING
+    uint matIndex = gInstanceData[pin.InstanceIndex].MaterialIndex;
+    uint receiveShadow = gInstanceData[pin.InstanceIndex].ReceiveShadow;
+#else
+    uint matIndex = gMaterialIndex;
+    uint receiveShadow = gReceiveShadow;
+#endif
+
+    MaterialData matData = gMaterialData[matIndex];
 
     float4 texColor = gTexture.Sample(gSampler, pin.TexCoord);
     float3 albedo = matData.BaseColor.rgb * texColor.rgb;
@@ -69,7 +111,7 @@ float4 PS(VertexOut pin) : SV_Target
         float3 lightContrib = ComputeDirectionalLight(gLights[i], mat, N, V);
 
         // 方向光阴影采样
-        if (gLights[i].ShadowMapIndex >= 0 && gReceiveShadow)
+        if (gLights[i].ShadowMapIndex >= 0 && receiveShadow)
         {
             float shadow = SampleDirShadow((uint)gLights[i].ShadowMapIndex, pin.WorldPos, N, gLights[i].Direction.xyz);
             lightContrib *= shadow;

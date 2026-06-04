@@ -116,6 +116,10 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateWithRetry(RingBuffer &bu
     if (addr == 0) {
         // 扩容：当前大小翻倍，至少满足请求大小
         uint32_t newSize = std::max(buffer.GetSize() * 2, size);
+        wchar_t msg[256];
+        swprintf_s(msg, L"[WARN] FrameResourceManager: RingBuffer expanding from %u to %u bytes (requested %u)\n",
+                   buffer.GetSize(), newSize, size);
+        OutputDebugStringW(msg);
         buffer.Initialize(m_device, newSize);
 
         if (data) {

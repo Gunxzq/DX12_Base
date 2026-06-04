@@ -54,15 +54,31 @@ void TextureManager::Shutdown() {
 
 D3D12_GPU_DESCRIPTOR_HANDLE TextureManager::GetSRV(TextureHandle handle) const {
     if (!handle.IsValid() || handle.index >= m_capacity) {
+        if (handle.IsValid()) {
+            char msg[256];
+            sprintf_s(msg, "[WARN] TextureManager::GetSRV: handle invalid or index out of range. index=%u cap=%u\n",
+                      handle.index, m_capacity);
+            OutputDebugStringA(msg);
+        }
         return {};
     }
 
     const TextureEntry &entry = m_entries[handle.index];
     if (!entry.inUse || entry.generation != handle.generation) {
+        char msg[256];
+        sprintf_s(msg,
+                  "[WARN] TextureManager::GetSRV: entry not in use or generation mismatch. "
+                  "index=%u inUse=%d entryGen=%u handleGen=%u\n",
+                  handle.index, entry.inUse, entry.generation, handle.generation);
+        OutputDebugStringA(msg);
         return {};
     }
 
     if (entry.srvIndex == UINT32_MAX || !m_descriptorHeaps) {
+        char msg[256];
+        sprintf_s(msg, "[WARN] TextureManager::GetSRV: srvIndex invalid or descriptorHeaps null. srvIndex=%u\n",
+                  entry.srvIndex);
+        OutputDebugStringA(msg);
         return {};
     }
 

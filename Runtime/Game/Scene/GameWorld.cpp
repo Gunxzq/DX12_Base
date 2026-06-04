@@ -143,8 +143,8 @@ void GameWorld::BuildRenderQueue() {
     m_transparentBuilder->SetCullingResult(&m_context->cullingResult);
     m_transparentBuilder->SetLODResult(&m_context->lodResult);
 
-    // 构建不透明渲染队列
-    m_opaqueBuilder->BuildTyped(*m_registry, m_opaqueQueue);
+    // 构建不透明渲染双队列（Standard / Instanced 分离，避免渲染时 PSO 切换）
+    m_opaqueBuilder->BuildDualQueue(*m_registry, m_opaqueQueueStandard, m_opaqueQueueInstanced);
 
     // 构建透明渲染队列（从远到近排序）
     m_transparentBuilder->BuildTyped(*m_registry, m_transparentQueue);
@@ -263,7 +263,7 @@ void GameWorld::CreateTestCube() {
 
     // 1. 创建立方体几何数据
     GeometryGenerator geoGen;
-    auto meshData = geoGen.CreateBox(1.0f, 1.0f, 1.0f, 0.0f);
+    auto meshData = geoGen.CreateBox(1.0f, 1.0f, 1.0f, 0);
 
     // 2. 创建 GPU 资源（直接使用 GeometryGenerator::Vertex）
     auto &gpuMgr = GpuResourceManager::GetInstance();
@@ -800,8 +800,8 @@ void GameWorld::RegisterCubeRenderSystem() {
         {.name = "CubeRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
-                 if (m_opaqueQueue.Empty()) {
-                     m_context->Logging->Debug("[CubeRender] Opaque queue is empty, skipping draw");
+                 if (m_opaqueQueueStandard.Empty() && m_opaqueQueueInstanced.Empty()) {
+                     m_context->Logging->Debug("[CubeRender] Opaque queues are empty, skipping draw");
                      return;
                  }
 
@@ -862,14 +862,59 @@ void GameWorld::RegisterCubeRenderSystem() {
                  m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
                                         shadowMapSRV);
 
-                 // 使用 GameWorld 自己的队列
-                 for (const auto &item : m_opaqueQueue) {
+                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}; // TODO: 从场景获取
+
+                 // 诊断：打印队列状态
+                 {
+                     static int frameCount = 0;
+                     if (frameCount < 5) {
+                         char msg[256];
+                         size_t stdCount = 0, instCount = 0;
+                         D3D12_GPU_DESCRIPTOR_HANDLE firstStdSRV = {}, firstInstSRV = {};
+                         for (const auto &item : m_opaqueQueueStandard) {
+                             if (item.IsValid()) {
+                                 stdCount++;
+                                 if (firstStdSRV.ptr == 0)
+                                     firstStdSRV = item.textureSRV;
+                             }
+                         }
+                         for (const auto &item : m_opaqueQueueInstanced) {
+                             if (item.IsValid()) {
+                                 instCount++;
+                                 if (firstInstSRV.ptr == 0)
+                                     firstInstSRV = item.textureSRV;
+                             }
+                         }
+                         sprintf_s(msg,
+                                   "[CubeRender] Frame %d: Standard=%zu items (firstSRV=%llx), Instanced=%zu items "
+                                   "(firstSRV=%llx)\n",
+                                   frameCount, stdCount, (unsigned long long)firstStdSRV.ptr, instCount,
+                                   (unsigned long long)firstInstSRV.ptr);
+                         OutputDebugStringA(msg);
+                         frameCount++;
+                     }
+                 }
+
+                 // ================================================================
+                 // Phase 1: 绑定 Standard PSO，绘制所有 Standard 物体
+                 // ================================================================
+                 for (const auto &item : m_opaqueQueueStandard) {
                      if (!item.IsValid())
                          continue;
-                     D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}; // TODO: 从场景获取
-                     m_renderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
-                                          item.textureSRV, envMapSRV);
+                     m_renderer->DrawMesh(cmdList, item.geometryHandle, DirectX::XMMatrixIdentity(),
+                                          item.standard.constantBuffer, item.textureSRV, envMapSRV);
                  }
+
+                 // ================================================================
+                 // Phase 2: 绑定 Instanced PSO，绘制所有 Instanced 批次
+                 // ================================================================
+                 for (const auto &item : m_opaqueQueueInstanced) {
+                     if (!item.IsValid())
+                         continue;
+                     m_renderer->DrawInstanced(cmdList, item.geometryHandle, item.instanced.instanceBuffer,
+                                               item.instanced.instanceCount, item.textureSRV, envMapSRV);
+                 }
+
                  m_renderer->EndFrame();
 
                  // 屏障：RenderTarget -> Present
@@ -1484,7 +1529,8 @@ void GameWorld::RegisterShadowRenderSystem() {
                  const auto &shadowRes = lightMgr.GetDirShadowResources();
 
                  // 检查方向光阴影是否可用
-                 if (!lightMgr.HasDirShadow() || !shadowRes.isValid || dirShadowAddr == 0 || m_opaqueQueue.Empty()) {
+                 if (!lightMgr.HasDirShadow() || !shadowRes.isValid || dirShadowAddr == 0 ||
+                     (m_opaqueQueueStandard.Empty() && m_opaqueQueueInstanced.Empty())) {
                      return;
                  }
 
@@ -1528,14 +1574,25 @@ void GameWorld::RegisterShadowRenderSystem() {
                  m_shadowRenderer->Begin(cmdList, dirShadowAddr, dsvHandle, shadowRes.resolution, shadowRes.resolution);
 
                  // ================================================================
-                 // 遍历不透明队列中的物体，绘制阴影
+                 // 遍历 Standard 队列中的物体，绘制阴影
                  // ================================================================
-                 for (const auto &item : m_opaqueQueue) {
+                 for (const auto &item : m_opaqueQueueStandard) {
                      if (!item.IsValid())
                          continue;
 
-                     // 绘制阴影（使用物体的世界矩阵和 ObjectCB 地址）
-                     m_shadowRenderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress);
+                     m_shadowRenderer->DrawMesh(cmdList, item.geometryHandle, DirectX::XMMatrixIdentity(),
+                                                item.standard.constantBuffer);
+                 }
+
+                 // ================================================================
+                 // 遍历 Instanced 队列中的物体，绘制阴影
+                 // ================================================================
+                 for (const auto &item : m_opaqueQueueInstanced) {
+                     if (!item.IsValid())
+                         continue;
+
+                     m_shadowRenderer->DrawInstanced(cmdList, item.geometryHandle, item.instanced.instanceBuffer,
+                                                     item.instanced.instanceCount);
                  }
 
                  // ================================================================

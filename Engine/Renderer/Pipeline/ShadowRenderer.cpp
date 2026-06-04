@@ -74,6 +74,7 @@ void ShadowRenderer::Begin(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS light
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, lightCBAddress);
 
     m_inPass = true;
+    m_firstInstancedInPass = true;
 }
 
 void ShadowRenderer::DrawMesh(CommandList &cmdList, GeometryHandle geometryHandle, const XMMATRIX &worldMatrix,
@@ -121,6 +122,58 @@ void ShadowRenderer::DrawMesh(CommandList &cmdList, GeometryHandle geometryHandl
     cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
 }
 
+void ShadowRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometryHandle,
+                                   D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount) {
+    if (!m_inPass || !m_geometryManager) {
+        OutputDebugStringW(L"[ERROR] ShadowRenderer::DrawInstanced: Begin not called\n");
+        return;
+    }
+
+    const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
+    if (!mesh || !mesh->isGpuReady) {
+        return;
+    }
+
+    // 仅第一次调用时切换到 Instanced PSO
+    if (m_firstInstancedInPass) {
+        if (m_psoInstanced) {
+            cmdList.Get()->SetPipelineState(m_psoInstanced.Get());
+        }
+        m_firstInstancedInPass = false;
+    }
+
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    ID3D12Resource *vbResource = gpuMgr.GetResource(mesh->vertexBufferHandle);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
+
+    if (!vbResource || !ibResource) {
+        OutputDebugStringW(L"[ERROR] ShadowRenderer::DrawInstanced - Invalid buffer!\n");
+        return;
+    }
+
+    // 设置顶点缓冲区
+    D3D12_VERTEX_BUFFER_VIEW vbView;
+    vbView.BufferLocation = vbResource->GetGPUVirtualAddress();
+    vbView.StrideInBytes = mesh->vertexStride;
+    vbView.SizeInBytes = static_cast<UINT>(mesh->vertexCount * mesh->vertexStride);
+
+    // 设置索引缓冲区
+    D3D12_INDEX_BUFFER_VIEW ibView;
+    ibView.BufferLocation = ibResource->GetGPUVirtualAddress();
+    ibView.Format = mesh->indexFormat;
+    ibView.SizeInBytes = static_cast<UINT>(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2));
+
+    cmdList.Get()->IASetVertexBuffers(0, 1, &vbView);
+    cmdList.Get()->IASetIndexBuffer(&ibView);
+    cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
+
+    // 绑定 InstanceData StructuredBuffer (slot 2, t12,space1)
+    cmdList.Get()->SetGraphicsRootShaderResourceView(2, instanceBufferAddress);
+
+    // 执行实例化绘制
+    cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, instanceCount, 0, 0, 0);
+}
+
 void ShadowRenderer::End(CommandList &cmdList) {
     if (!m_inPass) {
         OutputDebugStringW(L"[WARN] ShadowRenderer::End: Called without matching Begin\n");
@@ -140,7 +193,7 @@ void ShadowRenderer::LoadShaders() {
     Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
     HRESULT hr;
 
-    // 方向光 VS (入口: DirShadowVS)
+    // 方向光 VS Standard (入口: DirShadowVS)
     hr = D3DCompileFromFile(L"Shaders/Shadow.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "DirShadowVS", "vs_5_1",
                             compileFlags, 0, &m_vsBlob, &errors);
     if (FAILED(hr)) {
@@ -148,6 +201,17 @@ void ShadowRenderer::LoadShaders() {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         }
         throw std::runtime_error("ShadowRenderer: Failed to compile DirShadowVS");
+    }
+
+    // 方向光 VS Instanced (入口: DirShadowVS, 定义 USE_INSTANCING)
+    D3D_SHADER_MACRO instancedDefines[] = {"USE_INSTANCING", "1", nullptr, nullptr};
+    hr = D3DCompileFromFile(L"Shaders/Shadow.hlsl", instancedDefines, D3D_COMPILE_STANDARD_FILE_INCLUDE, "DirShadowVS",
+                            "vs_5_1", compileFlags, 0, &m_vsInstancedBlob, &errors);
+    if (FAILED(hr)) {
+        if (errors) {
+            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+        }
+        throw std::runtime_error("ShadowRenderer: Failed to compile DirShadowVS (Instanced)");
     }
 
     // 阴影 PS (入口: ShadowPS)
@@ -168,15 +232,18 @@ void ShadowRenderer::CreateRootSignature() {
 
     // ========================================================================
     // 根参数布局 (对齐 Shadow.hlsl):
-    //   slot 0: b0 cbShadowObject  (CBV — 物体 World 矩阵)
+    //   slot 0: b0 cbShadowObject  (CBV — 物体 World 矩阵, Standard 模式)
     //   slot 1: b1 cbDirShadow     (CBV — 光源 VP 矩阵等)
+    //   slot 2: t12,space1         (SRV — InstanceData StructuredBuffer, Instanced 模式)
     // ========================================================================
-    CD3DX12_ROOT_PARAMETER slotRootParameter[2];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[3];
 
     slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_VERTEX); // b0
     slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // b1
+    slotRootParameter[2].InitAsShaderResourceView(
+        12, 1, D3D12_SHADER_VISIBILITY_VERTEX); // t12,space1: InstanceData StructuredBuffer
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(2, slotRootParameter, 0, nullptr,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(3, slotRootParameter, 0, nullptr,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -244,6 +311,15 @@ void ShadowRenderer::CreatePSO() {
     psoDesc.SampleDesc.Quality = 0;
 
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso)));
+
+    // ========================================================================
+    // PSO 描述 (Instanced) — 使用 USE_INSTANCING 编译的 VS
+    // ========================================================================
+    if (m_vsInstancedBlob) {
+        psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsInstancedBlob->GetBufferPointer()),
+                      m_vsInstancedBlob->GetBufferSize()};
+        ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_psoInstanced)));
+    }
 
     OutputDebugStringW(L"[INFO] Shadow PSO created successfully\n");
 }

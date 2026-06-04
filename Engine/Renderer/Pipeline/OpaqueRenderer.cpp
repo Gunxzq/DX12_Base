@@ -30,13 +30,13 @@ void OpaqueRenderer::Initialize() {
 
     LoadShaders();
 
-    if (!m_vsBlob || !m_psBlob) {
+    if (!m_vsStandard || !m_psBlob) {
         OutputDebugStringW(L"[ERROR] Failed to load shaders!\n");
         throw std::runtime_error("OpaqueRenderer: Failed to load shaders");
     }
 
     CreateRootSignature();
-    CreatePSO();
+    CreatePSOs();
 
     const auto &viewport = m_context->GetViewport();
     OnResize(static_cast<uint32_t>(viewport.Width), static_cast<uint32_t>(viewport.Height));
@@ -64,10 +64,10 @@ void OpaqueRenderer::Update(float deltaTime) {
 void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
                                 D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
-    if (!m_pso || !m_rootSignature)
+    if (!m_psoStandard || !m_rootSignature)
         return;
 
-    cmdList.Get()->SetPipelineState(m_pso.Get());
+    cmdList.Get()->SetPipelineState(m_psoStandard.Get());
     cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
     cmdList.Get()->SetGraphicsRootConstantBufferView(2, lightCBAddress);
@@ -86,6 +86,9 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
     if (shadowMapSRV.ptr != 0) {
         cmdList.Get()->SetGraphicsRootDescriptorTable(7, shadowMapSRV);
     }
+
+    // 重置帧内 PSO 切换追踪
+    m_firstInstancedInFrame = true;
 }
 
 void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
@@ -100,6 +103,8 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
     if (!mesh || !mesh->isGpuReady) {
         return;
     }
+
+    // PSO 已在 BeginFrame 中设置为 m_psoStandard，不再每物体重复切换
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Resource *vbResource = gpuMgr.GetResource(mesh->vertexBufferHandle);
@@ -126,7 +131,15 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objectCBAddress);
 
     // 纹理 SRV (slot 4)
-    cmdList.Get()->SetGraphicsRootDescriptorTable(4, textureSRV);
+    if (textureSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(4, textureSRV);
+    } else {
+        static int warnCount = 0;
+        if (warnCount < 3) {
+            OutputDebugStringW(L"[WARN] OpaqueRenderer::DrawMesh: textureSRV is null, texture binding skipped\n");
+            warnCount++;
+        }
+    }
 
     // 环境贴图 SRV (slot 5, t10)
     if (envMapSRV.ptr != 0) {
@@ -134,6 +147,70 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
     }
 
     cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
+}
+
+void OpaqueRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometryHandle,
+                                   D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount,
+                                   D3D12_GPU_DESCRIPTOR_HANDLE textureSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) {
+    if (!m_geometryManager) {
+        OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawInstanced - GeometryResourceManager not set!\n");
+        return;
+    }
+
+    const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
+    if (!mesh || !mesh->isGpuReady) {
+        return;
+    }
+
+    // 仅第一次调用时从 Standard PSO 切换到 Instanced PSO
+    // （双队列保证所有 Instanced 物体连续绘制，PSO 切换仅发生一次）
+    if (m_firstInstancedInFrame) {
+        cmdList.Get()->SetPipelineState(m_psoInstanced.Get());
+        m_firstInstancedInFrame = false;
+    }
+
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    ID3D12Resource *vbResource = gpuMgr.GetResource(mesh->vertexBufferHandle);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
+
+    if (!vbResource || !ibResource) {
+        OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawInstanced - Invalid buffer!\n");
+        return;
+    }
+
+    // 设置顶点/索引缓冲区
+    D3D12_VERTEX_BUFFER_VIEW vbView;
+    vbView.BufferLocation = vbResource->GetGPUVirtualAddress();
+    vbView.StrideInBytes = mesh->vertexStride;
+    vbView.SizeInBytes = static_cast<UINT>(mesh->vertexCount * mesh->vertexStride);
+    cmdList.Get()->IASetVertexBuffers(0, 1, &vbView);
+
+    D3D12_INDEX_BUFFER_VIEW ibView;
+    ibView.BufferLocation = ibResource->GetGPUVirtualAddress();
+    ibView.Format = mesh->indexFormat;
+    ibView.SizeInBytes = static_cast<UINT>(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2));
+    cmdList.Get()->IASetIndexBuffer(&ibView);
+    cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
+
+    // 绑定实例化数据 (slot 8, t12,space1) — 直接使用 GPU VA
+    cmdList.Get()->SetGraphicsRootShaderResourceView(8, instanceBufferAddress);
+
+    // 纹理和环境绑定
+    if (textureSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(4, textureSRV);
+    } else {
+        static int warnCount = 0;
+        if (warnCount < 3) {
+            OutputDebugStringW(L"[WARN] OpaqueRenderer::DrawInstanced: textureSRV is null, texture binding skipped\n");
+            warnCount++;
+        }
+    }
+    if (envMapSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(5, envMapSRV);
+    }
+
+    // 执行实例化绘制
+    cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, instanceCount, 0, 0, 0);
 }
 
 void OpaqueRenderer::EndFrame() {
@@ -158,7 +235,7 @@ void OpaqueRenderer::LoadShaders() {
                             "vs_5_1",                          // target profile
                             compileFlags,                      // flags1
                             0,                                 // flags2
-                            &m_vsBlob,                         // output shader blob
+                            &m_vsStandard,                     // output shader blob
                             &errors                            // error messages
     );
 
@@ -170,6 +247,16 @@ void OpaqueRenderer::LoadShaders() {
             OutputDebugStringA("============================\n");
         }
         throw std::runtime_error("OpaqueRenderer: Failed to compile Vertex Shader");
+    }
+
+    D3D_SHADER_MACRO instancedDefines[] = {"USE_INSTANCING", "1", nullptr, nullptr};
+    hr = D3DCompileFromFile(L"Shaders/color.hlsl", instancedDefines, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
+                            compileFlags, 0, &m_vsInstanced, &errors);
+    if (FAILED(hr)) {
+        if (errors) {
+            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+        }
+        throw std::runtime_error("OpaqueRenderer: Failed to compile Instanced VS");
     }
 
     // 2. 编译像素着色器
@@ -203,8 +290,9 @@ void OpaqueRenderer::CreateRootSignature() {
     //   slot 5: t10                 环境贴图 SRV (描述符表)
     //   slot 6: t11,space1          StructuredBuffer<DirShadowData> (SRV 描述符表)
     //   slot 7: t14,space1          Texture2D 阴影贴图 (SRV 描述符表)
+    //   slot 8: t12,space1                  (SRV) - Instanced 模式（StructuredBuffer<InstanceData>）
     // ========================================================================
-    CD3DX12_ROOT_PARAMETER slotRootParameter[8];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[9];
 
     CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
@@ -229,6 +317,8 @@ void OpaqueRenderer::CreateRootSignature() {
     slotRootParameter[5].InitAsDescriptorTable(1, &envMapTable, D3D12_SHADER_VISIBILITY_PIXEL);         // t10
     slotRootParameter[6].InitAsDescriptorTable(1, &shadowDataTable, D3D12_SHADER_VISIBILITY_PIXEL);     // t11,space1
     slotRootParameter[7].InitAsDescriptorTable(1, &shadowMapTable, D3D12_SHADER_VISIBILITY_PIXEL);      // t14,space1
+    slotRootParameter[8].InitAsShaderResourceView(
+        12, 1, D3D12_SHADER_VISIBILITY_VERTEX); // t12,space1: InstanceData StructuredBuffer
 
     // ========================================================================
     // 静态采样器 (对齐 Common_PBR.hlsl: s0~s5 + s10 + s11)
@@ -256,7 +346,7 @@ void OpaqueRenderer::CreateRootSignature() {
                            D3D12_COMPARISON_FUNC_LESS_EQUAL, D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK, 0.0f, 0.0f,
                            D3D12_SHADER_VISIBILITY_PIXEL);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(8, slotRootParameter, 8, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(9, slotRootParameter, 8, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -273,7 +363,7 @@ void OpaqueRenderer::CreateRootSignature() {
                                               serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
 }
 
-void OpaqueRenderer::CreatePSO() {
+void OpaqueRenderer::CreatePSOs() {
     auto device = m_context->GetDevice();
 
     // 输入布局对齐 GeometryGenerator::Vertex (44 bytes):
@@ -286,7 +376,7 @@ void OpaqueRenderer::CreatePSO() {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = {inputLayout, _countof(inputLayout)};
     psoDesc.pRootSignature = m_rootSignature.Get();
-    psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsBlob->GetBufferPointer()), m_vsBlob->GetBufferSize()};
+    psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsStandard->GetBufferPointer()), m_vsStandard->GetBufferSize()};
     psoDesc.PS = {reinterpret_cast<BYTE *>(m_psBlob->GetBufferPointer()), m_psBlob->GetBufferSize()};
 
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -314,7 +404,14 @@ void OpaqueRenderer::CreatePSO() {
     psoDesc.SampleDesc.Count = m_context->Is4xMsaaEnabled() ? 4 : 1;
     psoDesc.SampleDesc.Quality = m_context->Is4xMsaaEnabled() ? (m_context->Get4xMsaaQuality() - 1) : 0;
 
-    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso)));
+    psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsStandard->GetBufferPointer()), m_vsStandard->GetBufferSize()};
+    psoDesc.PS = {reinterpret_cast<BYTE *>(m_psBlob->GetBufferPointer()), m_psBlob->GetBufferSize()};
+    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_psoStandard)));
+
+    // 创建 Instanced PSO（实例化）
+    psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsInstanced->GetBufferPointer()), m_vsInstanced->GetBufferSize()};
+    psoDesc.PS = {reinterpret_cast<BYTE *>(m_psBlob->GetBufferPointer()), m_psBlob->GetBufferSize()};
+    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_psoInstanced)));
 
     OutputDebugStringW(L"[INFO] PSO created successfully\n");
 }

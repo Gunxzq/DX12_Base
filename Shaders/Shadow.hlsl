@@ -84,6 +84,34 @@ struct GeoOut
 //==============================================================================
 // 方向光阴影 VS — 使用方向光 VP 矩阵
 //==============================================================================
+
+// InstanceData 结构体（与 C++ 侧 FrameResourceTypes.h 保持一致）
+// C++ 布局: XMFLOAT4X4 World (64B) + XMFLOAT4X4 WorldInvTranspose (64B)
+//          + uint32 MaterialIndex + uint32 ReceiveShadow + float Pad[2]
+//          = 144 bytes (含 HLSL 对齐填充)
+struct InstanceData
+{
+    row_major float4x4 World;             // 64 bytes
+    row_major float4x4 WorldInvTranspose; // 64 bytes
+    uint MaterialIndex;                   // 4 bytes
+    uint ReceiveShadow;                   // 4 bytes
+};
+
+#ifdef USE_INSTANCING
+// Instanced 模式：从 StructuredBuffer 读取每实例 World 矩阵
+StructuredBuffer<InstanceData> gInstanceData : register(t12, space1);
+
+VertexOut DirShadowVS(VertexIn vin, uint instanceID : SV_InstanceID)
+{
+    VertexOut vout;
+
+    float4 worldPos = mul(float4(vin.PosL, 1.0f), gInstanceData[instanceID].World);
+    vout.PosH = mul(worldPos, gDirLightViewProj);
+
+    return vout;
+}
+#else
+// Standard 模式：使用 gWorld CBV
 VertexOut DirShadowVS(VertexIn vin)
 {
     VertexOut vout;
@@ -93,6 +121,7 @@ VertexOut DirShadowVS(VertexIn vin)
 
     return vout;
 }
+#endif
 
 //==============================================================================
 // 点光源阴影 VS — 只传递世界坐标给 GS

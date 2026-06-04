@@ -49,9 +49,15 @@ public:
                     D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
                     D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV);
 
+    // 单物体渲染（Standard 模式）
     void DrawMesh(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
                   const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
                   D3D12_GPU_DESCRIPTOR_HANDLE textureSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV);
+
+    // 实例化渲染（Instanced 模式）
+    void DrawInstanced(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
+                       D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount,
+                       D3D12_GPU_DESCRIPTOR_HANDLE textureSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV);
 
     void EndFrame();
 
@@ -61,7 +67,7 @@ private:
     // ========================================================================
 
     void CreateRootSignature();
-    void CreatePSO();
+    void CreatePSOs();
     void LoadShaders();
 
     // ========================================================================
@@ -71,18 +77,23 @@ private:
     D3D12DeviceContext *m_context = nullptr;
 
     // 根签名 & PSO
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature; // 根签名（Standard 和 Instanced 共用）
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_psoStandard;   // 单物体模式
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_psoInstanced;  // 实例化模式
 
     Resource::GeometryResourceManager *m_geometryManager = nullptr;
     Resource::MaterialManager *m_materialManager = nullptr;
 
     // 着色器字节码
-    Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;
-    Microsoft::WRL::ComPtr<ID3DBlob> m_psBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> m_vsStandard;  // 单物体 VS
+    Microsoft::WRL::ComPtr<ID3DBlob> m_vsInstanced; // 实例化 VS
+    Microsoft::WRL::ComPtr<ID3DBlob> m_psBlob;      // PS 共用
 
     // 投影矩阵（窗口 Resize 时更新）
     DirectX::XMMATRIX m_projectionMatrix;
+
+    // 帧内 PSO 切换追踪（双队列方案下每帧仅切换 1 次）
+    bool m_firstInstancedInFrame = true;
 };
 
 } // namespace DX12Engine::Renderer

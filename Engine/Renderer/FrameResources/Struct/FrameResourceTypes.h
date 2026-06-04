@@ -29,7 +29,7 @@ struct PassConstants {
 };
 
 // ============================================================================
-// 2. Object Constants（物体变换）
+// 2. Object Constants（物体变换）处理独立/特殊物体
 // ============================================================================
 
 struct ObjectConstants {
@@ -144,15 +144,15 @@ struct Particle {
 };
 
 // ============================================================================
-// 11. Instance Data（GPU 实例化）
+// 11. Instance Data（GPU 实例化）处理批量/重复物体
 // ============================================================================
 
 struct InstanceData {
     DirectX::XMFLOAT4X4 World;             // 物体变换矩阵
     DirectX::XMFLOAT4X4 WorldInvTranspose; // 物体逆变换矩阵的转置
-    uint32_t MaterialIndex;                // 材质索引
-    uint32_t ReceiveShadow;                // 是否接收阴影
-    float Pad[2];
+    uint32_t MaterialIndex;                // 材质索引-后续可改进为材质模板
+    // uint32_t TextureArrayIndex;            // 关键！指向纹理数组的索引，而非具体纹理
+    uint32_t ReceiveShadow; // 是否接收阴影
 };
 
 // ============================================================================

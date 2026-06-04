@@ -43,6 +43,9 @@ public:
     void DrawMesh(CommandList &cmdList, Resource::GeometryHandle geometryHandle, const DirectX::XMMATRIX &worldMatrix,
                   D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress);
 
+    void DrawInstanced(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
+                       D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount);
+
     // 结束阴影 Pass
     // @param cmdList 命令列表
     void End(CommandList &cmdList);
@@ -67,15 +70,18 @@ private:
     // 根签名
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
 
-    // PSO
+    // PSO (Standard / Instanced)
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_psoInstanced;
 
     // 着色器字节码
     Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> m_vsInstancedBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> m_psBlob;
 
     // 当前 Pass 状态
     bool m_inPass = false;
+    bool m_firstInstancedInPass = true;
 };
 
 } // namespace DX12Engine::Renderer

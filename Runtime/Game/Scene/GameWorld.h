@@ -109,9 +109,10 @@ private:
     std::unique_ptr<DX12Engine::Renderer::WaterRenderer> m_waterRenderer;
     std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer; // 阴影渲染器
 
-    // 新的构建器和渲染队列（由 GameWorld 持有）
+    // 构建器和双队列（Standard 和 Instanced 分离，避免 PSO 切换）
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderItemBuilder> m_opaqueBuilder;
-    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::OpaqueRenderItem> m_opaqueQueue;
+    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::OpaqueRenderItem> m_opaqueQueueStandard;
+    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::OpaqueRenderItem> m_opaqueQueueInstanced;
 
     std::unique_ptr<DX12Engine::Renderer::TransparentRenderItemBuilder> m_transparentBuilder;
     DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::TransparentRenderItem> m_transparentQueue;
@@ -120,7 +121,7 @@ private:
     DX12Engine::Resource::MaterialHandle m_cubeMaterialHandle;
     DX12Engine::Resource::GpuResourceHandle m_materialBufferHandle; // 材质数组 GPU Buffer 句柄
     DX12Engine::ECS::Entity m_cubeEntity;
-    std::vector<DX12Engine::ECS::Entity> m_cubeEntities;    // 多个立方体实体
+    std::vector<DX12Engine::ECS::Entity> m_cubeEntities; // 多个立方体实体
 
     // 地面平面
     DX12Engine::ECS::Entity m_groundPlaneEntity;
