@@ -101,7 +101,7 @@ bool Game::Initialize() {
                 // 上传光源数据到 GPU（使用 UpdateAndUpload，内部脏标记自动判断是否更新）
                 // 传入相机位置用于方向光阴影矩阵计算
                 // ========================================================================
-                LightManager::GetInstance().UpdateAndUpload(m_context->GetNextFence(), camera.Position);
+                LightManager::GetInstance().UpdateAndUpload(m_context->GetNextFence(), camera);
 
                 m_context->FrameResourceManager->UpdatePassConstants();
             },

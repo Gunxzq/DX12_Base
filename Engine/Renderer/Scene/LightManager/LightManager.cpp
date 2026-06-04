@@ -129,7 +129,7 @@ void LightManager::Shutdown() {
  * @param cameraPos
  * @date 2026-06-03
  */
-void LightManager::UpdateAndUpload(uint64_t fence, const DirectX::XMFLOAT3 &cameraPos) {
+void LightManager::UpdateAndUpload(uint64_t fence, const Camera &camera) {
     if (!m_initialized)
         return;
 
@@ -139,7 +139,7 @@ void LightManager::UpdateAndUpload(uint64_t fence, const DirectX::XMFLOAT3 &came
     }
 
     // if (m_shadowDirty) {
-    RebuildShadowConstants(cameraPos);
+    RebuildShadowConstants(camera);
     // }
 
     // 只在脏数据变化时才上传，光源数据是低频更新的
@@ -421,12 +421,12 @@ void LightManager::RebuildLightConstants() {
     // 注意：不在此处清除 m_lightDirty，由 UpdateAndUpload 在上传完成后统一清除
 }
 
-void LightManager::RebuildShadowConstants(const DirectX::XMFLOAT3 &cameraPos) {
+void LightManager::RebuildShadowConstants(const Camera &camera) {
     // 方向光阴影常量
     m_dirShadowConstants.clear();
     for (size_t i = 0; i < m_dirLights.size(); ++i) {
         DirLightShadowConstants constants = {};
-        ComputeDirShadowMatrix(m_dirLights[i], constants, cameraPos);
+        ComputeDirShadowMatrix(m_dirLights[i], constants, camera);
         // 设置 ShadowMapIndex：gDirShadowMaps[] 纹理数组索引（目前只有一张方向光阴影贴图，索引为 0）
         constants.ShadowMapIndex = m_dirShadow.isValid ? 0u : UINT32_MAX;
         m_dirShadowConstants.push_back(constants);
@@ -458,40 +458,97 @@ void LightManager::RebuildShadowConstants(const DirectX::XMFLOAT3 &cameraPos) {
 }
 
 void LightManager::ComputeDirShadowMatrix(const Light &light, DirLightShadowConstants &outConstants,
-                                          const DirectX::XMFLOAT3 &cameraPos) {
+                                          const Camera &mainCamera) {
     using namespace DirectX;
 
+    // 1. 限制阴影覆盖距离（根据场景调整）
+    const float SHADOW_DISTANCE = 30.0f; // 相机前方 30 单位
+    const float MAX_RANGE = 35.0f;       // 最大覆盖范围 35x35
+    const float EXPAND = 1.0f;           // 包围盒扩大值
+
+    // 创建临时相机，限制远平面
+    Camera shadowCamera = mainCamera;
+    shadowCamera.FarPlane = SHADOW_DISTANCE;
+
+    // 2. 构建视锥体并获取角点
+    Frustum cameraFrustum;
+    cameraFrustum.BuildFromCamera(shadowCamera.Position, shadowCamera.Forward, shadowCamera.Up, shadowCamera.FOV,
+                                  shadowCamera.AspectRatio, shadowCamera.NearPlane, shadowCamera.FarPlane);
+
+    const auto &worldCorners = cameraFrustum.GetCorners();
+
+    // 3. 光源方向
     XMVECTOR lightDir = XMLoadFloat4(&light.Direction);
     lightDir = XMVector3Normalize(lightDir);
 
-    // ================================================================
-    // 固定场景中心，不跟相机走
-    // ================================================================
-    XMFLOAT3 sceneCenter(0.0f, 8.0f, 0.0f); // 你的场景中心
-    XMVECTOR centerVec = XMLoadFloat3(&sceneCenter);
+    // 4. 计算视锥体中心
+    XMVECTOR centerVec = XMVectorZero();
+    for (int i = 0; i < 8; ++i) {
+        centerVec = XMVectorAdd(centerVec, XMLoadFloat3(&worldCorners[i]));
+    }
+    centerVec = XMVectorScale(centerVec, 1.0f / 8.0f);
 
-    // 光源位置：场景中心向光源反方向移动
-    float distance = 150.0f; // 足够远以覆盖整个场景
+    // 5. 构建光源视图矩阵
+    float distance = MAX_RANGE * 1.5f;
     XMVECTOR lightPos = XMVectorSubtract(centerVec, XMVectorScale(lightDir, distance));
-
-    // 目标点：场景中心（固定）
     XMVECTOR target = centerVec;
     XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
-    XMMATRIX view = XMMatrixLookAtLH(lightPos, target, up);
+    XMMATRIX lightView = XMMatrixLookAtLH(lightPos, target, up);
 
-    // 正交投影：覆盖场景范围
-    float halfSize = 25.0f; // 覆盖 X:-25~25, Z:-25~25
-    float nearPlane = 0.1f;
-    float farPlane = 300.0f; // 足够远
-    XMMATRIX proj = XMMatrixOrthographicLH(halfSize * 2.0f, halfSize * 2.0f, nearPlane, farPlane);
+    // 6. 将角点转换到光源空间，计算 AABB
+    XMVECTOR lightSpaceMin = XMVectorSet(FLT_MAX, FLT_MAX, FLT_MAX, 0.0f);
+    XMVECTOR lightSpaceMax = XMVectorSet(-FLT_MAX, -FLT_MAX, -FLT_MAX, 0.0f);
 
-    XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+    for (int i = 0; i < 8; ++i) {
+        XMVECTOR corner = XMLoadFloat3(&worldCorners[i]);
+        XMVECTOR lightSpaceCorner = XMVector3TransformCoord(corner, lightView);
+        lightSpaceMin = XMVectorMin(lightSpaceMin, lightSpaceCorner);
+        lightSpaceMax = XMVectorMax(lightSpaceMax, lightSpaceCorner);
+    }
+
+    // 7. 扩大包围盒并限制范围
+    XMVECTOR expand = XMVectorSet(EXPAND, EXPAND, EXPAND * 2.0f, 0.0f);
+    lightSpaceMin = XMVectorSubtract(lightSpaceMin, expand);
+    lightSpaceMax = XMVectorAdd(lightSpaceMax, expand);
+
+    float l = XMVectorGetX(lightSpaceMin);
+    float r = XMVectorGetX(lightSpaceMax);
+    float b = XMVectorGetY(lightSpaceMin);
+    float t = XMVectorGetY(lightSpaceMax);
+    float n = XMVectorGetZ(lightSpaceMin);
+    float f = XMVectorGetZ(lightSpaceMax);
+
+    // 限制最大范围
+    float rangeX = r - l;
+    float rangeY = t - b;
+    if (rangeX > MAX_RANGE) {
+        float centerX = (l + r) * 0.5f;
+        l = centerX - MAX_RANGE * 0.5f;
+        r = centerX + MAX_RANGE * 0.5f;
+    }
+    if (rangeY > MAX_RANGE) {
+        float centerY = (b + t) * 0.5f;
+        b = centerY - MAX_RANGE * 0.5f;
+        t = centerY + MAX_RANGE * 0.5f;
+    }
+
+    if (r <= l)
+        r = l + 1.0f;
+    if (t <= b)
+        t = b + 1.0f;
+    if (f <= n)
+        f = n + 1.0f;
+
+    // 8. 构建正交投影矩阵
+    XMMATRIX lightProj = XMMatrixOrthographicOffCenterLH(l, r, b, t, n, f);
+    XMMATRIX viewProj = XMMatrixMultiply(lightView, lightProj);
     XMStoreFloat4x4(&outConstants.LightViewProj, viewProj);
 
+    // 9. 参数设置（使用你验证有效的值）
     outConstants.ShadowMapSize = 2048.0f;
-    outConstants.Bias = 0.0005f;
-    outConstants.NormalBias = 0.001f;
+    outConstants.Bias = 0.0001f;
+    outConstants.NormalBias = 0.0001f;
     outConstants.ShadowStrength = 1.0f;
     outConstants.ShadowMapIndex = 0;
 }

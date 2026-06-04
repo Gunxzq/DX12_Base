@@ -3,6 +3,8 @@
 #include "LightResourceTypes.h"
 #include "Renderer/FrameResources/RingBuffer.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
+#include "Renderer/Scene/Camera.h"
+#include "Renderer/Scene/Struct/Frustum.h"
 #include "Resource/Struct/ResourceHandle.h"
 #include <d3d12.h>
 #include <unordered_map>
@@ -61,7 +63,7 @@ public:
     void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps);
     void Shutdown();
 
-    void UpdateAndUpload(uint64_t fence, const DirectX::XMFLOAT3 &cameraPos = DirectX::XMFLOAT3(0, 0, 0));
+    void UpdateAndUpload(uint64_t fence, const Camera &camera);
 
     void Clear();
 
@@ -142,11 +144,10 @@ private:
     void RebuildLightConstants();
 
     // 重建阴影常量数组
-    void RebuildShadowConstants(const DirectX::XMFLOAT3 &cameraPos);
+    void RebuildShadowConstants(const Camera &camera);
 
     // 计算单个光源的阴影 VP 矩阵
-    void ComputeDirShadowMatrix(const Light &light, DirLightShadowConstants &outConstants,
-                                const DirectX::XMFLOAT3 &cameraPos);
+    void ComputeDirShadowMatrix(const Light &light, DirLightShadowConstants &outConstants, const Camera &camera);
     // void ComputePointShadowMatrices(const Light &light, PointLightShadowConstants &outConstants);
     // void ComputeSpotShadowMatrix(const Light &light, SpotLightShadowConstants &outConstants);
 

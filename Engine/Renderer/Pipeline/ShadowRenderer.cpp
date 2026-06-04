@@ -213,9 +213,9 @@ void ShadowRenderer::CreatePSO() {
     // 光栅化状态：增加深度偏移减少阴影痤疮
     // ========================================================================
     D3D12_RASTERIZER_DESC rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    rasterizerDesc.DepthBias = 100; // 必须为 0
+    rasterizerDesc.DepthBias = 100;
     rasterizerDesc.DepthBiasClamp = 0.0f;
-    rasterizerDesc.SlopeScaledDepthBias = 1.0f; // 龙书使用的值
+    rasterizerDesc.SlopeScaledDepthBias = 10.0f;
     rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
 
     // ========================================================================
