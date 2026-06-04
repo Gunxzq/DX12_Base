@@ -14,7 +14,7 @@
 //==============================================================================
 cbuffer cbShadowObject : register(b0)
 {
-    float4x4 gWorld;
+    row_major float4x4 gWorld;
 }
 
 //==============================================================================
@@ -22,7 +22,7 @@ cbuffer cbShadowObject : register(b0)
 //==============================================================================
 cbuffer cbDirShadow : register(b1)
 {
-    float4x4 gDirLightViewProj;
+    row_major float4x4 gDirLightViewProj;
     float gDirShadowMapSize;
     float gDirBias;
     float gDirNormalBias;
@@ -36,7 +36,7 @@ cbuffer cbDirShadow : register(b1)
 //==============================================================================
 cbuffer cbPointShadow : register(b1)
 {
-    float4x4 gPointLightViewProj[6];
+    row_major float4x4 gPointLightViewProj[6];
     float3 gPointLightPosition;
     float gPointShadowMapSize;
     float gPointBias;
@@ -52,7 +52,7 @@ cbuffer cbPointShadow : register(b1)
 //==============================================================================
 cbuffer cbSpotShadow : register(b1)
 {
-    float4x4 gSpotLightViewProj;
+    row_major float4x4 gSpotLightViewProj;
     float gSpotShadowMapSize;
     float gSpotBias;
     float gSpotNormalBias;

@@ -47,6 +47,42 @@ file(GLOB_RECURSE ENGINE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/Engine/**/*.h"
 )
 
+# ========================================================================
+# FidelityFX FSR SDK 配置
+# ========================================================================
+set(FIDELITYFX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/FidelityFX)
+
+# ========================================================================
+# 过滤掉 FSR SDK 中不需要编译的源文件（帧生成、FSR2 等）
+# ========================================================================
+# 排除整个 framegeneration 目录
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/FidelityFX/framegeneration/.*")
+
+# 排除 FSR2 相关文件
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_fsr2.*")
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_provider_fsr2.*")
+
+# 排除帧生成相关的 shaderblobs
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_frameinterpolation.*")
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_opticalflow.*")
+
+# 排除 FSR3 Upscaler 实现文件和 shaderblobs（由 DLL 提供）
+# ffx_fsr3upscaler_shaderblobs.cpp 需要通过构建脚本生成的 permutation 头文件，
+# ffx_fsr3upscaler.cpp 依赖 shaderblobs 中的函数，两者必须同时存在或同时排除。
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_fsr3upscaler_shaderblobs.cpp")
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_fsr3upscaler.cpp")
+
+# 排除 provider 文件（由 DLL 提供）
+# ffx_provider_fsr3upscale.cpp 依赖 ffx_fsr3upscaler.cpp 中的符号
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_provider_fsr3upscale.cpp")
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_provider_registry.cpp")
+
+# 排除 ffx_api.cpp —— ffxCreateContext/ffxDispatch 等由 amd_fidelityfx_loader_dx12.dll 提供
+# 编译自己的 ffx_api.cpp 会覆盖 loader DLL 的实现，导致 provider 注册失败
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_api.cpp")
+
+
+
 # 创建静态库
 add_library(DX12EngineCore STATIC ${ENGINE_SOURCES})
 
@@ -55,7 +91,17 @@ target_include_directories(DX12EngineCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine
     ${CMAKE_CURRENT_SOURCE_DIR}/Content
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imgui
+    ${FIDELITYFX_DIR}/api/include
+    ${FIDELITYFX_DIR}/api/include/dx12
+    ${FIDELITYFX_DIR}/api/internal              # 内部头文件
+    ${FIDELITYFX_DIR}/backend/dx12
+    ${FIDELITYFX_DIR}/upscalers/include
+    ${FIDELITYFX_DIR}/upscalers/fsr3/include
+    ${FIDELITYFX_DIR}/upscalers/fsr3/internal   # 内部头文件
 )
+
+
+
 
 
 # 确保引擎内部的所有代码都使用 mimalloc 的重载操作符
@@ -63,7 +109,7 @@ target_compile_definitions(DX12EngineCore PRIVATE
     UNICODE
     _UNICODE
     MI_OVERRIDE=ON
-    IMGUI_DEFINE_MATH_OPERATORS   
+    IMGUI_DEFINE_MATH_OPERATORS
 )
 
 
@@ -93,13 +139,17 @@ target_link_libraries(DX12EngineCore PUBLIC
     Taskflow::Taskflow
     GameNetworkingSockets::static
     protobuf::libprotobuf
+    ${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_loader_dx12.lib
 )
 
 
 # 如果只在 Runtime 使用，也可以只加在 Runtime 上
 target_compile_definitions(DX12EngineCore PUBLIC
     STEAMNETWORKINGSOCKETS_STATIC_LINK
+    FFX_API_ENABLE_DX12=1
 )
+
+
 
 # ========================================================================
 # 4. 构建主程序 (Executable)
@@ -180,6 +230,24 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     ${CMAKE_SOURCE_DIR}/Content
     $<TARGET_FILE_DIR:${PROJECT_NAME}>/Content
 )
+
+# 复制 FSR DLL 到输出目录（仅当 DLL 存在于 signedbin 时）
+if(EXISTS "${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_loader_dx12.dll")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_loader_dx12.dll
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMENT "Copying FSR loader DLL..."
+    )
+endif()
+if(EXISTS "${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_upscaler_dx12.dll")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_upscaler_dx12.dll
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMENT "Copying FSR upscaler DLL..."
+    )
+endif()
 
 # 复制 Config 文件夹到输出目录
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

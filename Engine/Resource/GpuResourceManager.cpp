@@ -161,17 +161,16 @@ ID3D12Resource *GpuResourceManager::GetResource(GpuResourceHandle handle) const 
     return static_cast<ID3D12Resource *>(m_handlePool.GetDataPtr(handle));
 }
 
-void GpuResourceManager::Release(GpuResourceHandle handle, uint64_t fenceValue) {
+void GpuResourceManager::Release(GpuResourceHandle handle, uint64_t completedFenceValue) {
     if (!m_handlePool.Validate(handle)) {
         return;
     }
 
-    // 标记为 PendingRelease，防止业务层再次使用
     m_handlePool.SetState(handle, GpuResourceState::PendingRelease);
 
     PendingGpuRelease pr;
     pr.handle = handle;
-    pr.fenceValue = fenceValue;
+    pr.fenceValue = completedFenceValue;
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);

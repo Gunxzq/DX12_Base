@@ -80,11 +80,10 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_waterRenderer->Initialize();
 
     // // 初始化阴影渲染器
-    // m_shadowRenderer = std::make_unique<ShadowRenderer>();
-    // m_shadowRenderer->SetDeviceContext(m_context->DeviceContext);
-    // m_shadowRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
-    // m_shadowRenderer->SetDescriptorHeaps(m_context->DescriptorHeaps);
-    // m_shadowRenderer->Initialize();
+    m_shadowRenderer = std::make_unique<ShadowRenderer>();
+    m_shadowRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_shadowRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
+    m_shadowRenderer->Initialize();
 
     LoadTestTexture();
     LoadWaterTexture();
@@ -109,18 +108,21 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     RegisterWaterConstantsCallback();
 
     // 注册阴影渲染系统
-    // RegisterShadowRenderSystem();
+    RegisterShadowRenderSystem();
 }
 
 void GameWorld::Clear() {
     if (!m_registry)
         return;
 
-    // 移除测试立方体
-    if (m_cubeEntity != INVALID_ENTITY) {
-        m_registry->DestroyEntity(m_cubeEntity);
-        m_cubeEntity = INVALID_ENTITY;
+    // 移除所有测试立方体
+    for (auto entity : m_cubeEntities) {
+        if (entity != INVALID_ENTITY) {
+            m_registry->DestroyEntity(entity);
+        }
     }
+    m_cubeEntities.clear();
+    m_cubeEntity = INVALID_ENTITY;
 }
 
 void GameWorld::BuildRenderQueue() {
@@ -236,41 +238,57 @@ void GameWorld::CreateTestCube() {
         return;
     }
 
-    // 4. 创建实体并添加组件
-    m_cubeEntity = m_registry->CreateEntity();
+    // 4. 创建多个立方体实体，分布在不同位置
+    struct CubePlacement {
+        XMFLOAT3 position;
+        XMFLOAT3 rotation;
+        XMFLOAT3 scale;
+    };
 
-    // Transform 组件 — 放在地形上方高处
-    XMFLOAT3 position(0.0f, 15.0f, 5.0f);
-    XMFLOAT3 rotation(0.0f, 0.0f, 0.0f);
-    XMFLOAT3 scale(1.0f, 1.0f, 1.0f);
-    m_registry->AddComponent<TransformComponent>(m_cubeEntity, position, rotation, scale);
+    // 不同位置、不同大小的立方体，产生明显的阴影层次
+    const std::vector<CubePlacement> cubePlacements = {
+        // 第一个：中心偏前，标准大小 — 原始立方体位置
+        {{0.0f, 15.0f, 5.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+        // 第二个：右前方，放大 2 倍，更容易看到阴影
+        {{8.0f, 10.0f, 10.0f}, {0.0f, 0.0f, 0.0f}, {2.0f, 2.0f, 2.0f}},
+        // 第三个：左前方，略高
+        {{-7.0f, 12.0f, 8.0f}, {0.0f, 0.0f, 0.0f}, {1.5f, 1.5f, 1.5f}},
+        // 第四个：后方，不同高度
+        {{0.0f, 8.0f, -8.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+        // 第五个：远右侧，贴近地面 — 阴影会投射在地形上
+        {{15.0f, 3.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {3.0f, 3.0f, 3.0f}},
+        // 第六个：远左侧
+        {{-14.0f, 5.0f, -3.0f}, {0.0f, 0.0f, 0.0f}, {2.0f, 2.0f, 2.0f}},
+    };
 
-    // 创建 LODMesh（包含 LOD 链）
-    LODMesh lodMesh;
-    lodMesh.lodChain = {geoHandle}; // 只有一个 LOD，后续可扩展
+    m_cubeEntities.clear();
+    m_cubeEntities.reserve(cubePlacements.size());
 
-    LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
+    for (size_t i = 0; i < cubePlacements.size(); ++i) {
+        auto entity = m_registry->CreateEntity();
 
-    // 使用预创建的材质句柄
-    MaterialHandle materialHandle = m_cubeMaterialHandle;
+        const auto &placement = cubePlacements[i];
+        m_registry->AddComponent<TransformComponent>(entity, placement.position, placement.rotation, placement.scale);
 
-    if (!materialHandle.IsValid()) {
-        OutputDebugStringW(L"[ERROR] Cube material handle is invalid!\n");
+        // 创建 LODMesh（共享同一个 geoHandle）
+        LODMesh lodMesh;
+        lodMesh.lodChain = {geoHandle};
+
+        LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
+
+        // Mesh 组件
+        MeshComponent meshComp;
+        meshComp.lodMeshHandle = lodHandle;
+        meshComp.localBounds = bounds;
+        meshComp.materialHandle = m_cubeMaterialHandle;
+        meshComp.textureHandle = m_testTextureHandle;
+        m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
+
+        m_cubeEntities.push_back(entity);
     }
 
-    // 验证能否取回
-    const MaterialData *testMaterial = m_context->MaterialMgr->GetMaterial(materialHandle);
-    if (!testMaterial) {
-        OutputDebugStringW(L"[ERROR] GetMaterial returned null!\n");
-    }
-
-    // Mesh 组件
-    MeshComponent meshComp;
-    meshComp.lodMeshHandle = lodHandle;
-    meshComp.localBounds = bounds;
-    meshComp.materialHandle = materialHandle;
-    meshComp.textureHandle = m_testTextureHandle; // 使用成员变量
-    m_registry->AddComponent<MeshComponent>(m_cubeEntity, std::move(meshComp));
+    // 保持第一个立方体为 m_cubeEntity（兼容旧代码）
+    m_cubeEntity = m_cubeEntities.empty() ? INVALID_ENTITY : m_cubeEntities[0];
 
     // 注册旋转系统
     RegisterRotationSystem();
@@ -671,12 +689,14 @@ void GameWorld::RegisterRotationSystem() {
                               .func =
                                   [this](Registry &registry, const MessageContext &ctx) {
                                       float deltaTime = m_context->MainTimer->GetDeltaTime();
-                                      // 只旋转立方体，不影响地形等其他实体
-                                      if (m_cubeEntity == INVALID_ENTITY)
-                                          return;
-                                      auto *transform = registry.TryGetComponent<TransformComponent>(m_cubeEntity);
-                                      if (transform) {
-                                          transform->rotation.y += deltaTime * 2.0f;
+                                      // 旋转所有立方体
+                                      for (auto &entity : m_cubeEntities) {
+                                          if (entity == INVALID_ENTITY)
+                                              continue;
+                                          auto *transform = registry.TryGetComponent<TransformComponent>(entity);
+                                          if (transform) {
+                                              transform->rotation.y += deltaTime * 2.0f;
+                                          }
                                       }
                                   },
                               .phase = TaskPhase::Update,
@@ -1366,74 +1386,118 @@ void GameWorld::RegisterTerrainSystems() {
          .interestedMessages = {static_cast<uint32_t>(Event::EventType::TerrainReadyEvent)}});
 }
 
-// void GameWorld::RegisterShadowRenderSystem() {
-//     SystemRegistry::Register(
-//         {.name = "ShadowRenderSystem",
-//          .func =
-//              [this](Registry &registry, const MessageContext &ctx) {
-//                  auto &lightMgr = LightManager::GetInstance();
+void GameWorld::RegisterShadowRenderSystem() {
+    SystemRegistry::Register(
+        {.name = "ShadowRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 auto &lightMgr = LightManager::GetInstance();
 
-//                  // ================================================================
-//                  // 获取命令列表
-//                  // ================================================================
-//                  uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-//                  auto allocatorHandle =
-//                  m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence); auto allocator =
-//                  m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle); auto cmdListHandle =
-//                  m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator); auto cmdList =
-//                  m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+                 // 检查方向光阴影是否可用
+                 if (!lightMgr.HasDirShadow()) {
+                     return;
+                 }
 
-//                  // ================================================================
-//                  // 设置描述符堆
-//                  // ================================================================
-//                  ID3D12DescriptorHeap *descriptorHeaps[] = {
-//                      m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
-//                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+                 const auto &shadowRes = lightMgr.GetDirShadowResources();
+                 if (!shadowRes.isValid) {
+                     return;
+                 }
 
-//                  // ================================================================
-//                  // 渲染方向光阴影贴图（主光源）
-//                  // ================================================================
-//                  if (lightMgr.HasDirShadow()) {
-//                      const auto &shadowRes = lightMgr.GetDirShadowResources();
+                 D3D12_GPU_VIRTUAL_ADDRESS dirShadowAddr = lightMgr.GetDirShadowAddress();
+                 if (dirShadowAddr == 0) {
+                     return;
+                 }
 
-//                      // 渲染方向光阴影（目前只支持 1 个方向光）
-//                      D3D12_GPU_VIRTUAL_ADDRESS dirShadowAddr = lightMgr.GetDirShadowAddress();
-//                      if (dirShadowAddr != 0 && shadowRes.isValid) {
+                 // 如果场景中没有不透明物体，跳过阴影渲染
+                 if (m_opaqueQueue.Empty()) {
+                     return;
+                 }
 
-//                          m_shadowRenderer->RenderDirectionalShadow(cmdList, dirShadowAddr, shadowRes);
+                 // ================================================================
+                 // 获取命令列表
+                 // ================================================================
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
-//                          // 遍历不透明队列中的物体，绘制阴影
-//                          for (const auto &item : m_opaqueQueue) {
-//                              // 继续处理 item
-//                              if (!item.IsValid())
-//                                  continue;
-//                              m_shadowRenderer->DrawShadowMesh(cmdList, item.geometryHandle, item.worldMatrix,
-//                                                               item.objectCBAddress);
-//                          }
+                 // ================================================================
+                 // 获取阴影纹理资源
+                 // ================================================================
+                 auto &gpuMgr = GpuResourceManager::GetInstance();
+                 ID3D12Resource *depthTexture = gpuMgr.GetResource(shadowRes.textureHandle);
+                 if (!depthTexture) {
+                     m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+                     m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle,
+                                                                                 m_context->GetNextSequence());
+                     return;
+                 }
 
-//                          // 结束阴影 Pass，过渡深度资源到 SRV 状态供主 Pass 采样
-//                          m_shadowRenderer->EndShadowPass(cmdList, shadowRes.textureHandle);
-//                      } else {
-//                          // 日志dirShadowAddr,shadowRes
-//                          m_context->Logging->Warn("Directional shadow resources not ready: addr={}, valid={}",
-//                                                   dirShadowAddr, shadowRes.isValid);
-//                      }
-//                  }
+                 D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
+                     m_context->DescriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, shadowRes.dsvSlot);
 
-//                  // TODO: 点光源和聚光灯阴影
+                 // ================================================================
+                 // 资源状态转换：SRV -> DEPTH_WRITE
+                 // ================================================================
+                 CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                     depthTexture,
+                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                     D3D12_RESOURCE_STATE_DEPTH_WRITE);
+                 cmdList.Get()->ResourceBarrier(1, &barrier);
 
-//                  cmdList.Close();
-//                  m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PrePass, cmdListHandle);
+                 // ================================================================
+                 // 开始阴影 Pass
+                 // ================================================================
+                 m_shadowRenderer->Begin(cmdList, dirShadowAddr, dsvHandle, shadowRes.resolution, shadowRes.resolution);
 
-//                  uint64_t sequence = m_context->GetNextSequence();
-//                  m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
-//              },
-//          .phase = TaskPhase::Render,
-//          .threadType = ThreadType::Main,
-//          .priority = TaskPriority::Normal,
-//          .renderPhase = RenderPhase::PrePass,
-//          .alwaysRun = true});
-// }
+                 // ================================================================
+                 // 遍历不透明队列中的物体，绘制阴影
+                 // ================================================================
+                 for (const auto &item : m_opaqueQueue) {
+                     if (!item.IsValid())
+                         continue;
+
+                     // 绘制阴影（使用物体的世界矩阵和 ObjectCB 地址）
+                     m_shadowRenderer->DrawMesh(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress);
+                 }
+
+                 // ================================================================
+                 // 结束阴影 Pass
+                 // ================================================================
+                 m_shadowRenderer->End(cmdList);
+
+                 // ================================================================
+                 // 资源状态转换：DEPTH_WRITE -> SRV
+                 // ================================================================
+                 CD3DX12_RESOURCE_BARRIER barrierBack = CD3DX12_RESOURCE_BARRIER::Transition(
+                     depthTexture, D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                 cmdList.Get()->ResourceBarrier(1, &barrierBack);
+
+                 // ================================================================
+                 // 提交命令
+                 // ================================================================
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PrePass, cmdListHandle);
+
+                 uint64_t sequence = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Render,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::PrePass,
+         .alwaysRun = true});
+}
+
+// 3. 在 LightManager.h 中添加缺失的接口（如果还没有）
+// 在 LightManager 类的 public 部分添加：
+// bool HasDirShadow() const { return m_dirShadow.isValid && !m_dirShadowConstants.empty(); }
+// const DirShadowResources &GetDirShadowResources() const { return m_dirShadow; }
+
+// 4. 在 Game.cpp 中创建阴影贴图（在 LightManager 初始化后）
+// LightManager::GetInstance().CreateShadowMapForDirectionalLight(0, 2048, m_context->GetNextFence());
 
 void GameWorld::Update() {
     if (m_backgroundExecutor) {

@@ -106,7 +106,7 @@ private:
     DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
     std::unique_ptr<DX12Engine::Renderer::SkyRenderer> m_skyRenderer; // 天空盒渲染器
     std::unique_ptr<DX12Engine::Renderer::WaterRenderer> m_waterRenderer;
-    // std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer; // 阴影渲染器
+    std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer; // 阴影渲染器
 
     // 新的构建器和渲染队列（由 GameWorld 持有）
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderItemBuilder> m_opaqueBuilder;
@@ -119,6 +119,7 @@ private:
     DX12Engine::Resource::MaterialHandle m_cubeMaterialHandle;
     DX12Engine::Resource::GpuResourceHandle m_materialBufferHandle; // 材质数组 GPU Buffer 句柄
     DX12Engine::ECS::Entity m_cubeEntity;
+    std::vector<DX12Engine::ECS::Entity> m_cubeEntities;    // 多个立方体实体
 
     // 天空盒数据
     DX12Engine::Resource::TextureHandle m_skyboxTextureHandle;   // 天空盒纹理 SRV

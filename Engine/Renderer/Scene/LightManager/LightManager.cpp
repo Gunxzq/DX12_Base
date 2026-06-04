@@ -1,4 +1,5 @@
 #include "LightManager.h"
+#include "Renderer/Scene/CameraManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Struct/Descriptor.h"
@@ -37,7 +38,7 @@ void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *de
 
     // 初始化内部 RingBuffer
     m_lightBuffer.Initialize(device, DEFAULT_LIGHT_BUFFER_SIZE);
-    // m_dirShadowBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE);
+    m_dirShadowBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE);
     // m_pointShadowBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE);
     // m_spotShadowBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE);
 
@@ -158,12 +159,12 @@ void LightManager::Shutdown() {
     // gpuMgr.Update(0);
 
     m_lightBuffer.Shutdown();
-    // m_dirShadowBuffer.Shutdown();
+    m_dirShadowBuffer.Shutdown();
     // m_pointShadowBuffer.Shutdown();
     // m_spotShadowBuffer.Shutdown();
 
-    // m_lightCBAddress = 0;
-    // m_dirShadowAddress = 0;
+    m_lightCBAddress = 0;
+    m_dirShadowAddress = 0;
     // m_pointShadowAddress = 0;
     // m_spotShadowAddress = 0;
     // m_shadowDataSRV = {};
@@ -188,8 +189,9 @@ void LightManager::UpdateAndUpload(uint64_t fence, const DirectX::XMFLOAT3 &came
     if (m_lightDirty) {
         RebuildLightConstants();
     }
+
     // if (m_shadowDirty) {
-    //     RebuildShadowConstants(cameraPos);
+    RebuildShadowConstants(cameraPos);
     // }
 
     // 只在脏数据变化时才上传，光源数据是低频更新的
@@ -199,23 +201,23 @@ void LightManager::UpdateAndUpload(uint64_t fence, const DirectX::XMFLOAT3 &came
     }
 
     // if (m_shadowDirty) {
-    //     if (!m_dirShadowConstants.empty()) {
-    //         m_dirShadowAddress = m_dirShadowBuffer.AllocateUpload(
-    //             m_dirShadowConstants.data(),
-    //             static_cast<uint32_t>(m_dirShadowConstants.size() * sizeof(DirLightShadowConstants)), fence);
+    if (!m_dirShadowConstants.empty()) {
+        m_dirShadowAddress = m_dirShadowBuffer.AllocateUpload(
+            m_dirShadowConstants.data(),
+            static_cast<uint32_t>(m_dirShadowConstants.size() * sizeof(DirLightShadowConstants)), fence);
 
-    //         // 同步写入阴影数据 StructuredBuffer（UPLOAD 堆，直接 Map 写入）
-    //         if (m_dirShadowDataBufferHandle.IsValid()) {
-    //             ID3D12Resource *resource =
-    //             GpuResourceManager::GetInstance().GetResource(m_dirShadowDataBufferHandle); if (resource) {
-    //                 void *mapped = nullptr;
-    //                 resource->Map(0, nullptr, &mapped);
-    //                 memcpy(mapped, m_dirShadowConstants.data(),
-    //                        m_dirShadowConstants.size() * sizeof(DirLightShadowConstants));
-    //                 resource->Unmap(0, nullptr);
-    //             }
-    //         }
-    //     }
+        // // 同步写入阴影数据 StructuredBuffer（UPLOAD 堆，直接 Map 写入）
+        // if (m_dirShadowDataBufferHandle.IsValid()) {
+        //     ID3D12Resource *resource = GpuResourceManager::GetInstance().GetResource(m_dirShadowDataBufferHandle);
+        //     if (resource) {
+        //         void *mapped = nullptr;
+        //         resource->Map(0, nullptr, &mapped);
+        //         memcpy(mapped, m_dirShadowConstants.data(),
+        //                m_dirShadowConstants.size() * sizeof(DirLightShadowConstants));
+        //         resource->Unmap(0, nullptr);
+        //     }
+        // }
+    }
     //     if (!m_pointShadowConstants.empty()) {
     //         m_pointShadowAddress = m_pointShadowBuffer.AllocateUpload(
     //             m_pointShadowConstants.data(),
@@ -255,7 +257,7 @@ void LightManager::UpdateAndUpload(uint64_t fence, const DirectX::XMFLOAT3 &came
 
     // 回收
     m_lightBuffer.Reclaim(fence);
-    // m_dirShadowBuffer.Reclaim(fence);
+    m_dirShadowBuffer.Reclaim(fence);
     // m_pointShadowBuffer.Reclaim(fence);
     // m_spotShadowBuffer.Reclaim(fence);
 }
@@ -286,7 +288,8 @@ void LightManager::Clear() {
     m_dirLights.clear();
     m_pointLights.clear();
     m_spotLights.clear();
-    // m_dirShadowConstants.clear();
+
+    m_dirShadowConstants.clear();
     // m_pointShadowConstants.clear();
     // m_spotShadowConstants.clear();
     m_lightDirty = true;
@@ -470,90 +473,141 @@ void LightManager::RebuildLightConstants() {
     // 注意：不在此处清除 m_lightDirty，由 UpdateAndUpload 在上传完成后统一清除
 }
 
-// void LightManager::RebuildShadowConstants(const DirectX::XMFLOAT3 &cameraPos) {
-//     // 方向光阴影常量
-//     m_dirShadowConstants.clear();
-//     for (size_t i = 0; i < m_dirLights.size(); ++i) {
-//         DirLightShadowConstants constants = {};
-//         ComputeDirShadowMatrix(m_dirLights[i], constants, cameraPos);
-//         // 设置 ShadowMapIndex
-//         if (m_dirShadow.isValid) {
-//             constants.ShadowMapIndex = static_cast<int>(m_dirShadow.srvSlot);
-//         }
-//         m_dirShadowConstants.push_back(constants);
-//     }
+void LightManager::RebuildShadowConstants(const DirectX::XMFLOAT3 &cameraPos) {
+    // 方向光阴影常量
+    m_dirShadowConstants.clear();
+    for (size_t i = 0; i < m_dirLights.size(); ++i) {
+        DirLightShadowConstants constants = {};
+        ComputeDirShadowMatrix(m_dirLights[i], constants, cameraPos);
+        // 设置 ShadowMapIndex
+        if (m_dirShadow.isValid) {
+            constants.ShadowMapIndex = static_cast<int>(m_dirShadow.srvSlot);
+        }
+        m_dirShadowConstants.push_back(constants);
+    }
 
-//     // 点光源阴影常量
-//     m_pointShadowConstants.clear();
-//     for (size_t i = 0; i < m_pointLights.size(); ++i) {
-//         PointLightShadowConstants constants = {};
-//         ComputePointShadowMatrices(m_pointLights[i], constants);
-//         // 设置 ShadowMapIndex
-//         if (i < m_pointShadowResources.size() && m_pointShadowResources[i].isValid) {
-//             constants.ShadowMapIndex = static_cast<int>(m_pointShadowResources[i].srvSlot);
-//         }
-//         m_pointShadowConstants.push_back(constants);
-//     }
+    // // 点光源阴影常量
+    // m_pointShadowConstants.clear();
+    // for (size_t i = 0; i < m_pointLights.size(); ++i) {
+    //     PointLightShadowConstants constants = {};
+    //     ComputePointShadowMatrices(m_pointLights[i], constants);
+    //     // 设置 ShadowMapIndex
+    //     if (i < m_pointShadowResources.size() && m_pointShadowResources[i].isValid) {
+    //         constants.ShadowMapIndex = static_cast<int>(m_pointShadowResources[i].srvSlot);
+    //     }
+    //     m_pointShadowConstants.push_back(constants);
+    // }
 
-//     // 聚光灯阴影常量
-//     m_spotShadowConstants.clear();
-//     for (size_t i = 0; i < m_spotLights.size(); ++i) {
-//         SpotLightShadowConstants constants = {};
-//         ComputeSpotShadowMatrix(m_spotLights[i], constants);
-//         // 设置 ShadowMapIndex
-//         if (i < m_spotShadowResources.size() && m_spotShadowResources[i].isValid) {
-//             constants.ShadowMapIndex = static_cast<int>(m_spotShadowResources[i].srvSlot);
-//         }
-//         m_spotShadowConstants.push_back(constants);
-//     }
+    // // 聚光灯阴影常量
+    // m_spotShadowConstants.clear();
+    // for (size_t i = 0; i < m_spotLights.size(); ++i) {
+    //     SpotLightShadowConstants constants = {};
+    //     ComputeSpotShadowMatrix(m_spotLights[i], constants);
+    //     // 设置 ShadowMapIndex
+    //     if (i < m_spotShadowResources.size() && m_spotShadowResources[i].isValid) {
+    //         constants.ShadowMapIndex = static_cast<int>(m_spotShadowResources[i].srvSlot);
+    //     }
+    //     m_spotShadowConstants.push_back(constants);
+    // }
+}
 
-//     // 注意：不在此处清除 m_shadowDirty，由 UpdateAndUpload 在上传完成后统一清除
-// }
+void LightManager::ComputeDirShadowMatrix(const Light &light, DirLightShadowConstants &outConstants,
+                                          const DirectX::XMFLOAT3 &cameraPos) {
+    // using namespace DirectX;
 
-// void LightManager::ComputeDirShadowMatrix(const Light &light, DirLightShadowConstants &outConstants,
-//                                           const DirectX::XMFLOAT3 &cameraPos) {
-//     using namespace DirectX;
+    // // 光源方向
+    // XMVECTOR lightDir = XMLoadFloat4(&light.Direction);
 
-//     // 光源方向
-//     XMVECTOR lightDir = XMLoadFloat4(&light.Direction);
+    // // 防御：如果方向为零向量，使用默认方向
+    // if (XMVector3Equal(lightDir, XMVectorZero())) {
+    //     lightDir = XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f);
+    // }
 
-//     // 防御：如果方向为零向量，使用默认方向
-//     if (XMVector3Equal(lightDir, XMVectorZero())) {
-//         lightDir = XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f);
-//     }
+    // lightDir = XMVector3Normalize(lightDir);
 
-//     lightDir = XMVector3Normalize(lightDir);
+    // // 构建观察矩阵：从光源方向看向相机位置（使阴影贴图覆盖相机周围区域）
+    // XMVECTOR cameraPosVec = XMLoadFloat3(&cameraPos);
 
-//     // 构建观察矩阵：从光源方向看向相机位置（使阴影贴图覆盖相机周围区域）
-//     XMVECTOR cameraPosVec = XMLoadFloat3(&cameraPos);
+    // // 将光源推远，使其位于相机"后方"足够远的距离
+    // XMVECTOR lightPos = XMVectorAdd(cameraPosVec, XMVectorScale(lightDir, -50.0f));
 
-//     // 将光源推远，使其位于相机"后方"足够远的距离
-//     XMVECTOR lightPos = XMVectorAdd(cameraPosVec, XMVectorScale(lightDir, -50.0f));
+    // // 目标点：相机位置（阴影贴图的中心）
+    // XMVECTOR target = cameraPosVec;
 
-//     // 目标点：相机位置（阴影贴图的中心）
-//     XMVECTOR target = cameraPosVec;
+    // // 选择 up 向量：优先使用 (0,1,0)，如果与视线平行则换为 (0,0,1)
+    // XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    // XMVECTOR lookDir = XMVector3Normalize(XMVectorSubtract(target, lightPos));
 
-//     // 选择 up 向量：优先使用 (0,1,0)，如果与视线平行则换为 (0,0,1)
-//     XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-//     XMVECTOR lookDir = XMVector3Normalize(XMVectorSubtract(target, lightPos));
+    // // 检查 lookDir 与 up 是否平行（abs(dot) > 0.99）
+    // float dotValue = fabsf(XMVectorGetY(lookDir));
+    // if (dotValue > 0.99f) {
+    //     up = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+    // }
 
-//     // 检查 lookDir 与 up 是否平行（abs(dot) > 0.99）
-//     float dotValue = fabsf(XMVectorGetY(lookDir));
-//     if (dotValue > 0.99f) {
-//         up = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-//     }
+    // XMMATRIX view = XMMatrixLookAtLH(lightPos, target, up);
+    // XMMATRIX proj = XMMatrixOrthographicLH(100.0f, 100.0f, 0.1f, 100.0f);
+    // XMMATRIX viewProj = XMMatrixMultiply(view, proj);
 
-//     XMMATRIX view = XMMatrixLookAtLH(lightPos, target, up);
-//     XMMATRIX proj = XMMatrixOrthographicLH(100.0f, 100.0f, 0.1f, 100.0f);
-//     XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+    // XMStoreFloat4x4(&outConstants.LightViewProj, XMMatrixTranspose(viewProj));
+    // outConstants.ShadowMapSize = 2048.0f;
+    // outConstants.Bias = 0.005f;
+    // outConstants.NormalBias = 0.02f;
+    // outConstants.ShadowStrength = 1.0f;
+    // outConstants.ShadowMapIndex = -1;
 
-//     XMStoreFloat4x4(&outConstants.LightViewProj, XMMatrixTranspose(viewProj));
-//     outConstants.ShadowMapSize = 2048.0f;
-//     outConstants.Bias = 0.005f;
-//     outConstants.NormalBias = 0.02f;
-//     outConstants.ShadowStrength = 1.0f;
-//     outConstants.ShadowMapIndex = -1;
-// }
+    using namespace DirectX;
+
+    // 1. 光源方向
+    XMVECTOR lightDir = XMLoadFloat4(&light.Direction);
+    lightDir = XMVector3Normalize(lightDir);
+
+    XMVECTOR cameraPosVec = XMLoadFloat3(&cameraPos);
+
+    // 2. 光源位置：相机位置向光源方向后方移动（距离足够远以覆盖场景）
+    float distance = 300.0f;
+    XMVECTOR lightPos = XMVectorAdd(cameraPosVec, XMVectorScale(lightDir, distance));
+
+    // 3. 目标点：相机位置
+    XMVECTOR target = cameraPosVec;
+
+    // 4. 上向量（避免与视线方向平行）
+    XMVECTOR up = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+
+    // 5. 视图矩阵
+    XMMATRIX view = XMMatrixLookAtLH(lightPos, target, up);
+
+    // 6. 正交投影（覆盖足够大的范围）
+    //    光源 View 空间中 X/Y 轴已旋转，需要足够大的范围覆盖整个场景
+    float halfSize = 30.0f; // 覆盖范围 [-300, 300]
+    float nearPlane = 0.1f;
+    float farPlane = 400.0f; // 足够远的远平面
+    XMMATRIX proj = XMMatrixOrthographicLH(halfSize * 2.0f, halfSize * 2.0f, nearPlane, farPlane);
+
+    // 7. 组合
+    XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+
+    // 8. 存储（row_major float4x4，不需要转置，与主渲染器 PassConstants 一致）
+    XMStoreFloat4x4(&outConstants.LightViewProj, viewProj);
+
+    outConstants.ShadowMapSize = 2048.0f;
+    outConstants.Bias = 0.005f;
+    outConstants.NormalBias = 0.02f;
+    outConstants.ShadowStrength = 1.0f;
+    outConstants.ShadowMapIndex = -1;
+
+    static int frame = 0;
+    if (frame++ % 60 == 0) {
+        // 测试一个世界空间点
+        XMVECTOR testPoint = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
+        XMMATRIX viewProjNoTranspose = XMMatrixMultiply(view, proj);
+        XMVECTOR result = XMVector3Transform(testPoint, viewProjNoTranspose);
+
+        char msg[256];
+        sprintf_s(msg, "Frame %d: Test point result: (%f, %f, %f, %f)\n", frame, XMVectorGetX(result),
+                  XMVectorGetY(result), XMVectorGetZ(result), XMVectorGetW(result));
+        OutputDebugStringA(msg);
+    }
+}
 
 // void LightManager::ComputePointShadowMatrices(const Light &light, PointLightShadowConstants &outConstants) {
 //     using namespace DirectX;
@@ -640,85 +694,92 @@ void LightManager::RebuildLightConstants() {
 // 阴影贴图资源管理
 // ============================================================================
 
-// void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint32_t resolution) {
-//     if (!m_initialized || !m_descriptorHeaps)
-//         return;
+/**
+ * @brief 创建方向光阴影贴图
+ * @param lightIndex
+ * @param resolution
+ * @date 2026-06-04
+ */
+void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint32_t resolution,
+                                                      uint64_t completeFence) {
+    if (!m_initialized || !m_descriptorHeaps)
+        return;
 
-//     auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto &gpuMgr = GpuResourceManager::GetInstance();
 
-//     // 释放旧资源
-//     if (m_dirShadow.isValid) {
-//         ReleaseShadowMap(m_dirShadow, 0);
-//     }
+    // 释放旧资源
+    if (m_dirShadow.isValid) {
+        ReleaseShadowMap(m_dirShadow, completeFence);
+    }
 
-//     m_dirShadow = {};
-//     m_dirShadow.resolution = resolution;
+    m_dirShadow = {};
+    m_dirShadow.resolution = resolution;
 
-//     // 1. 创建 2D 深度纹理
-//     D3D12_RESOURCE_DESC desc = {};
-//     desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-//     desc.Width = resolution;
-//     desc.Height = resolution;
-//     desc.DepthOrArraySize = 1;
-//     desc.MipLevels = 1;
-//     desc.Format = DXGI_FORMAT_R32_TYPELESS; // 32-bit depth
-//     desc.SampleDesc.Count = 1;
-//     desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-//     desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    // 1. 创建 2D 深度纹理
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = resolution;
+    desc.Height = resolution;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_R32_TYPELESS; // 32-bit depth
+    desc.SampleDesc.Count = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
-//     D3D12_CLEAR_VALUE clearValue = {};
-//     clearValue.Format = DXGI_FORMAT_D32_FLOAT;
-//     clearValue.DepthStencil.Depth = 1.0f;
+    D3D12_CLEAR_VALUE clearValue = {};
+    clearValue.Format = DXGI_FORMAT_D32_FLOAT;
+    clearValue.DepthStencil.Depth = 1.0f;
 
-//     m_dirShadow.textureHandle = gpuMgr.CreateTexture2D(m_device, desc, clearValue,
-//                                                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
-//                                                            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-//     if (!m_dirShadow.textureHandle.IsValid()) {
-//         return;
-//     }
+    m_dirShadow.textureHandle = gpuMgr.CreateTexture2D(m_device, desc, clearValue,
+                                                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    if (!m_dirShadow.textureHandle.IsValid()) {
+        return;
+    }
 
-//     // 2. 分配 DSV 槽并创建 DSV
-//     m_dirShadow.dsvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::Dsv);
-//     if (m_dirShadow.dsvSlot == UINT32_MAX) {
-//         gpuMgr.Release(m_dirShadow.textureHandle, 0);
-//         m_dirShadow = {};
-//         return;
-//     }
-//     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-//     dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
-//     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-//     dsvDesc.Texture2D.MipSlice = 0;
-//     m_device->CreateDepthStencilView(gpuMgr.GetResource(m_dirShadow.textureHandle), &dsvDesc,
-//                                      m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, m_dirShadow.dsvSlot));
+    // 2. 分配 DSV 槽并创建 DSV
+    m_dirShadow.dsvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::Dsv);
+    if (m_dirShadow.dsvSlot == UINT32_MAX) {
+        gpuMgr.Release(m_dirShadow.textureHandle, 0);
+        m_dirShadow = {};
+        return;
+    }
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsvDesc.Texture2D.MipSlice = 0;
+    m_device->CreateDepthStencilView(gpuMgr.GetResource(m_dirShadow.textureHandle), &dsvDesc,
+                                     m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, m_dirShadow.dsvSlot));
 
-//     // 3. 分配 SRV 槽并创建 SRV
-//     m_dirShadow.srvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
-//     if (m_dirShadow.srvSlot == UINT32_MAX) {
-//         m_descriptorHeaps->Free(DescriptorHeapType::Dsv, m_dirShadow.dsvSlot, 0);
-//         gpuMgr.Release(m_dirShadow.textureHandle, 0);
-//         m_dirShadow = {};
-//         return;
-//     }
-//     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-//     srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
-//     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-//     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-//     srvDesc.Texture2D.MipLevels = 1;
-//     m_device->CreateShaderResourceView(
-//         gpuMgr.GetResource(m_dirShadow.textureHandle), &srvDesc,
-//         m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_dirShadow.srvSlot));
+    // 3. 分配 SRV 槽并创建 SRV
+    m_dirShadow.srvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    if (m_dirShadow.srvSlot == UINT32_MAX) {
+        m_descriptorHeaps->Free(DescriptorHeapType::Dsv, m_dirShadow.dsvSlot, 0);
+        gpuMgr.Release(m_dirShadow.textureHandle, 0);
+        m_dirShadow = {};
+        return;
+    }
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels = 1;
+    m_device->CreateShaderResourceView(
+        gpuMgr.GetResource(m_dirShadow.textureHandle), &srvDesc,
+        m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_dirShadow.srvSlot));
 
-//     // 同时在 t14 槽位创建 SRV（供 OpaqueRenderer 根签名 slot 7 使用）
-//     // 注：不能使用 CopyDescriptorsSimple，因为 Shader Visible 堆的 CPU 端是只读的
-//     if (m_shadowMapSrvDirSlot != UINT32_MAX) {
-//         m_device->CreateShaderResourceView(
-//             gpuMgr.GetResource(m_dirShadow.textureHandle), &srvDesc,
-//             m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_shadowMapSrvDirSlot));
-//     }
+    // 同时在 t14 槽位创建 SRV（供 OpaqueRenderer 根签名 slot 7 使用）
+    // 注：不能使用 CopyDescriptorsSimple，因为 Shader Visible 堆的 CPU 端是只读的
+    if (m_shadowMapSrvDirSlot != UINT32_MAX) {
+        m_device->CreateShaderResourceView(
+            gpuMgr.GetResource(m_dirShadow.textureHandle), &srvDesc,
+            m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_shadowMapSrvDirSlot));
+    }
 
-//     m_dirShadow.isValid = true;
-//     m_shadowDirty = true;
-// }
+    m_dirShadow.isValid = true;
+    m_shadowDirty = true;
+}
 
 // void LightManager::CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t resolution) {
 //     if (!m_initialized || !m_descriptorHeaps)
@@ -875,24 +936,24 @@ void LightManager::RebuildLightConstants() {
 //     m_shadowDirty = true;
 // }
 
-// void LightManager::ReleaseShadowMap(DirShadowResources &shadow, uint64_t fence) {
-//     if (!shadow.isValid)
-//         return;
+void LightManager::ReleaseShadowMap(DirShadowResources &shadow, uint64_t completedFence) {
+    if (!shadow.isValid)
+        return;
 
-//     auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto &gpuMgr = GpuResourceManager::GetInstance();
 
-//     if (shadow.textureHandle.IsValid()) {
-//         gpuMgr.Release(shadow.textureHandle, fence);
-//     }
-//     if (shadow.dsvSlot != UINT32_MAX && m_descriptorHeaps) {
-//         m_descriptorHeaps->Free(DescriptorHeapType::Dsv, shadow.dsvSlot, fence);
-//     }
-//     if (shadow.srvSlot != UINT32_MAX && m_descriptorHeaps) {
-//         m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, shadow.srvSlot, fence);
-//     }
+    if (shadow.textureHandle.IsValid()) {
+        gpuMgr.Release(shadow.textureHandle, completedFence);
+    }
+    if (shadow.dsvSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(DescriptorHeapType::Dsv, shadow.dsvSlot, completedFence);
+    }
+    if (shadow.srvSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, shadow.srvSlot, completedFence);
+    }
 
-//     shadow = {};
-// }
+    shadow = {};
+}
 
 // void LightManager::ReleaseShadowMap(PointShadowResources &shadow, uint64_t fence) {
 //     if (!shadow.isValid)
@@ -943,11 +1004,11 @@ void LightManager::CreateTestLights() {
     m_lightConstants.AmbientLight = DirectX::XMFLOAT4{0.4f, 0.45f, 0.5f, 1.0f}; // 环境光-暖色
 
     // ========================================================================
-    // 方向光 0 — 模拟太阳光（从右上方斜照，避免方向与 up 平行导致 LookAt 崩溃）
+    // 方向光 0 — 模拟太阳光（从左上方斜照，产生明显阴影）
     // ========================================================================
     Light dirLight = {};
-    dirLight.Strength = DirectX::XMFLOAT4(4.0f, 3.8f, 3.5f, 0.0f);         // 暖色太阳光
-    dirLight.Direction = DirectX::XMFLOAT4(0.577f, -0.577f, 0.577f, 0.0f); // 右上前方斜照
+    dirLight.Strength = DirectX::XMFLOAT4(5.0f, 4.5f, 4.0f, 0.0f);     // 更强的暖色太阳光
+    dirLight.Direction = DirectX::XMFLOAT4(0.4f, -0.85f, 0.35f, 0.0f); // 左上方斜照（约 30° 仰角）
     SetDirectionalLight(dirLight, 0);
 
     // 暖色点光源（右前方）

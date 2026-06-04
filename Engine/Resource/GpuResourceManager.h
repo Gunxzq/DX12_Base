@@ -32,7 +32,7 @@ public:
                                       D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
     ID3D12Resource *GetResource(GpuResourceHandle handle) const;
 
-    void Release(GpuResourceHandle handle, uint64_t fenceValue);
+    void Release(GpuResourceHandle handle, uint64_t completedFenceValue);
 
     void Update(uint64_t completedFenceValue);
 

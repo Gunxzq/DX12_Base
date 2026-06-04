@@ -97,14 +97,14 @@ public:
     // GPU 上传
     // ========================================================================
     D3D12_GPU_VIRTUAL_ADDRESS GetLightCBAddress() const { return m_lightCBAddress; }
-    // D3D12_GPU_VIRTUAL_ADDRESS GetDirShadowAddress() const { return m_dirShadowAddress; }
+    D3D12_GPU_VIRTUAL_ADDRESS GetDirShadowAddress() const { return m_dirShadowAddress; }
     // D3D12_GPU_VIRTUAL_ADDRESS GetPointShadowAddress() const { return m_pointShadowAddress; }
     // D3D12_GPU_VIRTUAL_ADDRESS GetSpotShadowAddress() const { return m_spotShadowAddress; }
 
     // // ========================================================================
     // // 阴影贴图资源访问（供 ShadowRenderer 使用）
     // // ========================================================================
-    // const DirShadowResources &GetDirShadowResources() const { return m_dirShadow; }
+    const DirShadowResources &GetDirShadowResources() const { return m_dirShadow; }
     // DirShadowResources &GetDirShadowResources() { return m_dirShadow; }
     // const PointShadowResources &GetPointShadowResources(uint32_t index) const { return m_pointShadowResources[index];
     // } const SpotShadowResources &GetSpotShadowResources(uint32_t index) const { return m_spotShadowResources[index];
@@ -120,7 +120,7 @@ public:
     // const std::vector<PointLightShadowConstants> &GetPointShadowConstants() const { return m_pointShadowConstants; }
     // const std::vector<SpotLightShadowConstants> &GetSpotShadowConstants() const { return m_spotShadowConstants; }
 
-    // bool HasDirShadow() const { return m_dirShadow.isValid && !m_dirShadowConstants.empty(); }
+    bool HasDirShadow() const { return m_dirShadow.isValid && !m_dirShadowConstants.empty(); }
     // bool HasPointShadow(uint32_t index) const {
     //     return index < m_pointShadowResources.size() && m_pointShadowResources[index].isValid &&
     //            index < m_pointShadowConstants.size();
@@ -135,22 +135,22 @@ public:
     void CreateTestLights();
 
     // 阴影贴图
-    // void CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint32_t resolution);
+    void CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint32_t resolution, uint64_t completeFence);
     // void CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t resolution);
     // void CreateShadowMapForSpotLight(uint32_t lightIndex, uint32_t resolution);
-    // void ReleaseShadowMap(DirShadowResources &shadow, uint64_t fence);
+    void ReleaseShadowMap(DirShadowResources &shadow, uint64_t fence);
     // void ReleaseShadowMap(PointShadowResources &shadow, uint64_t fence);
     // void ReleaseShadowMap(SpotShadowResources &shadow, uint64_t fence);
 
 private:
     void RebuildLightConstants();
 
-    // // 重建阴影常量数组
-    // void RebuildShadowConstants(const DirectX::XMFLOAT3 &cameraPos);
+    // 重建阴影常量数组
+    void RebuildShadowConstants(const DirectX::XMFLOAT3 &cameraPos);
 
-    // // 计算单个光源的阴影 VP 矩阵
-    // void ComputeDirShadowMatrix(const Light &light, DirLightShadowConstants &outConstants,
-    //                             const DirectX::XMFLOAT3 &cameraPos);
+    // 计算单个光源的阴影 VP 矩阵
+    void ComputeDirShadowMatrix(const Light &light, DirLightShadowConstants &outConstants,
+                                const DirectX::XMFLOAT3 &cameraPos);
     // void ComputePointShadowMatrices(const Light &light, PointLightShadowConstants &outConstants);
     // void ComputeSpotShadowMatrix(const Light &light, SpotLightShadowConstants &outConstants);
 
@@ -161,14 +161,14 @@ private:
     std::vector<Light> m_dirLights;
 
     // 阴影常量
-    // std::vector<DirLightShadowConstants> m_dirShadowConstants;
+    std::vector<DirLightShadowConstants> m_dirShadowConstants;
     // std::vector<PointLightShadowConstants> m_pointShadowConstants;
     // std::vector<SpotLightShadowConstants> m_spotShadowConstants;
     LightConstants m_lightConstants = {}; // 光源常量数据
 
     // GPU 地址
-    D3D12_GPU_VIRTUAL_ADDRESS m_lightCBAddress = 0; // 光源常量缓冲区地址
-    // D3D12_GPU_VIRTUAL_ADDRESS m_dirShadowAddress = 0;   // 方向光阴影缓冲区地址
+    D3D12_GPU_VIRTUAL_ADDRESS m_lightCBAddress = 0;   // 光源常量缓冲区地址
+    D3D12_GPU_VIRTUAL_ADDRESS m_dirShadowAddress = 0; // 方向光阴影缓冲区地址
     // D3D12_GPU_VIRTUAL_ADDRESS m_pointShadowAddress = 0; // 点光源阴影缓冲区地址
     // D3D12_GPU_VIRTUAL_ADDRESS m_spotShadowAddress = 0;  // 聚光灯阴影缓冲区地址
 
@@ -183,12 +183,12 @@ private:
 
     // 内部 RingBuffer
     RingBuffer m_lightBuffer;
-    // RingBuffer m_dirShadowBuffer;
+    RingBuffer m_dirShadowBuffer;
     // RingBuffer m_pointShadowBuffer;
     // RingBuffer m_spotShadowBuffer;
 
     // 阴影贴图资源（单张，非 vector）
-    // DirShadowResources m_dirShadow;
+    DirShadowResources m_dirShadow;
     // std::vector<PointShadowResources> m_pointShadowResources;
     // std::vector<SpotShadowResources> m_spotShadowResources;
 
