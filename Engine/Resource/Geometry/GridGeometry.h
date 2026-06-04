@@ -2,6 +2,7 @@
 
 #include "Common/Common.h"
 #include "Math/BoundingVolume.h"
+#include "Renderer/Utils/GeometryGenerator.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/ResourceHandle.h"
 #include <cstdint>

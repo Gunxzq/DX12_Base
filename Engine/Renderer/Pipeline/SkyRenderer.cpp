@@ -70,7 +70,7 @@ void SkyRenderer::DrawSky(CommandList &cmdList, GeometryHandle skyboxGeometry,
         return;
     }
 
-    const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(skyboxGeometry);
+    const TriangleMesh *mesh = m_geometryManager->GetGeometry<TriangleMesh>(skyboxGeometry);
     if (!mesh || !mesh->isGpuReady) {
         return;
     }
@@ -174,8 +174,8 @@ void SkyRenderer::CreateRootSignature() {
                            D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                            D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
     staticSamplers[1].Init(4, // register s4: gSamplerAnisotropicWrap
-                           D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+                           D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                           D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(3, slotRootParameter, 2, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);

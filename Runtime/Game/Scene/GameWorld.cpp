@@ -226,9 +226,9 @@ void GameWorld::CreateGroundPlane() {
     bounds.max = XMFLOAT3(5.0f, 0.0f, 5.0f);
 
     auto &geoMgr = m_context->GeometryResourceManager;
-    GeometryHandle geoHandle = geoMgr->RegisterTriangleMesh(planeMesh);
+    GeometryHandle geoHandle = geoMgr->RegisterGeometry<TriangleMesh>(planeMesh);
     if (!geoHandle.IsValid()) {
-        OutputDebugStringW(L"[ERROR] RegisterTriangleMesh for ground plane failed!\n");
+        OutputDebugStringW(L"[ERROR] RegisterGeometry for ground plane failed!\n");
         return;
     }
 
@@ -313,16 +313,16 @@ void GameWorld::CreateTestCube() {
 
     // 5. 注册到 GeometryResourceManager
     auto &geoMgr = m_context->GeometryResourceManager;
-    GeometryHandle geoHandle = geoMgr->RegisterTriangleMesh(triangleMesh);
+    GeometryHandle geoHandle = geoMgr->RegisterGeometry<TriangleMesh>(triangleMesh);
 
     if (!geoHandle.IsValid()) {
-        OutputDebugStringW(L"[ERROR] RegisterTriangleMesh failed!\n");
+        OutputDebugStringW(L"[ERROR] RegisterGeometry failed!\n");
         return;
     }
 
-    const TriangleMesh *testMesh = geoMgr->GetTriangleMesh(geoHandle);
+    const TriangleMesh *testMesh = geoMgr->GetGeometry<TriangleMesh>(geoHandle);
     if (!testMesh) {
-        OutputDebugStringW(L"[ERROR] GetTriangleMesh returned null!\n");
+        OutputDebugStringW(L"[ERROR] GetGeometry returned null!\n");
         return;
     }
 
@@ -749,7 +749,7 @@ void GameWorld::CreateSkybox() {
     skyTriangleMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     skyTriangleMesh.isGpuReady = true;
 
-    m_skyboxGeometryHandle = m_context->GeometryResourceManager->RegisterTriangleMesh(skyTriangleMesh);
+    m_skyboxGeometryHandle = m_context->GeometryResourceManager->RegisterGeometry<TriangleMesh>(skyTriangleMesh);
 
     if (!m_skyboxGeometryHandle.IsValid()) {
         m_context->Logging->Error("[GameWorld] Failed to register skybox geometry");
@@ -1074,7 +1074,7 @@ void GameWorld::CreateWater() {
     bounds.max = XMFLOAT3(10.0f, 0.0f, 10.0f);
 
     auto &geoMgr = m_context->GeometryResourceManager;
-    GeometryHandle geoHandle = geoMgr->RegisterTriangleMesh(waterMesh);
+    GeometryHandle geoHandle = geoMgr->RegisterGeometry<TriangleMesh>(waterMesh);
 
     // 4. 创建 LODMesh
     LODMesh lodMesh;
@@ -1400,7 +1400,7 @@ void GameWorld::RegisterTerrainSystems() {
                  mesh.localBounds = state.bounds;
 
                  auto geoMgr = m_context->GeometryResourceManager;
-                 auto handle = geoMgr->RegisterTriangleMesh(mesh);
+                 auto handle = geoMgr->RegisterGeometry<TriangleMesh>(mesh);
                  m_terrainGeometryHandle = handle;
                  m_context->Logging->Info("[TerrainGPUCreate] Geometry registered: handle(idx={}, gen={})",
                                           handle.index, handle.generation);

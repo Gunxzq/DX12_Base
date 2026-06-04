@@ -78,7 +78,7 @@ void WaterRenderer::DrawWater(CommandList &cmdList, Resource::GeometryHandle geo
         return;
     }
 
-    const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
+    const TriangleMesh *mesh = m_geometryManager->GetGeometry<TriangleMesh>(geometryHandle);
     if (!mesh || !mesh->isGpuReady) {
         return;
     }

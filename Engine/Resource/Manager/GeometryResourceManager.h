@@ -1,10 +1,13 @@
 #pragma once
 
 #include "Math/BoundingVolume.h"
+#include "Resource/Geometry/GridGeometry.h"
+#include "Resource/Geometry/PatchMesh.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include <cstdint>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace DX12Engine {
@@ -14,6 +17,8 @@ using BoundingVolumeVariant = Math::BoundingVolumeVariant;
 }
 
 namespace Resource {
+// 定义所有支持的几何体类型
+using GeometryVariant = std::variant<TriangleMesh, PatchMesh, GridGeometry>;
 
 // ============================================================================
 // 几何体资源管理器
@@ -35,30 +40,50 @@ public:
     void Shutdown();
 
     // ========================================================================
-    // 几何体注册
+    // 统一注册接口（模板自动推导）
     // ========================================================================
-    GeometryHandle RegisterTriangleMesh(const TriangleMesh &mesh);
+    template <typename T> GeometryHandle RegisterGeometry(const T &geometry) {
+        return RegisterGeometryVariant(geometry);
+    }
 
     // ========================================================================
-    // 几何体查询
+    // 统一查询接口（类型安全）
     // ========================================================================
-    const TriangleMesh *GetTriangleMesh(GeometryHandle handle) const;
-    TriangleMesh *GetTriangleMesh(GeometryHandle handle);
+    template <typename T> const T *GetGeometry(GeometryHandle handle) const {
+        const auto *variant = GetGeometryVariant(handle);
+        if (!variant)
+            return nullptr;
+        return std::get_if<T>(variant);
+    }
 
+    template <typename T> T *GetGeometry(GeometryHandle handle) {
+        auto *variant = GetGeometryVariant(handle);
+        if (!variant)
+            return nullptr;
+        return std::get_if<T>(variant);
+    }
+
+    // ========================================================================
+    // 类型信息查询
+    // ========================================================================
+    size_t GetGeometryTypeIndex(GeometryHandle handle) const;
+    const char *GetGeometryTypeName(GeometryHandle handle) const;
+
+    // ========================================================================
+    // 通用查询
+    // ========================================================================
     bool IsValid(GeometryHandle handle) const;
     const Math::BoundingVolumeVariant *GetBounds(GeometryHandle handle) const;
 
     // ========================================================================
     // 几何体释放
     // ========================================================================
-
     void Release(GeometryHandle handle, uint64_t fenceValue);
     void Reclaim(uint64_t completedFence);
 
     // ========================================================================
     // 调试/统计
     // ========================================================================
-
     uint32_t GetActiveCount() const;
     uint32_t GetCapacity() const;
     uint32_t GetPendingReleaseCount() const;
@@ -66,9 +91,9 @@ public:
 private:
     // 几何体条目
     struct Entry {
-        TriangleMesh mesh;       // 几何体数据
-        uint32_t generation = 0; // 世代号（用于句柄验证）
-        bool inUse = false;      // 是否使用中
+        GeometryVariant geometry; // 几何体数据
+        uint32_t generation = 0;  // 世代号（用于句柄验证）
+        bool inUse = false;       // 是否使用中
     };
 
     // 待释放条目
@@ -84,6 +109,9 @@ private:
 
     // 释放条目（内部，立即释放）
     void FreeEntry(uint32_t index);
+    GeometryHandle RegisterGeometryVariant(const GeometryVariant &geometry);
+    const GeometryVariant *GetGeometryVariant(GeometryHandle handle) const;
+    GeometryVariant *GetGeometryVariant(GeometryHandle handle);
 
 private:
     std::vector<Entry> m_entries;                  // 几何体条目数组

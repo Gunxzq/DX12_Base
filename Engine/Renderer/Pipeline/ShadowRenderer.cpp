@@ -84,7 +84,8 @@ void ShadowRenderer::DrawMesh(CommandList &cmdList, GeometryHandle geometryHandl
         return;
     }
 
-    const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
+    // 从 GeometryResourceManager 获取几何体
+    const TriangleMesh *mesh = m_geometryManager->GetGeometry<TriangleMesh>(geometryHandle);
     if (!mesh || !mesh->isGpuReady) {
         return;
     }
@@ -129,7 +130,7 @@ void ShadowRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometry
         return;
     }
 
-    const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
+    const TriangleMesh *mesh = m_geometryManager->GetGeometry<TriangleMesh>(geometryHandle);
     if (!mesh || !mesh->isGpuReady) {
         return;
     }

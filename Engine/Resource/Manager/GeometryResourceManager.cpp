@@ -39,10 +39,10 @@ void GeometryResourceManager::Shutdown() {
 }
 
 // ============================================================================
-// 几何体注册
+// 统一注册
 // ============================================================================
 
-GeometryHandle GeometryResourceManager::RegisterTriangleMesh(const TriangleMesh &mesh) {
+GeometryHandle GeometryResourceManager::RegisterGeometryVariant(const GeometryVariant &geometry) {
     if (!m_initialized) {
         OutputDebugStringW(L"[ERROR] Not initialized!\n");
         return GeometryHandle::Invalid();
@@ -54,7 +54,7 @@ GeometryHandle GeometryResourceManager::RegisterTriangleMesh(const TriangleMesh 
     }
 
     Entry &entry = m_entries[index];
-    entry.mesh = mesh;
+    entry.geometry = geometry;
     entry.generation = m_nextGeneration++;
     entry.inUse = true;
 
@@ -63,32 +63,47 @@ GeometryHandle GeometryResourceManager::RegisterTriangleMesh(const TriangleMesh 
     handle.generation = entry.generation;
 
     char buf[256];
-    sprintf_s(buf, "[INFO] Registered at index %d\n", index);
+    sprintf_s(buf, "[INFO] Registered geometry type %zu at index %d\n", geometry.index(), index);
     OutputDebugStringA(buf);
 
     return handle;
 }
 
 // ============================================================================
-// 几何体查询
+// 查询
 // ============================================================================
 
-const TriangleMesh *GeometryResourceManager::GetTriangleMesh(GeometryHandle handle) const {
-    if (!IsValid(handle)) {
+const GeometryVariant *GeometryResourceManager::GetGeometryVariant(GeometryHandle handle) const {
+    if (!IsValid(handle))
         return nullptr;
-    }
-
-    const Entry &entry = m_entries[handle.index];
-    return &entry.mesh;
+    return &m_entries[handle.index].geometry;
 }
 
-TriangleMesh *GeometryResourceManager::GetTriangleMesh(GeometryHandle handle) {
-    if (!IsValid(handle)) {
+GeometryVariant *GeometryResourceManager::GetGeometryVariant(GeometryHandle handle) {
+    if (!IsValid(handle))
         return nullptr;
-    }
+    return &m_entries[handle.index].geometry;
+}
 
-    Entry &entry = m_entries[handle.index];
-    return &entry.mesh;
+size_t GeometryResourceManager::GetGeometryTypeIndex(GeometryHandle handle) const {
+    const auto *variant = GetGeometryVariant(handle);
+    if (!variant)
+        return static_cast<size_t>(-1);
+    return variant->index();
+}
+
+const char *GeometryResourceManager::GetGeometryTypeName(GeometryHandle handle) const {
+    size_t idx = GetGeometryTypeIndex(handle);
+    switch (idx) {
+    case 0:
+        return "TriangleMesh";
+    case 1:
+        return "PatchMesh";
+    case 2:
+        return "GridGeometry";
+    default:
+        return "Unknown";
+    }
 }
 
 bool GeometryResourceManager::IsValid(GeometryHandle handle) const {
@@ -105,15 +120,17 @@ bool GeometryResourceManager::IsValid(GeometryHandle handle) const {
 }
 
 const Math::BoundingVolumeVariant *GeometryResourceManager::GetBounds(GeometryHandle handle) const {
-    const TriangleMesh *mesh = GetTriangleMesh(handle);
-    if (!mesh) {
+    const auto *variant = GetGeometryVariant(handle);
+    if (!variant)
         return nullptr;
-    }
-    return &mesh->localBounds;
+
+    // 根据类型获取包围盒
+    return std::visit([](const auto &geom) -> const Math::BoundingVolumeVariant * { return &geom.localBounds; },
+                      *variant);
 }
 
 // ============================================================================
-// 几何体释放
+// 释放
 // ============================================================================
 
 void GeometryResourceManager::Release(GeometryHandle handle, uint64_t fenceValue) {
@@ -128,11 +145,8 @@ void GeometryResourceManager::Release(GeometryHandle handle, uint64_t fenceValue
     pending.fenceValue = fenceValue;
     m_pendingReleases.push_back(pending);
 
-    // 标记条目为不再使用（但不清空数据，等 Reclaim 时释放）
     Entry &entry = m_entries[handle.index];
     entry.inUse = false;
-    // 注意：不增加 generation，因为 Release 后可能还有旧的 handle 引用
-    // 这些旧 handle 在 IsValid 时会因为 inUse=false 而失效
 }
 
 void GeometryResourceManager::Reclaim(uint64_t completedFence) {
@@ -153,15 +167,13 @@ void GeometryResourceManager::Reclaim(uint64_t completedFence) {
 // ============================================================================
 
 uint32_t GeometryResourceManager::GetActiveCount() const {
-    if (!m_initialized) {
+    if (!m_initialized)
         return 0;
-    }
 
     uint32_t count = 0;
     for (const auto &entry : m_entries) {
-        if (entry.inUse) {
+        if (entry.inUse)
             ++count;
-        }
     }
     return count;
 }
@@ -218,7 +230,7 @@ void GeometryResourceManager::FreeEntry(uint32_t index) {
 
     // 清空数据
     Entry &entry = m_entries[index];
-    entry.mesh = TriangleMesh{}; // 重置为默认值
+    entry.geometry = GeometryVariant{}; // 重置为默认值（空 variant）
     entry.inUse = false;
     // generation 不重置，用于检测悬空句柄
 

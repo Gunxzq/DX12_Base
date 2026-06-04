@@ -99,7 +99,8 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
         return;
     }
 
-    const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
+    // 从 GeometryResourceManager 获取几何体
+    const TriangleMesh *mesh = m_geometryManager->GetGeometry<TriangleMesh>(geometryHandle);
     if (!mesh || !mesh->isGpuReady) {
         return;
     }
@@ -157,7 +158,8 @@ void OpaqueRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometry
         return;
     }
 
-    const TriangleMesh *mesh = m_geometryManager->GetTriangleMesh(geometryHandle);
+    // 从 GeometryResourceManager 获取几何体
+    const TriangleMesh *mesh = m_geometryManager->GetGeometry<TriangleMesh>(geometryHandle);
     if (!mesh || !mesh->isGpuReady) {
         return;
     }
