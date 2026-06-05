@@ -9,6 +9,7 @@
 
 namespace DX12Engine::Resource {
 class TextureManager;
+class MaterialManager;
 } // namespace DX12Engine::Resource
 
 namespace DX12Engine::Renderer {
@@ -20,7 +21,8 @@ class FrameResourceManager;
 // ============================================================================
 class BillboardRenderItemBuilder : public TRenderItemBuilder<TRenderQueue<BillboardRenderItem>> {
 public:
-    BillboardRenderItemBuilder(FrameResourceManager *frameResources, Resource::TextureManager *textureManager);
+    BillboardRenderItemBuilder(FrameResourceManager *frameResources, Resource::TextureManager *textureManager,
+                               Resource::MaterialManager *materialManager);
 
     // 设置每帧数据
     void SetCullingResult(const CullingResult *result) { m_cullingResult = result; }
@@ -34,6 +36,7 @@ public:
 private:
     FrameResourceManager *m_frameResourceManager;
     Resource::TextureManager *m_textureManager;
+    Resource::MaterialManager *m_materialManager;
 
     const CullingResult *m_cullingResult = nullptr;
     const LODResult *m_lodResult = nullptr;

@@ -1,6 +1,7 @@
 #include "BillboardRenderItemBuilder.h"
 #include "ECS/Core/Components.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
+#include "Resource/Manager/MaterialManager.h"
 #include "Resource/Texture/TextureManager.h"
 #include <unordered_map>
 #include <vector>
@@ -18,6 +19,7 @@ struct BillboardInstanceData {
     float Height;
     uint32_t Mode;
     uint32_t TextureArrayIndex;
+    uint32_t MaterialIndex;
     float Pad;
 };
 
@@ -33,8 +35,9 @@ struct BatchKeyHash {
 };
 
 BillboardRenderItemBuilder::BillboardRenderItemBuilder(FrameResourceManager *frameResources,
-                                                       TextureManager *textureManager)
-    : m_frameResourceManager(frameResources), m_textureManager(textureManager) {}
+                                                       TextureManager *textureManager,
+                                                       MaterialManager *materialManager)
+    : m_frameResourceManager(frameResources), m_textureManager(textureManager), m_materialManager(materialManager) {}
 
 void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<BillboardRenderItem> &outQueue) {
     outQueue.Clear();
@@ -84,6 +87,8 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
         inst.Height = billboardComp->height;
         inst.Mode = static_cast<uint32_t>(billboardComp->mode);
         inst.TextureArrayIndex = srvIndex; // 绝对 SRV 索引，供无界纹理数组使用
+        inst.MaterialIndex = m_materialManager->GetGPUIndex(billboardComp->materialHandle);
+        inst.Pad = 0.0f;
 
         BatchKey key{textureSRV};
         batches[key].push_back(inst);

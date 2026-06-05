@@ -12,6 +12,7 @@ struct BillboardInstanceData
     float Height;
     uint Mode; // BillboardMode 枚举值
     uint TextureArrayIndex;
+    uint MaterialIndex;
     float PadS;
 };
 
@@ -20,11 +21,7 @@ StructuredBuffer<BillboardInstanceData> gInstanceData : register(t12, space1);
 // ============================================================================
 // 顶点着色器输入/输出
 // ============================================================================
-struct VSInput
-{
-    float3 PosL : POSITION; // 实际不使用，但需要满足输入布局
-};
-
+// 无需顶点输入——所有数据从 StructuredBuffer 读取，VS 仅由 SV_VertexID/SV_InstanceID 驱动
 struct VSOutput
 {
     float3 CenterW : TEXCOORD0;
@@ -34,7 +31,7 @@ struct VSOutput
     uint InstanceID : TEXCOORD4;
 };
 
-VSOutput VS(VSInput input, uint instanceID : SV_InstanceID)
+VSOutput VS(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
     VSOutput output;
     BillboardInstanceData inst = gInstanceData[instanceID];
@@ -134,13 +131,44 @@ float4 PS(GSOutput pin) : SV_Target
     // Alpha 裁剪：丢弃几乎透明的像素（与龙书一致，阈值 0.1f）
     clip(texColor.a - 0.1f);
 
-    // 简单 Lambert 光照
-    float3 lightDir = normalize(-gLights[0].Direction.xyz);
+    // 重新归一化插值后的法线
     float3 N = normalize(pin.WorldNormal);
-    float ndotl = max(dot(N, lightDir), 0.3f);
 
-    float3 ambient = gAmbientLight.xyz * texColor.xyz;
-    float3 diffuse = texColor.xyz * gLights[0].Strength.xyz * ndotl;
+    // 视线方向
+    float3 V = normalize(gCameraPos - pin.WorldPos);
 
-    return float4(ambient + diffuse, texColor.a);
+    // 从材质数组读取材质（与 color.hlsl 一致）
+    uint matIndex = gInstanceData[pin.InstanceID].MaterialIndex;
+    MaterialData matData = gMaterialData[matIndex];
+
+    float3 albedo = matData.BaseColor.rgb * texColor.rgb;
+    float metallic = matData.Metallic;
+    float roughness = matData.Roughness;
+    float ao = matData.Ambient;
+    float3 emissive = matData.Emissive.rgb * matData.Emissive.w;
+
+    Material mat;
+    mat.BaseColor = float4(albedo, matData.BaseColor.a);
+    mat.Metallic = metallic;
+    mat.Roughness = roughness;
+    mat.Ambient = ao;
+    mat.Emissive = float4(emissive, 1.0f);
+    mat.Alpha = matData.Alpha;
+    mat.AlphaCutoff = matData.AlphaCutoff;
+
+    // 环境光
+    float3 ambient = gAmbientLight.xyz * gAmbientLight.w * albedo * ao;
+
+    // 直接光照（完整 PBR，与 color.hlsl 一致，逐光源遍历避免 ComputeLighting 的数组大小不匹配）
+    float3 directLight = 0;
+    for (uint i = 0; i < gNumDirLights; ++i)
+        directLight += ComputeDirectionalLight(gLights[i], mat, N, V);
+    for (uint j = gNumDirLights; j < gNumDirLights + gNumPointLights; ++j)
+        directLight += ComputePointLight(gLights[j], mat, pin.WorldPos, N, V);
+    for (uint k = gNumDirLights + gNumPointLights; k < gNumDirLights + gNumPointLights + gNumSpotLights; ++k)
+        directLight += ComputeSpotLight(gLights[k], mat, pin.WorldPos, N, V);
+
+    float3 litColor = ambient + directLight + emissive;
+
+    return float4(litColor, texColor.a);
 }

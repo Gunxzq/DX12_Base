@@ -91,6 +91,7 @@ enum class BillboardMode : uint8_t {
 
 struct BillboardComponent {
     Resource::TextureHandle textureHandle;
+    Resource::MaterialHandle materialHandle;
 
     float width = 2.0f;
     float height = 4.0f;
