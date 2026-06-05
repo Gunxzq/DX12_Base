@@ -89,12 +89,6 @@ void FrameDriver::ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence) {
     auto &handles = m_renderBuckets[static_cast<size_t>(phase)];
     if (!handles.empty()) {
 
-        // // 在批量执行前，让队列等待 BeginBarrier 完成
-        // if (waitSequence > 0) {
-        //     auto *queue = m_deviceContext->GetCommandQueue();
-        //     auto *fence = GetCommandManager()->GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
-        //     queue->Wait(fence, waitSequence);
-        // }
         m_deviceContext->GetCommandManager().SubmitBatch(handles, waitSequence);
 
         for (const auto &handle : handles) {
@@ -105,85 +99,6 @@ void FrameDriver::ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence) {
         handles.clear();
     }
 }
-
-// uint64_t FrameDriver::SubmitBarrier(RenderPhase phase) {
-//     if (!m_deviceContext) {
-//         OutputDebugStringW(L"[DEBUG] SubmitBarrier: m_deviceContext is null, returning 0\n");
-//         return 0;
-//     }
-
-//     auto &cmdMgr = m_deviceContext->GetCommandManager();
-//     uint64_t completed = cmdMgr.GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-
-//     const char *phaseName = (phase == RenderPhase::BeginBarrier) ? "BeginBarrier" : "EndBarrier";
-
-//     auto allocHandle = cmdMgr.AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(completed);
-//     ID3D12CommandAllocator *allocator = cmdMgr.GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
-
-//     auto cmdListHandle = cmdMgr.AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-//     CommandList cmdList = cmdMgr.GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-
-//     if (!cmdList.IsValid()) {
-//         OutputDebugStringW(L"[ERROR] CommandList is invalid!\n");
-//         return 0;
-//     }
-
-//     ID3D12Resource *backBuffer = m_deviceContext->GetCurrentBackBuffer();
-
-//     D3D12_RESOURCE_STATES stateBefore =
-//         (phase == RenderPhase::BeginBarrier) ? D3D12_RESOURCE_STATE_PRESENT : D3D12_RESOURCE_STATE_RENDER_TARGET;
-//     D3D12_RESOURCE_STATES stateAfter =
-//         (phase == RenderPhase::BeginBarrier) ? D3D12_RESOURCE_STATE_RENDER_TARGET : D3D12_RESOURCE_STATE_PRESENT;
-
-//     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, stateBefore, stateAfter);
-//     cmdList.Get()->ResourceBarrier(1, &barrier);
-
-//     if (phase == RenderPhase::BeginBarrier) {
-//         D3D12_VIEWPORT viewport = m_deviceContext->GetViewport();
-//         D3D12_RECT scissorRect = m_deviceContext->GetScissorRect();
-//         cmdList.Get()->RSSetViewports(1, &viewport);
-//         cmdList.Get()->RSSetScissorRects(1, &scissorRect);
-
-//         auto rtvHandle = m_deviceContext->GetCurrentBackBufferView();
-//         auto dsvHandle = m_deviceContext->GetDepthStencilView();
-//         cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
-
-//         // 根据时间计算颜色
-//         float time = static_cast<float>(m_stats.totalTime);
-//         float r = (sin(time * 0.5f) + 1.0f) / 2.0f;
-//         float g = (sin(time * 0.7f + 2.0f) + 1.0f) / 2.0f;
-//         float b = (sin(time * 0.9f + 4.0f) + 1.0f) / 2.0f;
-//         const float clearColor[] = {r, g, b, 1.0f};
-
-//         cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-//         cmdList.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0,
-//         0,
-//                                              nullptr);
-//     }
-
-//     uint64_t sequence = cmdMgr.GetNextSequence();
-
-//     try {
-//         cmdList.Close();
-//     } catch (...) {
-//         OutputDebugStringW(L"[ERROR] Close FAILED!\n");
-//         throw;
-//     }
-
-//     cmdMgr.Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
-
-//     cmdMgr.ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-//     cmdMgr.ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, sequence);
-
-//     // 关键：在 GPU 端插入等待，确保后续命令在屏障完成后才执行
-//     if (phase == RenderPhase::BeginBarrier) {
-//         auto *queue = m_deviceContext->GetCommandQueue();
-//         auto *fence = cmdMgr.GetFenceManager().GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT)->Get();
-//         queue->Wait(fence, sequence);
-//     }
-
-//     return sequence;
-// }
 
 bool FrameDriver::Tick() {
     if (!m_running)
@@ -274,8 +189,9 @@ bool FrameDriver::Tick() {
     // B. 提交命令列表到 GPU
     // 注意：此时 GPU 开始执行第 N-1 帧的渲染任务
     ExecuteRenderPhase(RenderPhase::PrePass, 0);
-    ExecuteRenderPhase(RenderPhase::Terrain, 0);
-    ExecuteRenderPhase(RenderPhase::Opaque, 0);
+    ExecuteRenderPhase(RenderPhase::Opaque, 0);       // 清除颜色+深度，写入深度
+    ExecuteRenderPhase(RenderPhase::Terrain, 0);      // 复用 Opaque 深度缓冲区
+    ExecuteRenderPhase(RenderPhase::Billboard, 0);    // 复用 Opaque 深度，不写深度
     ExecuteRenderPhase(RenderPhase::Transparent, 0);
     ExecuteRenderPhase(RenderPhase::PostProcess, 0);
     ExecuteRenderPhase(RenderPhase::FSR3_Upscale, 0);

@@ -16,6 +16,7 @@ enum class RenderPhase : uint8_t {
     Terrain,      // 地形渲染（独立阶段，在 Opaque 之前执行）
     Opaque,       // 不透明物体
     Transparent,  // 透明物体
+    Billboard,    // 公告牌渲染（独立阶段，避免与透明物体屏障冲突）
     PostProcess,  // 后处理
     FSR3_Upscale, // FSR3 超采样
     UI,           // 界面

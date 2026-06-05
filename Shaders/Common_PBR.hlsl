@@ -74,6 +74,7 @@ cbuffer cbLights : register(b2)
 // =================================================================================================
 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
+Texture2D gSharedTextures[] : register(t0, space0);
 TextureCube gEnvMap : register(t10);
 SamplerState gEnvSampler : register(s10);
 
