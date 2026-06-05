@@ -91,7 +91,6 @@ enum class BillboardMode : uint8_t {
 
 struct BillboardComponent {
     Resource::TextureHandle textureHandle;
-    uint32_t textureArrayIndex = 0; // 纹理数组索引（可选）
 
     float width = 2.0f;
     float height = 4.0f;
@@ -101,9 +100,7 @@ struct BillboardComponent {
     float maxDistance = 500.0f;   // 最大显示距离（远裁剪）
     float switchDistance = 50.0f; // 切换到实例化 3D 模型的距离
 
-    D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = 0;
-    uint32_t instanceBufferOffset = 0;
-    bool needsUpload = true;
+    uint32_t textureArrayIndex = 0;
 
     bool IsValid() const { return textureHandle.IsValid(); }
 };
