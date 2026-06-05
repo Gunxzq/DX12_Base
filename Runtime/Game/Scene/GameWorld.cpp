@@ -1656,158 +1656,107 @@ void GameWorld::RegisterShadowRenderSystem() {
 // ============================================================================
 
 void GameWorld::LoadBillboardTextures() {
-    // 加载多棵树 DDS 纹理到无界纹理数组
-    // 使用连续的 SRV 槽位，使着色器可以通过 gSharedTextures[TexIndex] 索引到不同纹理
-    //
-    // treearray.dds - 纹理数组 (DDS 自带多个切片)，占用 1 个 SRV 槽
-    // tree01S.dds   - 单张 2D 纹理
-    // tree02S.dds   - 单张 2D 纹理
-    // tree35S.dds   - 单张 2D 纹理
-
-    struct TextureEntry {
-        std::wstring path;
-        bool isArray = false; // true: DDS 内部已是纹理数组
-    };
-
-    const TextureEntry entries[] = {
-        {L"Content/Textures/treearray.dds", true},
-        {L"Content/Textures/tree01S.dds", false},
-        {L"Content/Textures/tree02S.dds", false},
-        {L"Content/Textures/tree35S.dds", false},
-    };
-
-    constexpr int kTextureCount = static_cast<int>(std::size(entries));
+    // ========================================================================
+    // 直接加载 treearray.dds 作为 Texture2DArray
+    // treearray.dds 是用工具打包好的纹理数组，内部已包含多个切片
+    // 着色器通过 Texture2DArray.Sample(float3(uv, sliceIndex)) 采样
+    // ========================================================================
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Device *device = m_context->DeviceContext->GetDevice();
     auto &descriptorHeaps = m_context->DescriptorHeaps;
     TextureManager *texMgr = m_context->TextureMgr;
 
-    // ========================================================================
-    // Step 1: 一次性分配连续的 SRV 槽位
-    // ========================================================================
-    std::vector<uint32_t> srvIndices(kTextureCount);
-    for (int i = 0; i < kTextureCount; ++i) {
-        srvIndices[i] = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
-        if (srvIndices[i] == UINT32_MAX) {
-            m_context->Logging->Error("[GameWorld] Failed to allocate SRV slot {} for billboard", i);
-            return;
-        }
+    // Step 1: 解析 DDS
+    DDSTextureInfo ddsInfo;
+    if (!AssetLoader::GetInstance().LoadTextureFromFile(L"Content/Textures/treearray.dds", ddsInfo)) {
+        m_context->Logging->Error("[GameWorld] Failed to load billboard texture treearray.dds");
+        return;
     }
 
-    // ========================================================================
-    // Step 2: 解析 DDS、创建 GPU 资源、创建 SRV
-    // ========================================================================
-    struct LoadedTexture {
-        GpuResourceHandle gpuHandle;
-        DDSTextureInfo ddsInfo;
-    };
-    std::vector<LoadedTexture> loaded(kTextureCount);
+    D3D12_RESOURCE_DESC &desc = ddsInfo.desc;
+    uint32_t arraySize = static_cast<uint32_t>(desc.DepthOrArraySize);
+    m_billboardTotalSlices = arraySize;
 
-    for (int i = 0; i < kTextureCount; ++i) {
-        DDSTextureInfo ddsInfo;
-        if (!AssetLoader::GetInstance().LoadTextureFromFile(entries[i].path, ddsInfo)) {
-            m_context->Logging->Error("[GameWorld] Failed to load billboard texture {}", i);
-            m_billboardTextureHandles[i] = {};
-            loaded[i].gpuHandle = GpuResourceHandle::Invalid(); // 显式标记无效，避免 Step 3 误判
-            continue; // 跳过当前纹理，继续加载后续
-        }
+    m_context->Logging->Info("[GameWorld] Billboard texture loaded: {}x{}, format={}, mips={}, arraySize={}",
+                             desc.Width, desc.Height, static_cast<int>(desc.Format), desc.MipLevels, arraySize);
 
-        m_context->Logging->Info("[GameWorld] Billboard texture {} loaded: {}x{}, format={}, mips={}, arraySize={}",
-                                 i, ddsInfo.desc.Width, ddsInfo.desc.Height,
-                                 static_cast<int>(ddsInfo.desc.Format), ddsInfo.desc.MipLevels,
-                                 ddsInfo.desc.DepthOrArraySize);
-
-        GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
-        if (!gpuHandle.IsValid()) {
-            m_context->Logging->Error("[GameWorld] Failed to create GPU texture for billboard {}", i);
-            m_billboardTextureHandles[i] = {};
-            loaded[i].gpuHandle = GpuResourceHandle::Invalid();
-            continue;
-        }
-
-        // 创建 SRV：纹理数组用 Texture2DArray 维度，单张纹理用 Texture2D
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = ddsInfo.desc.Format;
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-
-        uint32_t arraySize = ddsInfo.desc.DepthOrArraySize;
-
-        if (entries[i].isArray || arraySize > 1) {
-            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-            srvDesc.Texture2DArray.MostDetailedMip = 0;
-            srvDesc.Texture2DArray.MipLevels = ddsInfo.desc.MipLevels;
-            srvDesc.Texture2DArray.FirstArraySlice = 0;
-            srvDesc.Texture2DArray.ArraySize = arraySize;
-        } else {
-            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
-            srvDesc.Texture2D.MostDetailedMip = 0;
-        }
-
-        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
-            descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndices[i]);
-        device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
-
-        m_billboardTextureHandles[i] = texMgr->RegisterTexture(gpuHandle, srvIndices[i]);
-
-        loaded[i] = {gpuHandle, std::move(ddsInfo)};
+    // Step 2: 创建 GPU 资源（直接使用 DDS 解析出的 desc，格式/尺寸完全匹配）
+    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, desc, D3D12_RESOURCE_STATE_COMMON);
+    if (!gpuHandle.IsValid()) {
+        m_context->Logging->Error("[GameWorld] Failed to create billboard Texture2DArray");
+        return;
     }
 
-    // ========================================================================
-    // Step 3: 批量上传纹理数据（共享一个命令列表）
-    // ========================================================================
+    // Step 3: 分配 SRV
+    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    if (srvIndex == UINT32_MAX) {
+        m_context->Logging->Error("[GameWorld] Failed to allocate SRV slot for billboard Texture2DArray");
+        return;
+    }
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = desc.Format;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    srvDesc.Texture2DArray.MostDetailedMip = 0;
+    srvDesc.Texture2DArray.MipLevels = desc.MipLevels;
+    srvDesc.Texture2DArray.FirstArraySlice = 0;
+    srvDesc.Texture2DArray.ArraySize = arraySize;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+
+    // 注册到 TextureManager
+    TextureHandle texHandle = texMgr->RegisterTexture(gpuHandle, srvIndex);
+
+    // Step 4: 上传纹理数据
     uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
     auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
     auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
     auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
     auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
-    for (int i = 0; i < kTextureCount; ++i) {
-        auto &ld = loaded[i];
-        if (!ld.gpuHandle.IsValid())
-            continue; // 跳过加载失败的纹理
+    // 屏障: COMMON → COPY_DEST
+    auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
+                                                         D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdList.Get()->ResourceBarrier(1, &barrier1);
 
-        auto &ddsInfo = ld.ddsInfo;
-        ID3D12Resource *resource = gpuMgr.GetResource(ld.gpuHandle);
+    UINT64 requiredSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
+                                                      static_cast<UINT>(ddsInfo.subresources.size()));
+    GpuResourceHandle uploadHandle =
+        gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
-        // 屏障: COMMON → COPY_DEST
-        auto barrier1 =
-            CD3DX12_RESOURCE_BARRIER::Transition(resource, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
-        cmdList.Get()->ResourceBarrier(1, &barrier1);
+    UpdateSubresources(cmdList.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadHandle), 0, 0,
+                       static_cast<UINT>(ddsInfo.subresources.size()), ddsInfo.subresources.data());
 
-        // 上传子资源
-        UINT subresourceCount = static_cast<UINT>(ddsInfo.subresources.size());
-        UINT64 requiredSize = GetRequiredIntermediateSize(resource, 0, subresourceCount);
-        GpuResourceHandle uploadHandle =
-            gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
-
-        UpdateSubresources(cmdList.Get(), resource, gpuMgr.GetResource(uploadHandle), 0, 0, subresourceCount,
-                           ddsInfo.subresources.data());
-
-        // 屏障: COPY_DEST → PIXEL_SHADER_RESOURCE
-        auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(resource, D3D12_RESOURCE_STATE_COPY_DEST,
-                                                             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        cmdList.Get()->ResourceBarrier(1, &barrier2);
-
-        // 释放上传缓冲（带延迟回收）
-        uint64_t sequence = m_context->GetNextSequence();
-        gpuMgr.Release(uploadHandle, sequence);
-    }
+    // 屏障: COPY_DEST → PIXEL_SHADER_RESOURCE
+    auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    cmdList.Get()->ResourceBarrier(1, &barrier2);
 
     cmdList.Close();
     m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
     m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
 
     uint64_t releaseSequence = m_context->GetNextSequence();
+    gpuMgr.Release(uploadHandle, releaseSequence);
     m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
     m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, releaseSequence);
 
-    // 输出 SRV 索引信息（便于调试无界纹理数组）
-
-    for (int i = 0; i < kTextureCount; ++i) {
-        m_context->Logging->Info("Billboard texture {} loaded at SRV index {}", i, srvIndices[i]);
+    // Step 5: 存储句柄（所有实体共享同一个 Texture2DArray，通过 textureArrayIndex 区分切片）
+    for (int i = 0; i < 4; ++i) {
+        m_billboardTextureHandles[i] = texHandle;
     }
+
+    // sliceOffsets: 每个逻辑纹理在数组中的起始索引（全部指向同一个数组的不同切片范围）
+    // 现在只有一个纹理数组，但为保持兼容性，sliceOffsets[0]=0
+    for (int i = 0; i < 4; ++i) {
+        m_billboardSliceOffsets[i] = 0;
+    }
+
+    m_context->Logging->Info("[GameWorld] Billboard Texture2DArray created: {}x{}, {} slices, SRV index {}",
+                             desc.Width, desc.Height, arraySize, srvIndex);
 }
 
 void GameWorld::CreateBillboardTrees() {
@@ -1821,9 +1770,8 @@ void GameWorld::CreateBillboardTrees() {
     m_billboardRenderer->Initialize();
 
     // 初始化公告牌渲染项构建器
-    m_billboardBuilder =
-        std::make_unique<BillboardRenderItemBuilder>(m_context->FrameResourceManager, m_context->TextureMgr,
-                                                     m_context->MaterialMgr);
+    m_billboardBuilder = std::make_unique<BillboardRenderItemBuilder>(m_context->FrameResourceManager,
+                                                                      m_context->TextureMgr, m_context->MaterialMgr);
 
     // 在场景中随机放置树公告牌实体
     // 平面在 Y=10.0f，公告牌底部与平面齐平（公告牌中心 Y = 平面Y + 高度/2）
@@ -1840,18 +1788,12 @@ void GameWorld::CreateBillboardTrees() {
     // 手动指定位置让树看起来自然分布
     // 全部使用 texIndex=0 (treearray.dds)，待其他纹理加载修复后再分配
     const TreePlacement treePlacements[TREE_COUNT] = {
-        {-20.0f, -20.0f, 2.0f, 4.0f, BillboardMode::AxisY, 0},
-        {-10.0f, -22.0f, 2.5f, 5.0f, BillboardMode::AxisY, 0},
-        {5.0f, -18.0f, 2.0f, 4.5f, BillboardMode::AxisY, 0},
-        {-25.0f, 5.0f, 2.2f, 4.2f, BillboardMode::AxisY, 0},
-        {20.0f, -10.0f, 2.8f, 5.5f, BillboardMode::AxisY, 0},
-        {-15.0f, 12.0f, 2.0f, 4.0f, BillboardMode::AxisY, 0},
-        {12.0f, -15.0f, 2.3f, 4.8f, BillboardMode::AxisY, 0},
-        {-22.0f, 18.0f, 2.5f, 5.0f, BillboardMode::AxisY, 0},
-        {8.0f, 22.0f, 2.0f, 4.0f, BillboardMode::AxisY, 0},
-        {22.0f, 15.0f, 2.6f, 5.2f, BillboardMode::AxisY, 0},
-        {-28.0f, -8.0f, 2.4f, 4.6f, BillboardMode::AxisY, 0},
-        {28.0f, 8.0f, 2.1f, 4.3f, BillboardMode::AxisY, 0},
+        {-20.0f, -20.0f, 2.0f, 4.0f, BillboardMode::AxisY, 0}, {-10.0f, -22.0f, 2.5f, 5.0f, BillboardMode::AxisY, 0},
+        {5.0f, -18.0f, 2.0f, 4.5f, BillboardMode::AxisY, 0},   {-25.0f, 5.0f, 2.2f, 4.2f, BillboardMode::AxisY, 0},
+        {20.0f, -10.0f, 2.8f, 5.5f, BillboardMode::AxisY, 0},  {-15.0f, 12.0f, 2.0f, 4.0f, BillboardMode::AxisY, 0},
+        {12.0f, -15.0f, 2.3f, 4.8f, BillboardMode::AxisY, 0},  {-22.0f, 18.0f, 2.5f, 5.0f, BillboardMode::AxisY, 0},
+        {8.0f, 22.0f, 2.0f, 4.0f, BillboardMode::AxisY, 0},    {22.0f, 15.0f, 2.6f, 5.2f, BillboardMode::AxisY, 0},
+        {-28.0f, -8.0f, 2.4f, 4.6f, BillboardMode::AxisY, 0},  {28.0f, 8.0f, 2.1f, 4.3f, BillboardMode::AxisY, 0},
     };
 
     m_billboardEntities.clear();
@@ -1886,9 +1828,8 @@ void GameWorld::CreateBillboardTrees() {
         billboardComp.maxDistance = 500.0f;
         billboardComp.switchDistance = 50.0f;
 
-        // textureArrayIndex 由 BillboardRenderItemBuilder 通过
-        // TextureManager::GetSRVIndex 自动填充为绝对 SRV 索引
-        billboardComp.textureArrayIndex = 0;
+        // textureArrayIndex 循环使用 Texture2DArray 中的切片（0 到 totalSlices-1）
+        billboardComp.textureArrayIndex = i % m_billboardTotalSlices;
 
         m_registry->AddComponent<BillboardComponent>(entity, std::move(billboardComp));
         m_billboardEntities.push_back(entity);
@@ -1897,7 +1838,8 @@ void GameWorld::CreateBillboardTrees() {
     // 注册公告牌渲染系统
     RegisterBillboardRenderSystem();
 
-    m_context->Logging->Info("[GameWorld] {} billboard trees created (4 unique textures)", TREE_COUNT);
+    m_context->Logging->Info("[GameWorld] {} billboard trees created ({} texture slices)", TREE_COUNT,
+                             m_billboardTotalSlices);
 }
 
 void GameWorld::RegisterBillboardRenderSystem() {
@@ -1946,12 +1888,12 @@ void GameWorld::RegisterBillboardRenderSystem() {
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
-                 // 获取纹理堆起始地址（slot 4: 无界纹理数组）
-                 D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
-                     m_context->DescriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, 0);
+                 // 获取公告牌 Texture2DArray 的 SRV（slot 4: t20）
+                 D3D12_GPU_DESCRIPTOR_HANDLE billboardTexSRV =
+                     m_context->TextureMgr->GetSRV(m_billboardTextureHandles[0]);
 
                  // 开始公告牌渲染
-                 m_billboardRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, textureHeapStart);
+                 m_billboardRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, billboardTexSRV);
 
                  // 遍历公告牌队列
                  for (const auto &item : m_billboardQueue.GetItems()) {

@@ -14,8 +14,6 @@ struct BillboardRenderItem {
     D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = 0;
     uint32_t instanceCount = 0;
 
-    D3D12_GPU_DESCRIPTOR_HANDLE textureSRV = {};
-
     bool IsValid() const { return instanceBufferAddress != 0 && instanceCount > 0; }
 };
 

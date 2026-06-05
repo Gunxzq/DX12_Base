@@ -161,7 +161,9 @@ private:
     std::unique_ptr<DX12Engine::Renderer::BillboardRenderItemBuilder> m_billboardBuilder;
     DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::BillboardRenderItem> m_billboardQueue;
     DX12Engine::Resource::MaterialHandle m_billboardMaterialHandle;
-    DX12Engine::Resource::TextureHandle m_billboardTextureHandles[4]; // 多棵树纹理（无界纹理数组）
+    DX12Engine::Resource::TextureHandle m_billboardTextureHandles[4]; // 公告牌 Texture2DArray 句柄
+    uint32_t m_billboardSliceOffsets[4] = {};                         // 每个逻辑纹理的切片起始偏移
+    uint32_t m_billboardTotalSlices = 0;                              // 总切片数
     std::vector<DX12Engine::ECS::Entity> m_billboardEntities;         // 树公告牌实体
 
     // 后台异步执行器（纯 CPU 线程池，独立于 FrameDriver）

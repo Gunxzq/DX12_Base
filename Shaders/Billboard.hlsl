@@ -3,6 +3,11 @@
 #include "Common_PBR.hlsl"
 
 // ============================================================================
+// 公告牌专用纹理数组（独立于 gSharedTextures 无界数组）
+// ============================================================================
+Texture2DArray gBillboardTextures : register(t20);
+
+// ============================================================================
 // 实例数据（与 C++ 侧 BillboardInstanceData 布局一致）
 // ============================================================================
 struct BillboardInstanceData
@@ -11,7 +16,7 @@ struct BillboardInstanceData
     float Width;
     float Height;
     uint Mode; // BillboardMode 枚举值
-    uint TextureArrayIndex;
+    uint TextureArrayIndex; // 切片索引（0, 1, 2, 3...）
     uint MaterialIndex;
     float PadS;
 };
@@ -125,8 +130,8 @@ struct GSOutput
 // ============================================================================
 float4 PS(GSOutput pin) : SV_Target
 {
-    // 使用无界纹理数组采样
-    float4 texColor = gSharedTextures[pin.TexIndex].Sample(gSamplerLinearWrap, pin.TexCoord);
+    // 使用 Texture2DArray 采样（pin.TexIndex 是切片索引）
+    float4 texColor = gBillboardTextures.Sample(gSamplerLinearWrap, float3(pin.TexCoord, pin.TexIndex));
 
     // Alpha 裁剪：丢弃几乎透明的像素（与龙书一致，阈值 0.1f）
     clip(texColor.a - 0.1f);

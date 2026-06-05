@@ -3,7 +3,6 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Resource/Manager/MaterialManager.h"
 #include "Resource/Texture/TextureManager.h"
-#include <unordered_map>
 #include <vector>
 
 using namespace DX12Engine::Renderer;
@@ -23,17 +22,6 @@ struct BillboardInstanceData {
     float Pad;
 };
 
-// 分组键：相同纹理的公告牌可以合批
-struct BatchKey {
-    D3D12_GPU_DESCRIPTOR_HANDLE textureSRV;
-
-    bool operator==(const BatchKey &other) const { return textureSRV.ptr == other.textureSRV.ptr; }
-};
-
-struct BatchKeyHash {
-    size_t operator()(const BatchKey &key) const { return std::hash<uint64_t>()(key.textureSRV.ptr); }
-};
-
 BillboardRenderItemBuilder::BillboardRenderItemBuilder(FrameResourceManager *frameResources,
                                                        TextureManager *textureManager,
                                                        MaterialManager *materialManager)
@@ -46,8 +34,9 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
         return;
     }
 
-    // 按纹理分组
-    std::unordered_map<BatchKey, std::vector<BillboardInstanceData>, BatchKeyHash> batches;
+    // 所有公告牌共享同一个 Texture2DArray，通过实例数据中的 TextureArrayIndex 区分切片
+    // 因此可以合为一个批次
+    std::vector<BillboardInstanceData> instances;
 
     for (auto entity : m_cullingResult->visibleEntities) {
         auto *billboardComp = registry.TryGetComponent<BillboardComponent>(entity);
@@ -70,14 +59,8 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
             continue;
         }
 
-        // 获取纹理 SRV
-        D3D12_GPU_DESCRIPTOR_HANDLE textureSRV = m_textureManager->GetSRV(billboardComp->textureHandle);
-        if (textureSRV.ptr == 0)
-            continue;
-
-        // 获取 SRV 绝对索引（用于无界纹理数组 gSharedTextures[TexIndex]）
-        uint32_t srvIndex = m_textureManager->GetSRVIndex(billboardComp->textureHandle);
-        if (srvIndex == UINT32_MAX)
+        // 验证纹理句柄
+        if (!m_textureManager->IsValid(billboardComp->textureHandle))
             continue;
 
         // 构建实例数据
@@ -86,33 +69,28 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
         inst.Width = billboardComp->width;
         inst.Height = billboardComp->height;
         inst.Mode = static_cast<uint32_t>(billboardComp->mode);
-        inst.TextureArrayIndex = srvIndex; // 绝对 SRV 索引，供无界纹理数组使用
+        inst.TextureArrayIndex = billboardComp->textureArrayIndex; // Texture2DArray 切片索引
         inst.MaterialIndex = m_materialManager->GetGPUIndex(billboardComp->materialHandle);
         inst.Pad = 0.0f;
 
-        BatchKey key{textureSRV};
-        batches[key].push_back(inst);
+        instances.push_back(inst);
     }
 
-    // 为每个批次生成渲染项
-    for (auto &[key, instances] : batches) {
-        if (instances.empty())
-            continue;
+    if (instances.empty())
+        return;
 
-        // 上传实例数据到 GPU
-        D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = m_frameResourceManager->AllocateInstance(
-            instances.data(), static_cast<uint32_t>(instances.size() * sizeof(BillboardInstanceData)));
+    // 上传实例数据到 GPU
+    D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = m_frameResourceManager->AllocateInstance(
+        instances.data(), static_cast<uint32_t>(instances.size() * sizeof(BillboardInstanceData)));
 
-        if (instanceBufferAddress == 0)
-            continue;
+    if (instanceBufferAddress == 0)
+        return;
 
-        BillboardRenderItem item;
-        item.instanceBufferAddress = instanceBufferAddress;
-        item.instanceCount = static_cast<uint32_t>(instances.size());
-        item.textureSRV = key.textureSRV;
+    BillboardRenderItem item;
+    item.instanceBufferAddress = instanceBufferAddress;
+    item.instanceCount = static_cast<uint32_t>(instances.size());
 
-        outQueue.Add(item);
-    }
+    outQueue.Add(item);
 }
 
 } // namespace DX12Engine::Renderer

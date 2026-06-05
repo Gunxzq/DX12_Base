@@ -48,13 +48,13 @@ void BillboardRenderer::EndFrame() {
  * @param passConstantsAddress 传递常量缓冲区地址
  * @param lightCBAddress 光线缓冲区地址
  * @param materialBufferSRV 材料缓冲区SRV
- * @param textureHeapStart 纹理堆开始地址
+ * @param billboardTextureSRV 公告牌 Texture2DArray SRV
  * @date 2026-06-05
  */
 void BillboardRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                    D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
                                    D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
-                                   D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart) {
+                                   D3D12_GPU_DESCRIPTOR_HANDLE billboardTextureSRV) {
     if (!m_pso || !m_rootSignature) {
         OutputDebugStringW(L"[ERROR] BillboardRenderer::BeginFrame: PSO or RootSignature not initialized\n");
         return;
@@ -68,7 +68,9 @@ void BillboardRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRE
         cmdList.Get()->SetGraphicsRootDescriptorTable(3, materialBufferSRV);
     }
 
-    cmdList.Get()->SetGraphicsRootDescriptorTable(4, textureHeapStart);
+    if (billboardTextureSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(4, billboardTextureSRV);
+    }
 }
 
 void BillboardRenderer::DrawBillboard(CommandList &cmdList, const BillboardRenderItem &item) {
@@ -149,7 +151,7 @@ void BillboardRenderer::CreateRootSignature() {
     //   slot 1: b1 cbPass           (CBV)
     //   slot 2: b2 cbLights         (CBV)
     //   slot 3: t0,space1           StructuredBuffer<MaterialData> (SRV)
-    //   slot 4: t0                  纹理 SRV（公告牌无界数组）
+    //   slot 4: t20                 Texture2DArray SRV（公告牌专用）
     //   slot 5-7: 未使用（占位对齐）
     //   slot 8: t12,space1          StructuredBuffer<BillboardInstanceData> (SRV)
     // ========================================================================
@@ -159,16 +161,16 @@ void BillboardRenderer::CreateRootSignature() {
     CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
-    CD3DX12_DESCRIPTOR_RANGE texTable;
-    texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 0,
-                  D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND); // NumDescriptors=UINT_MAX 表示无界
+    CD3DX12_DESCRIPTOR_RANGE billboardTexRange;
+    billboardTexRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 20, 0,
+                           D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND); // 单个 Texture2DArray SRV at t20
 
     // slot 0: 占位 cbPerObject (Billboard VS 中未使用，但 cbPerObject 在 cbuffer 中仍有定义)
     slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[2].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[3].InitAsDescriptorTable(1, &materialBufferRange, D3D12_SHADER_VISIBILITY_PIXEL);
-    slotRootParameter[4].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
+    slotRootParameter[4].InitAsDescriptorTable(1, &billboardTexRange, D3D12_SHADER_VISIBILITY_PIXEL);
     // slot 5, 6, 7: 占位对齐（绑定到 shader 中不存在的寄存器，避免冲突）
     slotRootParameter[5].InitAsConstantBufferView(5, 0, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[6].InitAsConstantBufferView(6, 0, D3D12_SHADER_VISIBILITY_ALL);
