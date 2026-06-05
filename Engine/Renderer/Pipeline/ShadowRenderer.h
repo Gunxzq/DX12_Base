@@ -36,6 +36,9 @@ public:
     // OffscreenRenderer 接口 — 离屏渲染核心
     // ========================================================================
 
+    // 基类纯虚接口实现（阴影渲染器需额外参数，通过 SetShadowPassParams 设置）
+    void BeginOffscreen(CommandList &cmdList) override;
+
     // 开始离屏阴影 Pass（设置 DSV、清除深度、设置视口/裁剪、绑定 PSO）
     // 调用前：资源处于 SRV 状态（由调用方负责屏障转换）
     // 调用后：资源处于 DEPTH_WRITE 状态，可进行 DrawMesh/DrawInstanced
@@ -44,6 +47,10 @@ public:
 
     // 结束离屏阴影 Pass（由调用方负责后续屏障转换回 SRV）
     void EndOffscreen(CommandList &cmdList) override;
+
+    // 预设阴影 Pass 参数（用于基类 BeginOffscreen(CommandList&) 调用前）
+    void SetShadowPassParams(D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle,
+                             uint32_t width, uint32_t height);
 
     // ========================================================================
     // OffscreenRenderer 接口 — 输出纹理访问
@@ -126,6 +133,9 @@ private:
     uint32_t m_passWidth = 0;
     uint32_t m_passHeight = 0;
     D3D12_CPU_DESCRIPTOR_HANDLE m_currentDsvHandle = {};
+
+    // 缓存的阴影 Pass 参数（供基类 BeginOffscreen(CommandList&) 使用）
+    D3D12_GPU_VIRTUAL_ADDRESS m_cachedLightCBAddress = 0;
 };
 
 } // namespace DX12Engine::Renderer

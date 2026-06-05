@@ -55,6 +55,19 @@ void ShadowRenderer::Resize(uint32_t width, uint32_t height) {
 // OffscreenRenderer 接口 — 离屏渲染核心
 // ============================================================================
 
+void ShadowRenderer::SetShadowPassParams(D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
+                                         D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle, uint32_t width, uint32_t height) {
+    m_cachedLightCBAddress = lightCBAddress;
+    m_passWidth = width;
+    m_passHeight = height;
+    m_currentDsvHandle = dsvHandle;
+}
+
+void ShadowRenderer::BeginOffscreen(CommandList &cmdList) {
+    // 使用缓存的参数调用完整版本
+    BeginOffscreen(cmdList, m_cachedLightCBAddress, m_currentDsvHandle, m_passWidth, m_passHeight);
+}
+
 /**
  * @brief 开始离屏阴影 Pass
  * @param cmdList 命令列表
