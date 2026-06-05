@@ -85,6 +85,26 @@ D3D12_GPU_DESCRIPTOR_HANDLE TextureManager::GetSRV(TextureHandle handle) const {
     return m_descriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, entry.srvIndex);
 }
 
+/**
+ * @brief 获取纹理 SRV 索引
+ * @param handle 纹理句柄
+ * @return uint32_t SRV 索引
+ * @note 用于无界纹理数组 gSharedTextures[TexIndex]
+ * @date 2026-06-05
+ */
+uint32_t TextureManager::GetSRVIndex(TextureHandle handle) const {
+    if (!handle.IsValid() || handle.index >= m_capacity) {
+        return UINT32_MAX;
+    }
+
+    const TextureEntry &entry = m_entries[handle.index];
+    if (!entry.inUse || entry.generation != handle.generation) {
+        return UINT32_MAX;
+    }
+
+    return entry.srvIndex;
+}
+
 void TextureManager::Release(TextureHandle handle, uint64_t fenceValue) {
     if (!handle.IsValid() || handle.index >= m_capacity) {
         return;

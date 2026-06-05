@@ -17,6 +17,7 @@ public:
     void Shutdown();
 
     D3D12_GPU_DESCRIPTOR_HANDLE GetSRV(TextureHandle handle) const;
+    uint32_t GetSRVIndex(TextureHandle handle) const;
     TextureHandle RegisterTexture(GpuResourceHandle gpuHandle, uint32_t srvIndex);
 
     void Release(TextureHandle handle, uint64_t fenceValue);
