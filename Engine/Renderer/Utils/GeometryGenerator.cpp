@@ -623,3 +623,52 @@ GeometryGenerator::MeshData GeometryGenerator::CreateQuad(float x, float y, floa
 
     return meshData;
 }
+
+GeometryGenerator::PatchMeshData GeometryGenerator::CreateTerrainPatchGrid(float width, float depth, uint32 numQuadsX,
+                                                                           uint32 numQuadsZ) {
+    PatchMeshData meshData;
+
+    uint32 vertexCountX = numQuadsX + 1;
+    uint32 vertexCountZ = numQuadsZ + 1;
+
+    float halfWidth = width * 0.5f;
+    float halfDepth = depth * 0.5f;
+    float dx = width / (float)numQuadsX;
+    float dz = depth / (float)numQuadsZ;
+    float du = 1.0f / (float)numQuadsX;
+    float dv = 1.0f / (float)numQuadsZ;
+
+    // 生成顶点（与 CreateGrid 相同）
+    meshData.Vertices.resize(vertexCountX * vertexCountZ);
+    for (uint32 z = 0; z < vertexCountZ; ++z) {
+        float worldZ = halfDepth - z * dz;
+        for (uint32 x = 0; x < vertexCountX; ++x) {
+            float worldX = -halfWidth + x * dx;
+            uint32 idx = z * vertexCountX + x;
+
+            meshData.Vertices[idx].Position = XMFLOAT3(worldX, 0.0f, worldZ);
+            meshData.Vertices[idx].Normal = XMFLOAT3(0.0f, 1.0f, 0.0f);
+            meshData.Vertices[idx].TangentU = XMFLOAT3(1.0f, 0.0f, 0.0f);
+            meshData.Vertices[idx].TexC.x = x * du;
+            meshData.Vertices[idx].TexC.y = z * dv;
+        }
+    }
+
+    // 生成四边形面片索引（每个面片 4 个索引，用于曲面细分）
+    // D3D quad domain: uv=(0,0)左上（远处）, (1,1)右下（近处）
+    //   z 增加 → worldZ 减小（从远处到近处）
+    //   quad[0]=左上（远处，row=z）, quad[1]=右上（远处）
+    //   quad[2]=左下（近处，row=z+1）, quad[3]=右下（近处）
+    meshData.QuadPatchIndices.reserve(numQuadsX * numQuadsZ * 4);
+    for (uint32 z = 0; z < numQuadsZ; ++z) {
+        for (uint32 x = 0; x < numQuadsX; ++x) {
+            uint32 base = z * vertexCountX + x;
+            meshData.QuadPatchIndices.push_back(base);                    // quad[0]: 左上（远处，row=z）
+            meshData.QuadPatchIndices.push_back(base + 1);                // quad[1]: 右上（远处）
+            meshData.QuadPatchIndices.push_back(base + vertexCountX);     // quad[2]: 左下（近处，row=z+1）
+            meshData.QuadPatchIndices.push_back(base + vertexCountX + 1); // quad[3]: 右下（近处）
+        }
+    }
+
+    return meshData;
+}

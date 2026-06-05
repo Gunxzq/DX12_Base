@@ -274,6 +274,7 @@ bool FrameDriver::Tick() {
     // B. 提交命令列表到 GPU
     // 注意：此时 GPU 开始执行第 N-1 帧的渲染任务
     ExecuteRenderPhase(RenderPhase::PrePass, 0);
+    ExecuteRenderPhase(RenderPhase::Terrain, 0);
     ExecuteRenderPhase(RenderPhase::Opaque, 0);
     ExecuteRenderPhase(RenderPhase::Transparent, 0);
     ExecuteRenderPhase(RenderPhase::PostProcess, 0);

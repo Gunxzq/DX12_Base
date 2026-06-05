@@ -59,5 +59,53 @@ struct TransparentMeshComponent {
     bool IsValid() const { return lodMeshHandle.IsValid(); }
 };
 
+struct TerrainComponent {
+    Resource::GeometryHandle geometryHandle; // PatchMesh 句柄
+    Resource::TextureHandle heightMapHandle; // 高度图纹理
+    Resource::TextureHandle albedoHandle;    // 漫反射纹理（可选）
+    Resource::TextureHandle normalHandle;    // 法线贴图（可选）
+
+    float heightScale = 20.0f;
+    float heightOffset = 0.0f;
+    float tessellationFactor = 8.0f;       // 近距离最大细分因子 (1~64)
+    float tessellationDistanceMin = 5.0f;  // 在此距离内使用最大细分
+    float tessellationDistanceMax = 80.0f; // 超出此距离不再细分
+
+    uint32_t materialIndex = 0;
+    Math::BoundingVolumeVariant localBounds;
+
+    // 运行时数据（由 TerrainManager 管理）
+    uint32_t constantBufferOffset = 0;
+    bool needsUpload = true;
+
+    bool IsValid() const { return geometryHandle.IsValid() && heightMapHandle.IsValid(); }
+};
+
+// 公告牌组件
+
+enum class BillboardMode : uint8_t {
+    AxisY,    // 绕 Y 轴旋转（树木、灯柱）
+    Full,     // 完全面向相机（粒子、闪光）
+    Spherical // 球面朝向（云、远处物体）
+};
+
+struct BillboardComponent {
+    Resource::TextureHandle textureHandle;
+    uint32_t textureArrayIndex = 0; // 纹理数组索引（可选）
+
+    float width = 2.0f;
+    float height = 4.0f;
+    BillboardMode mode = BillboardMode::AxisY;
+
+    float minDistance = 10.0f;    // 最小显示距离（近裁剪）
+    float maxDistance = 500.0f;   // 最大显示距离（远裁剪）
+    float switchDistance = 50.0f; // 切换到实例化 3D 模型的距离
+
+    D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = 0;
+    uint32_t instanceBufferOffset = 0;
+    bool needsUpload = true;
+
+    bool IsValid() const { return textureHandle.IsValid(); }
+};
 } // namespace ECS
 } // namespace DX12Engine

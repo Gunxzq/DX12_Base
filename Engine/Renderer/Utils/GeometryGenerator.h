@@ -38,6 +38,12 @@ public:
         DirectX::XMFLOAT2 TexC;
     };
 
+    struct PatchMeshData {
+        std::vector<Vertex> Vertices;
+        std::vector<uint32> QuadPatchIndices; // 四边形面片索引（4个一组）
+        uint32 GetPatchCount() const { return (uint32)QuadPatchIndices.size() / 4; }
+    };
+
     struct MeshData {
         std::vector<Vertex> Vertices;
         std::vector<uint32> Indices32;
@@ -91,6 +97,8 @@ public:
     /// Creates a quad aligned with the screen.  This is useful for postprocessing and screen effects.
     ///</summary>
     MeshData CreateQuad(float x, float y, float w, float h, float depth);
+
+    PatchMeshData CreateTerrainPatchGrid(float width, float depth, uint32 numQuadsX, uint32 numQuadsZ);
 
 private:
     void Subdivide(MeshData &meshData);

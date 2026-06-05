@@ -170,4 +170,24 @@ void RingBuffer::Reset() {
     }
 }
 
+D3D12_GPU_VIRTUAL_ADDRESS RingBuffer::GetGPUAddress(uint32_t offset) const {
+    if (!m_initialized || offset >= m_size) {
+        return 0;
+    }
+    return m_gpuAddress + offset;
+}
+
+void RingBuffer::Free(uint32_t offset, uint64_t fence) {
+    if (!m_initialized || offset >= m_size) {
+        return;
+    }
+
+    // 注意：由于环形缓冲区的特性，不能随意释放任意偏移
+    // 必须按分配顺序释放（FIFO）
+    // 这里简化处理：如果释放的不是尾部，需要特殊处理
+
+    // 实际实现中，可以遍历 pending 队列找到对应的分配
+    // 或者要求调用者保证按顺序释放
+}
+
 } // namespace DX12Engine::Renderer

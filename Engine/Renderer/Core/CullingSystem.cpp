@@ -48,6 +48,18 @@ void CullingSystem::Execute(ECS::Registry &registry, CullingResult &outResult) {
     for (auto entity : transparentView) {
         outResult.SetVisible(entity);
     }
+
+    // 地形（TerrainComponent 也有 TransformComponent）
+    auto terrainView = registry.view<ECS::TerrainComponent, ECS::TransformComponent>();
+    for (auto entity : terrainView) {
+        outResult.SetVisible(entity);
+    }
+
+    // 公告牌
+    auto billboardView = registry.view<ECS::BillboardComponent, ECS::TransformComponent>();
+    for (auto entity : billboardView) {
+        outResult.SetVisible(entity);
+    }
 }
 
 // ============================================================================

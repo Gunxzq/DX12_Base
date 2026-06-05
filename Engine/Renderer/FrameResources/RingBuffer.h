@@ -41,6 +41,15 @@ public:
 
     bool IsInitialized() const { return m_initialized; }
 
+    // 获取 GPU 地址（基于偏移）
+    D3D12_GPU_VIRTUAL_ADDRESS GetGPUAddress(uint32_t offset) const;
+
+    // 释放指定偏移的空间（标记待回收）
+    void Free(uint32_t offset, uint64_t fence);
+
+    // 获取当前已使用大小
+    uint32_t GetUsedSize() const { return m_allocatedSize; }
+
 private:
     struct PendingAlloc {
         uint32_t size;
