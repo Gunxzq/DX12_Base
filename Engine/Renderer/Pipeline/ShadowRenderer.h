@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Common/d3dUtil.h"
-#include "IRenderer.h"
+#include "OffscreenRenderer.h"
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include <wrl/client.h>
@@ -14,19 +14,53 @@ namespace DX12Engine::Renderer {
 
 class D3D12DeviceContext;
 
-class ShadowRenderer : public IRenderer {
+// ============================================================================
+// 阴影贴图渲染器 — 继承自 OffscreenRenderer
+//
+// 阴影贴图是一种离屏渲染：输出到深度纹理而非 BackBuffer。
+// BeginOffscreen / EndOffscreen 管理离屏 Pass 的生命周期。
+// ============================================================================
+class ShadowRenderer : public OffscreenRenderer {
 public:
     ShadowRenderer() = default;
-    ~ShadowRenderer() = default;
+    ~ShadowRenderer() override = default;
 
     // ========================================================================
-    // IRenderer 接口
+    // OffscreenRenderer 接口 — 生命周期
     // ========================================================================
     void SetDeviceContext(D3D12DeviceContext *context) override;
     void Initialize() override;
-    void OnResize(uint32_t width, uint32_t height) override;
-    void Update(float deltaTime) override;
-    void EndFrame() override;
+    void Shutdown() override;
+
+    // ========================================================================
+    // OffscreenRenderer 接口 — 离屏渲染核心
+    // ========================================================================
+
+    // 开始离屏阴影 Pass（设置 DSV、清除深度、设置视口/裁剪、绑定 PSO）
+    // 调用前：资源处于 SRV 状态（由调用方负责屏障转换）
+    // 调用后：资源处于 DEPTH_WRITE 状态，可进行 DrawMesh/DrawInstanced
+    void BeginOffscreen(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
+                        D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle, uint32_t width, uint32_t height);
+
+    // 结束离屏阴影 Pass（由调用方负责后续屏障转换回 SRV）
+    void EndOffscreen(CommandList &cmdList) override;
+
+    // ========================================================================
+    // OffscreenRenderer 接口 — 输出纹理访问
+    // ========================================================================
+    D3D12_GPU_DESCRIPTOR_HANDLE GetOutputSRV() const override;
+    D3D12_CPU_DESCRIPTOR_HANDLE GetOutputRTV() const override;
+    D3D12_CPU_DESCRIPTOR_HANDLE GetDepthDSV() const override;
+
+    // ========================================================================
+    // OffscreenRenderer 接口 — 纹理信息
+    // ========================================================================
+    uint32_t GetWidth() const override { return m_passWidth; }
+    uint32_t GetHeight() const override { return m_passHeight; }
+    bool IsValid() const override { return m_pso && m_rootSignature; }
+
+    // 重置离屏资源（阴影贴图尺寸变化时重建相关资源）
+    void Resize(uint32_t width, uint32_t height) override;
 
     // ========================================================================
     // 依赖注入
@@ -34,11 +68,8 @@ public:
     void SetGeometryResourceManager(Resource::GeometryResourceManager *mgr) { m_geometryManager = mgr; }
 
     // ========================================================================
-    // 阴影 Pass 接口
+    // 阴影绘制接口（在 BeginOffscreen / EndOffscreen 之间调用）
     // ========================================================================
-
-    void Begin(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle,
-               uint32_t width, uint32_t height);
 
     void DrawMesh(CommandList &cmdList, Resource::GeometryHandle geometryHandle, const DirectX::XMMATRIX &worldMatrix,
                   D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress);
@@ -46,12 +77,20 @@ public:
     void DrawInstanced(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
                        D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount);
 
-    // 结束阴影 Pass
-    // @param cmdList 命令列表
-    void End(CommandList &cmdList);
-
     // 获取 PSO（供外部调试）
     ID3D12PipelineState *GetPSO() const { return m_pso.Get(); }
+
+    // ========================================================================
+    // 便利方法：一站式执行完整阴影 Pass（BeginOffscreen + 绘制 + EndOffscreen）
+    // ========================================================================
+    template <typename DrawFunc>
+    void ExecuteShadowPass(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
+                           D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle, uint32_t width, uint32_t height,
+                           DrawFunc &&drawFunc) {
+        BeginOffscreen(cmdList, lightCBAddress, dsvHandle, width, height);
+        drawFunc();
+        EndOffscreen(cmdList);
+    }
 
 private:
     // ========================================================================
@@ -82,6 +121,11 @@ private:
     // 当前 Pass 状态
     bool m_inPass = false;
     bool m_firstInstancedInPass = true;
+
+    // 当前离屏渲染参数
+    uint32_t m_passWidth = 0;
+    uint32_t m_passHeight = 0;
+    D3D12_CPU_DESCRIPTOR_HANDLE m_currentDsvHandle = {};
 };
 
 } // namespace DX12Engine::Renderer

@@ -1598,7 +1598,7 @@ void GameWorld::RegisterShadowRenderSystem() {
                  // 开始阴影 Pass
                  // ================================================================
                  //  DSV被设置为渲染目标，深度信息会被写入shadowRes
-                 m_shadowRenderer->Begin(cmdList, dirShadowAddr, dsvHandle, shadowRes.resolution, shadowRes.resolution);
+                 m_shadowRenderer->BeginOffscreen(cmdList, dirShadowAddr, dsvHandle, shadowRes.resolution, shadowRes.resolution);
 
                  // ================================================================
                  // 遍历 Standard 队列中的物体，绘制阴影
@@ -1625,7 +1625,7 @@ void GameWorld::RegisterShadowRenderSystem() {
                  // ================================================================
                  // 结束阴影 Pass
                  // ================================================================
-                 m_shadowRenderer->End(cmdList);
+                 m_shadowRenderer->EndOffscreen(cmdList);
 
                  // ================================================================
                  // 资源状态转换：DEPTH_WRITE -> SRV

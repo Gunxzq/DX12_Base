@@ -12,7 +12,7 @@ using namespace DX12Engine::Resource;
 namespace DX12Engine::Renderer {
 
 // ============================================================================
-// 生命周期管理
+// OffscreenRenderer 生命周期管理
 // ============================================================================
 
 void ShadowRenderer::SetDeviceContext(D3D12DeviceContext *context) { m_context = context; }
@@ -29,46 +29,64 @@ void ShadowRenderer::Initialize() {
     OutputDebugStringW(L"[INFO] ShadowRenderer initialized successfully\n");
 }
 
-void ShadowRenderer::OnResize(uint32_t width, uint32_t height) {
-    // ShadowRenderer 不依赖屏幕分辨率
-    (void)width;
-    (void)height;
+void ShadowRenderer::Shutdown() {
+    m_pso.Reset();
+    m_psoInstanced.Reset();
+    m_rootSignature.Reset();
+    m_vsBlob.Reset();
+    m_vsInstancedBlob.Reset();
+    m_psBlob.Reset();
+    m_inPass = false;
+    m_firstInstancedInPass = true;
+    m_context = nullptr;
+    m_geometryManager = nullptr;
 }
 
-void ShadowRenderer::Update(float deltaTime) { (void)deltaTime; }
-
-void ShadowRenderer::EndFrame() {
-    // 无每帧清理需求
+void ShadowRenderer::Resize(uint32_t width, uint32_t height) {
+    // 阴影贴图尺寸变化时记录新尺寸
+    // PSO 不依赖尺寸，无需重建
+    m_passWidth = width;
+    m_passHeight = height;
+    OutputDebugStringW((L"[INFO] ShadowRenderer::Resize to " + std::to_wstring(width) + L"x" +
+                        std::to_wstring(height) + L"\n").c_str());
 }
 
 // ============================================================================
-// 阴影 Pass 接口
+// OffscreenRenderer 接口 — 离屏渲染核心
 // ============================================================================
 
 /**
- * @brief 开始阴影渲染
+ * @brief 开始离屏阴影 Pass
  * @param cmdList 命令列表
  * @param lightCBAddress 光源常量缓冲区地址
- * @param dsvHandle 深度模板视图句柄-也就是渲染目标
+ * @param dsvHandle 深度模板视图句柄 — 离屏渲染目标
  * @param width 宽度
  * @param height 高度
  * @date 2026-06-04
  */
-void ShadowRenderer::Begin(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                           D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle, uint32_t width, uint32_t height) {
+void ShadowRenderer::BeginOffscreen(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
+                                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle, uint32_t width, uint32_t height) {
     if (!m_pso || !m_rootSignature) {
-        OutputDebugStringW(L"[ERROR] ShadowRenderer::Begin: PSO or RootSignature not initialized\n");
+        OutputDebugStringW(L"[ERROR] ShadowRenderer::BeginOffscreen: PSO or RootSignature not initialized\n");
         return;
     }
 
+    // 记录当前离屏渲染参数
+    m_passWidth = width;
+    m_passHeight = height;
+    m_currentDsvHandle = dsvHandle;
+
+    // 设置视口和裁剪矩形
     D3D12_VIEWPORT viewport = {0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f};
     D3D12_RECT scissorRect = {0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
     cmdList.Get()->RSSetViewports(1, &viewport);
     cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+
+    // 清除深度缓冲并绑定 DSV 为渲染目标（阴影 Pass 无颜色输出）
     cmdList.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
     cmdList.Get()->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
 
-    // 4. 设置 PSO 和根签名
+    // 设置 PSO 和根签名
     cmdList.Get()->SetPipelineState(m_pso.Get());
     cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, lightCBAddress);
@@ -77,10 +95,40 @@ void ShadowRenderer::Begin(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS light
     m_firstInstancedInPass = true;
 }
 
+void ShadowRenderer::EndOffscreen(CommandList &cmdList) {
+    if (!m_inPass) {
+        OutputDebugStringW(L"[WARN] ShadowRenderer::EndOffscreen: Called without matching BeginOffscreen\n");
+        return;
+    }
+    m_inPass = false;
+
+    // 注意：资源状态屏障（DEPTH_WRITE → SRV）由调用方在 EndOffscreen 后执行
+    (void)cmdList;
+}
+
+// ========================================================================
+// OffscreenRenderer 接口 — 输出纹理访问
+// ========================================================================
+
+D3D12_GPU_DESCRIPTOR_HANDLE ShadowRenderer::GetOutputSRV() const {
+    // 阴影渲染器输出的是深度纹理，SRV 由 LightManager 管理
+    // 此处返回空句柄，外部通过 LightManager::GetDirShadowResources() 获取 SRV
+    return {};
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE ShadowRenderer::GetOutputRTV() const {
+    // 阴影 Pass 不输出颜色，无 RTV
+    return {};
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE ShadowRenderer::GetDepthDSV() const {
+    return m_currentDsvHandle;
+}
+
 void ShadowRenderer::DrawMesh(CommandList &cmdList, GeometryHandle geometryHandle, const XMMATRIX &worldMatrix,
                               D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress) {
     if (!m_inPass || !m_geometryManager) {
-        OutputDebugStringW(L"[ERROR] ShadowRenderer::DrawMesh: Begin not called before DrawMesh\n");
+        OutputDebugStringW(L"[ERROR] ShadowRenderer::DrawMesh: BeginOffscreen not called before DrawMesh\n");
         return;
     }
 
@@ -126,7 +174,7 @@ void ShadowRenderer::DrawMesh(CommandList &cmdList, GeometryHandle geometryHandl
 void ShadowRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometryHandle,
                                    D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount) {
     if (!m_inPass || !m_geometryManager) {
-        OutputDebugStringW(L"[ERROR] ShadowRenderer::DrawInstanced: Begin not called\n");
+        OutputDebugStringW(L"[ERROR] ShadowRenderer::DrawInstanced: BeginOffscreen not called\n");
         return;
     }
 
@@ -173,15 +221,6 @@ void ShadowRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometry
 
     // 执行实例化绘制
     cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, instanceCount, 0, 0, 0);
-}
-
-void ShadowRenderer::End(CommandList &cmdList) {
-    if (!m_inPass) {
-        OutputDebugStringW(L"[WARN] ShadowRenderer::End: Called without matching Begin\n");
-        return;
-    }
-
-    m_inPass = false;
 }
 
 // ============================================================================
