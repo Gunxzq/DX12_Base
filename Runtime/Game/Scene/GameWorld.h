@@ -3,6 +3,7 @@
 #include "Async/TerrainLoadTask.h"
 #include "ECS/Core/Entity.h"
 #include "Math/BoundingVolume.h"
+#include "Renderer/RenderItemBuilder/BillboardRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/OpaqueRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/TRenderQueue.h"
 #include "Renderer/RenderItemBuilder/TransparentRenderItemBuilder.h"
@@ -30,6 +31,7 @@ class OpaqueRenderer;
 class SkyRenderer;
 class WaterRenderer;
 class ShadowRenderer;
+class BillboardRenderer;
 } // namespace Renderer
 } // namespace DX12Engine
 
@@ -62,6 +64,10 @@ public:
     void CreateSkybox();
     void CreateWater();
 
+    // 公告牌（Billboard）系统
+    void LoadBillboardTextures();
+    void CreateBillboardTrees();
+
     // 每帧 PreRender 阶段：收集实体并构建渲染队列
     void BuildRenderQueue();
 
@@ -82,6 +88,7 @@ private:
     void RegisterCubeRenderSystem();
     void RegisterSkyboxSystem();
     void RegisterWaterRenderSystem();
+    void RegisterBillboardRenderSystem();
 
     // 注册地形异步加载响应 System
     // 架构：后台线程完成所有 GPU 资源创建 + 上传，主线程只注册句柄 + 创建 ECS 实体
@@ -148,6 +155,14 @@ private:
     DX12Engine::Resource::TextureHandle m_waterTextureHandle;
     DX12Engine::ECS::Entity m_waterEntity;
     D3D12_GPU_VIRTUAL_ADDRESS m_waterCBAddress = 0;
+
+    // 公告牌（Billboard）系统
+    std::unique_ptr<DX12Engine::Renderer::BillboardRenderer> m_billboardRenderer;
+    std::unique_ptr<DX12Engine::Renderer::BillboardRenderItemBuilder> m_billboardBuilder;
+    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::BillboardRenderItem> m_billboardQueue;
+    DX12Engine::Resource::MaterialHandle m_billboardMaterialHandle;
+    DX12Engine::Resource::TextureHandle m_billboardTextureHandles[4]; // 多棵树纹理（无界纹理数组）
+    std::vector<DX12Engine::ECS::Entity> m_billboardEntities;         // 树公告牌实体
 
     // 后台异步执行器（纯 CPU 线程池，独立于 FrameDriver）
     std::unique_ptr<DX12Engine::Async::BackgroundExecutor> m_backgroundExecutor;
