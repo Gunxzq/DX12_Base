@@ -8,8 +8,6 @@
 
 #include "LightingUtil.hlsl"
 
-// gShadowSampler 必须在 ShadowSampling.hlsl 之前声明，
-// 因为 ShadowSampling.hlsl 内部使用了它
 SamplerComparisonState gShadowSampler : register(s11);
 
 #include "ShadowSampling.hlsl"
@@ -124,22 +122,6 @@ SamplerState gSamplerAnisotropicClamp : register(s5);
 Texture2D gTerrainTextures[8] : register(t0, space0);
 
 // ============================================================================
-// 实例化支持（与 color.hlsl 一致）
-// ============================================================================
-#ifdef USE_INSTANCING
-struct InstanceData
-{
-    row_major float4x4 World;
-    row_major float4x4 WorldInvTranspose;
-    uint MaterialIndex;
-    uint ReceiveShadow;
-    float2 Pad;
-};
-
-StructuredBuffer<InstanceData> gInstanceData : register(t12, space1);
-#endif
-
-// ============================================================================
 // 环境反射（与 Common_PBR.hlsl 一致）
 // ============================================================================
 float3 ComputeEnvironmentReflection(float3 reflectDir, float3 albedo, float metallic, float roughness, float3 N, float3 V)
@@ -191,7 +173,8 @@ struct DomainOutput
 };
 
 // ============================================================================
-// Vertex Shader - 标准版（透传控制点到 Hull Shader）
+// Vertex Shader - 透传控制点到 Hull Shader
+//   地形不需要实例化，使用标准 VS
 // ============================================================================
 HullControlPoint VS(VertexIn vin)
 {
@@ -202,27 +185,6 @@ HullControlPoint VS(VertexIn vin)
     vout.TexCoord = vin.TexCoord;
     return vout;
 }
-
-// ============================================================================
-// Vertex Shader - 实例化版
-// ============================================================================
-#ifdef USE_INSTANCING
-HullControlPoint VS_Instanced(VertexIn vin, uint instanceID : SV_InstanceID)
-{
-    HullControlPoint vout;
-
-    InstanceData inst = gInstanceData[instanceID];
-    float4x4 world = inst.World;
-
-    float4 posW = mul(float4(vin.PosL, 1.0f), world);
-    vout.PosL = posW.xyz;
-    vout.NormalL = vin.NormalL;
-    vout.TangentL = vin.TangentL;
-    vout.TexCoord = vin.TexCoord;
-
-    return vout;
-}
-#endif // USE_INSTANCING
 
 // ============================================================================
 // 常量 Hull Shader - 根据面片到相机的距离计算细分因子 (LOD)
@@ -284,22 +246,11 @@ HullConstantOutput ConstantHS(InputPatch<HullControlPoint, 4> patch, uint patchI
 {
     DomainOutput output;
 
-    // 1. 双线性插值局部空间位置
-    // D3D quad domain 的 SV_DomainLocation: uv=(0,0)在左上, (1,1)在右下
-    // 即 u 从左→右, v 从上→下
-    // 控制点布局：
-    //   quad[0] = 左上（远处，row=z）, quad[1] = 右上（远处）
-    //   quad[2] = 左下（近处，row=z+1）, quad[3] = 右下（近处）
-    // v1 = lerp(左上, 右上, u) → 上边（远处）
-    // v2 = lerp(左下, 右下, u) → 下边（近处）
-    // lerp(v1, v2, v) → 远→近（上→下）
     float3 v1 = lerp(patch[0].PosL, patch[1].PosL, uv.x); // 上边：左上→右上
     float3 v2 = lerp(patch[2].PosL, patch[3].PosL, uv.x); // 下边：左下→右下
-    float3 localPos = lerp(v1, v2, uv.y);                  // 纵向：远→近（上→下）
+    float3 localPos = lerp(v1, v2, uv.y);                 // 纵向：远→近（上→下）
 
     // 2. 双线性插值 UV（必须在高度采样之前）
-    // 控制点布局已修正：quad[0]/quad[1]=远处(row=z), quad[2]/quad[3]=近处(row=z+1)
-    // D3D quad domain: uv.y=0 对应 quad[0]/quad[1]（远处/上方），uv.y=1 对应 quad[2]/quad[3]（近处/下方）
     float2 texCoord = lerp(
         lerp(patch[0].TexCoord, patch[1].TexCoord, uv.x),
         lerp(patch[2].TexCoord, patch[3].TexCoord, uv.x), uv.y);

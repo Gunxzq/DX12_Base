@@ -26,7 +26,7 @@ void TerrainRenderer::Initialize() {
 
     LoadShaders();
     CreateRootSignature();
-    CreatePSOs();
+    CreatePSO();
 
     OutputDebugStringW(L"[INFO] TerrainRenderer initialized successfully\n");
 }
@@ -49,7 +49,7 @@ void TerrainRenderer::EndFrame() {
 void TerrainRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
                                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV) {
-    if (!m_psoStandard || !m_rootSignature) {
+    if (!m_pso || !m_rootSignature) {
         OutputDebugStringW(L"[ERROR] TerrainRenderer::BeginFrame: PSO or RootSignature not initialized\n");
         return;
     }
@@ -108,33 +108,20 @@ void TerrainRenderer::DrawTerrain(CommandList &cmdList, const TerrainRenderItem 
     cmdList.Get()->IASetVertexBuffers(0, 1, &vbView);
     cmdList.Get()->IASetIndexBuffer(&ibView);
 
-    // 选择 PSO（根据是否需要实例化）
-    if (item.instanceCount > 1) {
-        cmdList.Get()->SetPipelineState(m_psoInstanced.Get());
-        cmdList.Get()->SetGraphicsRootShaderResourceView(8, item.instanceBufferAddress);
-        cmdList.Get()->SetGraphicsRootDescriptorTable(4, item.heightMapSRV);
-        cmdList.Get()->DrawIndexedInstanced(indexCount, item.instanceCount, 0, 0, 0);
-    } else {
-        cmdList.Get()->SetPipelineState(m_psoStandard.Get());
-        cmdList.Get()->SetGraphicsRootConstantBufferView(0, item.instanceBufferAddress);
-        cmdList.Get()->SetGraphicsRootDescriptorTable(4, item.heightMapSRV);
-        cmdList.Get()->DrawIndexedInstanced(indexCount, 1, 0, 0, 0);
-    }
+    // 设置 PSO 和每物体常量（地形不需要实例化）
+    cmdList.Get()->SetPipelineState(m_pso.Get());
+    cmdList.Get()->SetGraphicsRootConstantBufferView(0, item.objectCBAddress);
+    cmdList.Get()->SetGraphicsRootDescriptorTable(4, item.heightMapSRV);
+    cmdList.Get()->DrawIndexedInstanced(indexCount, 1, 0, 0, 0);
 }
 
 // ============================================================================
-// PSO 切换
+// PSO 设置
 // ============================================================================
 
-void TerrainRenderer::SetStandardPSO(CommandList &cmdList) const {
-    if (m_psoStandard) {
-        cmdList.Get()->SetPipelineState(m_psoStandard.Get());
-    }
-}
-
-void TerrainRenderer::SetInstancedPSO(CommandList &cmdList) const {
-    if (m_psoInstanced) {
-        cmdList.Get()->SetPipelineState(m_psoInstanced.Get());
+void TerrainRenderer::SetPSO(CommandList &cmdList) const {
+    if (m_pso) {
+        cmdList.Get()->SetPipelineState(m_pso.Get());
     }
 }
 
@@ -148,25 +135,14 @@ void TerrainRenderer::LoadShaders() {
     Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
     HRESULT hr;
 
-    // 标准 VS（不使用实例化）
+    // Vertex Shader（标准版，地形不需要实例化）
     hr = D3DCompileFromFile(L"Shaders/Terrain.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
-                            compileFlags, 0, &m_vsStandard, &errors);
+                            compileFlags, 0, &m_vs, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         }
-        throw std::runtime_error("TerrainRenderer: Failed to compile Standard VS");
-    }
-
-    // 实例化 VS（使用 SV_InstanceID）
-    D3D_SHADER_MACRO instancedDefines[] = {{"USE_INSTANCING", "1"}, {nullptr, nullptr}};
-    hr = D3DCompileFromFile(L"Shaders/Terrain.hlsl", instancedDefines, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS_Instanced",
-                            "vs_5_1", compileFlags, 0, &m_vsInstanced, &errors);
-    if (FAILED(hr)) {
-        if (errors) {
-            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
-        }
-        throw std::runtime_error("TerrainRenderer: Failed to compile Instanced VS");
+        throw std::runtime_error("TerrainRenderer: Failed to compile VS");
     }
 
     // Hull Shader（曲面细分必需）
@@ -207,7 +183,7 @@ void TerrainRenderer::CreateRootSignature() {
 
     // ========================================================================
     // 根参数布局:
-    //   slot 0: b0 cbPerObject (CBV) - Standard 模式
+    //   slot 0: b0 cbPerObject (CBV)
     //   slot 1: b1 cbPass (CBV)
     //   slot 2: b2 cbLights (CBV)
     //   slot 3: t0,space1 StructuredBuffer<MaterialData> (SRV)
@@ -215,10 +191,10 @@ void TerrainRenderer::CreateRootSignature() {
     //   slot 5: t10 环境贴图 SRV
     //   slot 6: t11,space1 StructuredBuffer<DirShadowData> (SRV)
     //   slot 7: t14,space1 Texture2D 阴影贴图 (SRV)
-    //   slot 8: t12,space1 StructuredBuffer<InstanceData> (SRV) - Instanced 模式
+    //   （地形不需要实例化，不包含 slot 8 instanceData）
     // ========================================================================
 
-    CD3DX12_ROOT_PARAMETER slotRootParameter[9];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[8];
 
     // 描述符范围
     CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
@@ -236,9 +212,6 @@ void TerrainRenderer::CreateRootSignature() {
     CD3DX12_DESCRIPTOR_RANGE shadowMapTable;
     shadowMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 14, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
-    CD3DX12_DESCRIPTOR_RANGE instanceDataRange;
-    instanceDataRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 12, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
-
     // 根参数
     slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
@@ -248,7 +221,6 @@ void TerrainRenderer::CreateRootSignature() {
     slotRootParameter[5].InitAsDescriptorTable(1, &envMapTable, D3D12_SHADER_VISIBILITY_PIXEL);
     slotRootParameter[6].InitAsDescriptorTable(1, &shadowDataTable, D3D12_SHADER_VISIBILITY_PIXEL);
     slotRootParameter[7].InitAsDescriptorTable(1, &shadowMapTable, D3D12_SHADER_VISIBILITY_PIXEL);
-    slotRootParameter[8].InitAsDescriptorTable(1, &instanceDataRange, D3D12_SHADER_VISIBILITY_VERTEX);
 
     // 静态采样器（复用 OpaqueRenderer 的配置）
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[8];
@@ -271,7 +243,7 @@ void TerrainRenderer::CreateRootSignature() {
                            D3D12_COMPARISON_FUNC_LESS_EQUAL, D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK, 0.0f, 0.0f,
                            D3D12_SHADER_VISIBILITY_PIXEL);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(9, slotRootParameter, 8, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(8, slotRootParameter, 8, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -288,7 +260,7 @@ void TerrainRenderer::CreateRootSignature() {
                                               serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
 }
 
-void TerrainRenderer::CreatePSOs() {
+void TerrainRenderer::CreatePSO() {
     auto device = m_context->GetDevice();
 
     // 输入布局（与 GeometryGenerator::Vertex 一致）
@@ -319,18 +291,14 @@ void TerrainRenderer::CreatePSOs() {
     depthStencilDesc.StencilEnable = FALSE;
     psoDesc.DepthStencilState = depthStencilDesc;
 
-    // 创建 Standard PSO（单物体）
-    psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsStandard->GetBufferPointer()), m_vsStandard->GetBufferSize()};
+    // 创建 PSO（仅标准路径，地形不需要实例化）
+    psoDesc.VS = {reinterpret_cast<BYTE *>(m_vs->GetBufferPointer()), m_vs->GetBufferSize()};
     psoDesc.HS = {reinterpret_cast<BYTE *>(m_hs->GetBufferPointer()), m_hs->GetBufferSize()};
     psoDesc.DS = {reinterpret_cast<BYTE *>(m_ds->GetBufferPointer()), m_ds->GetBufferSize()};
     psoDesc.PS = {reinterpret_cast<BYTE *>(m_ps->GetBufferPointer()), m_ps->GetBufferSize()};
-    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_psoStandard)));
 
-    // 创建 Instanced PSO（实例化）
-    psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsInstanced->GetBufferPointer()), m_vsInstanced->GetBufferSize()};
-    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_psoInstanced)));
-
-    OutputDebugStringW(L"[INFO] Terrain PSOs created successfully\n");
+    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso)));
+    OutputDebugStringW(L"[INFO] Terrain PSO created successfully\n");
 }
 
 // ============================================================================

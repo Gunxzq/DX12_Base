@@ -22,12 +22,6 @@ struct TerrainBlockId {
 
 // ============================================================================
 // 地形常量（每块，每帧更新）
-//   布局必须与 Terrain.hlsl 的 cbPerObject 完全一致：
-//     gWorld(64) + gWorldInvTrans(64) + gPrevWorld(64) + gMaterialIndex(4)
-//     + gReceiveShadow(4) + gObjPad(8) + HeightScale(4) + HeightOffset(4)
-//     + TessellationFactor(4) + TessellationDistanceMin(4) + TessellationDistanceMax(4)
-//     + HeightMapIndex(4) + AlbedoMapIndex(4) + NormalMapIndex(4) + gTerrainPad(4)
-//     = 240 bytes
 // ============================================================================
 struct TerrainConstants {
     DirectX::XMFLOAT4X4 World;             // gWorld

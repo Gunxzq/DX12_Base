@@ -7,13 +7,14 @@ namespace DX12Engine::Renderer {
 
 // ============================================================================
 // 地形渲染项 - 支持曲面细分的地形专用渲染数据
+//   地形不需要实例化，每个地形块单独绘制
 // ============================================================================
 struct TerrainRenderItem {
     // 几何体句柄（指向 PatchMesh）
     Resource::GeometryHandle geometryHandle;
 
-    D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress;
-    uint32_t instanceCount;
+    // 每物体常量缓冲区 GPU 地址（cbPerObject）
+    D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress;
 
     // 纹理 SRV
     D3D12_GPU_DESCRIPTOR_HANDLE heightMapSRV; // 高度图（用于顶点置换，必需）

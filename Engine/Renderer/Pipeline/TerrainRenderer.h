@@ -19,6 +19,7 @@ class D3D12DeviceContext;
 
 // ============================================================================
 // 地形渲染器 - 支持曲面细分（Tessellation）
+//   地形不需要实例化，每个地形块单独绘制
 // ============================================================================
 class TerrainRenderer : public IRenderer {
 public:
@@ -49,10 +50,9 @@ public:
     void DrawTerrain(CommandList &cmdList, const TerrainRenderItem &item);
 
     // ========================================================================
-    // PSO 切换
+    // PSO 设置
     // ========================================================================
-    void SetStandardPSO(CommandList &cmdList) const;
-    void SetInstancedPSO(CommandList &cmdList) const;
+    void SetPSO(CommandList &cmdList) const;
 
 private:
     // ========================================================================
@@ -60,7 +60,7 @@ private:
     // ========================================================================
     void LoadShaders();
     void CreateRootSignature();
-    void CreatePSOs();
+    void CreatePSO();
 
     // ========================================================================
     // 辅助方法
@@ -78,16 +78,14 @@ private:
     // 根签名
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
 
-    // PSO（Standard / Instanced）
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_psoStandard;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_psoInstanced;
+    // PSO（仅标准路径，不支持实例化）
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 
     // 着色器字节码
-    Microsoft::WRL::ComPtr<ID3DBlob> m_vsStandard;  // 标准 VS（备用）
-    Microsoft::WRL::ComPtr<ID3DBlob> m_vsInstanced; // 实例化 VS（SV_InstanceID）
-    Microsoft::WRL::ComPtr<ID3DBlob> m_hs;          // Hull Shader
-    Microsoft::WRL::ComPtr<ID3DBlob> m_ds;          // Domain Shader
-    Microsoft::WRL::ComPtr<ID3DBlob> m_ps;          // Pixel Shader
+    Microsoft::WRL::ComPtr<ID3DBlob> m_vs;  // Vertex Shader
+    Microsoft::WRL::ComPtr<ID3DBlob> m_hs;  // Hull Shader
+    Microsoft::WRL::ComPtr<ID3DBlob> m_ds;  // Domain Shader
+    Microsoft::WRL::ComPtr<ID3DBlob> m_ps;  // Pixel Shader
 };
 
 } // namespace DX12Engine::Renderer

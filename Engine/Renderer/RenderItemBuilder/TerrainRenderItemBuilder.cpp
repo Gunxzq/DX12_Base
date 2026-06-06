@@ -49,8 +49,7 @@ void TerrainRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
         // 构建渲染项
         TerrainRenderItem item;
         item.geometryHandle = geoHandle;
-        item.instanceBufferAddress = 0; // 由 TerrainManager 在分配时填充
-        item.instanceCount = 1;         // 每个地形块单独绘制，后续可扩展实例化
+        item.objectCBAddress = 0; // 由 TerrainManager 在分配时填充
         item.heightMapSRV = heightMapSRV;
         item.albedoSRV = albedoSRV;
         item.normalSRV = normalSRV;
