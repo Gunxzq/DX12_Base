@@ -30,6 +30,7 @@
 #include "Resource/AssetLoader/AssetLoader.h"
 #include "Resource/AssetLoader/Loader/DDSLoader.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
+#include "Resource/Geometry/GridGeometry.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
@@ -1084,8 +1085,8 @@ void GameWorld::CreateWater() {
         ibResource->Unmap(0, nullptr);
     }
 
-    // 3. 构建 TriangleMesh（水面使用三角形网格）
-    TriangleMesh waterMesh;
+    // 3. 构建 GridGeometry（水面使用规则网格几何体）
+    GridGeometry waterMesh;
     waterMesh.vertexBufferHandle = vbHandle;
     waterMesh.indexBufferHandle = ibHandle;
     waterMesh.vertexCount = static_cast<uint32_t>(meshData.Vertices.size());
@@ -1094,14 +1095,16 @@ void GameWorld::CreateWater() {
     waterMesh.indexFormat = DXGI_FORMAT_R32_UINT;
     waterMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     waterMesh.isGpuReady = true;
+    waterMesh.widthSegments = 64;
+    waterMesh.depthSegments = 64;
 
     // 计算包围盒
     BoundingAABB bounds;
-    bounds.min = XMFLOAT3(-10.0f, 0.0f, -10.0f);
-    bounds.max = XMFLOAT3(10.0f, 0.0f, 10.0f);
+    bounds.min = XMFLOAT3(-128.0f, 0.0f, -128.0f);
+    bounds.max = XMFLOAT3(128.0f, 0.0f, 128.0f);
 
     auto &geoMgr = m_context->GeometryResourceManager;
-    GeometryHandle geoHandle = geoMgr->RegisterGeometry<TriangleMesh>(waterMesh);
+    GeometryHandle geoHandle = geoMgr->RegisterGeometry<GridGeometry>(waterMesh);
 
     // 4. 创建 LODMesh
     LODMesh lodMesh;

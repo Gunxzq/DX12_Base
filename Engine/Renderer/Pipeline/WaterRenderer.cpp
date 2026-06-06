@@ -2,7 +2,7 @@
 #include "WaterRenderer.h"
 #include "Common/d3dUtil.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
-#include "Resource/Geometry/TriangleMesh.h"
+#include "Resource/Geometry/GridGeometry.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include <d3dcompiler.h>
@@ -78,7 +78,7 @@ void WaterRenderer::DrawWater(CommandList &cmdList, Resource::GeometryHandle geo
         return;
     }
 
-    const TriangleMesh *mesh = m_geometryManager->GetGeometry<TriangleMesh>(geometryHandle);
+    const GridGeometry *mesh = m_geometryManager->GetGeometry<GridGeometry>(geometryHandle);
     if (!mesh || !mesh->isGpuReady) {
         return;
     }
