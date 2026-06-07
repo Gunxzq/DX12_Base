@@ -247,30 +247,27 @@ void DepthStencilPool::Reclaim(uint64_t completedFence) {
 }
 
 void DepthStencilPool::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames) {
+    // BugFix: 不再从 m_pool 中 erase 条目，而是递增 generation 使旧句柄失效。
+    // erase 会导致后续条目的索引前移，使得外部持有的 handle 指向错误条目。
     for (auto &entry : m_pool) {
-        if (!entry.inUse && entry.dsvSlot != UINT32_MAX) {
-            if (currentFrame - entry.lastUsedFrame > maxAgeFrames) {
-                if (entry.dsvSlot != UINT32_MAX) {
-                    m_descriptorHeaps->Free(DescriptorHeapType::Dsv, entry.dsvSlot, UINT64_MAX);
-                    entry.dsvSlot = UINT32_MAX;
-                }
-                if (entry.srvSlot != UINT32_MAX) {
-                    m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, entry.srvSlot, UINT64_MAX);
-                    entry.srvSlot = UINT32_MAX;
-                }
-                entry.resource.Reset();
+        if (!entry.inUse && currentFrame - entry.lastUsedFrame > maxAgeFrames) {
+            if (entry.dsvSlot != UINT32_MAX) {
+                m_descriptorHeaps->Free(DescriptorHeapType::Dsv, entry.dsvSlot, UINT64_MAX);
+                entry.dsvSlot = UINT32_MAX;
             }
+            if (entry.srvSlot != UINT32_MAX) {
+                m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, entry.srvSlot, UINT64_MAX);
+                entry.srvSlot = UINT32_MAX;
+            }
+            entry.resource.Reset();
+            // 递增 generation 使所有指向此条目的旧句柄立即失效
+            entry.generation = m_nextGeneration++;
         }
     }
 
-    auto it = m_pool.begin();
-    while (it != m_pool.end()) {
-        if (it->resource == nullptr && !it->inUse) {
-            it = m_pool.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    // 注意：不再 erase 条目，空闲条目留在 m_pool 中等待 FindMatchingEntry 复用。
+    // 被 Purge 的条目 generation 已递增，旧句柄无法通过 generation 验证，
+    // 而新 Allocate 会创建新条目（或复用已有空闲条目并赋予新 generation）。
 }
 
 } // namespace DX12Engine::Resource

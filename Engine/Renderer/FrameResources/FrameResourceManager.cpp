@@ -44,8 +44,8 @@ void FrameResourceManager::Initialize(ID3D12Device *device, DescriptorHeapCollec
     // 创建 PassCB
     CreatePassCB(device);
 
-    // 初始化每帧的环形缓冲区（预分配 64MB 每类型）
-    const uint32_t DEFAULT_BUFFER_SIZE = 64 * 1024 * 1024; // 64MB
+    // 初始化每帧的环形缓冲区（预分配 16MB 每类型）
+    const uint32_t DEFAULT_BUFFER_SIZE = 16 * 1024 * 1024; // 16MB
 
     m_objectCB.Initialize(device, DEFAULT_BUFFER_SIZE);
     m_skinning.Initialize(device, DEFAULT_BUFFER_SIZE);

@@ -83,3 +83,77 @@ if (HasFlag(m_config.flags, DescriptorSlotFlags::EnableExpand)) {
 
 - `DescriptorSlotAllocator::Initialize` — 修复 Reserve 未生效
 - `DescriptorSlotAllocator::AllocateFromFreeList` — 修复扩容后分配路径
+
+---
+
+## 补充修复（Bug 3 & Bug 4）
+
+### Bug 3：`AllocateConsecutive` FreeList 模式扩容路径同样存在双重分配
+
+与 Bug 2 相同模式：FreeList 模式下 `AllocateConsecutive` 触发扩容后，`Expand` 将新索引推入 `m_freeIndices`，但随后走 `m_nextIndex` 路径分配，导致已分配的索引仍残留于 `m_freeIndices`。
+
+**修复**：扩容后优先从 `m_freeIndices` 扫描连续块，找不到再回退到 `m_nextIndex`。
+
+### Bug 4：LinearAlloc 模式下 `Expand` 错误地填充 `m_freeIndices`
+
+LinearAlloc 模式下分配始终从 `m_nextIndex` 递增，不使用 `m_freeIndices`。但 `Expand` 无条件将新索引推入 `m_freeIndices`，虽然不直接导致冲突，但造成了内存浪费和逻辑不一致。
+
+**修复**：`Expand` 仅在非 LinearAlloc 模式下填充 `m_freeIndices`。
+
+### 其余模块扩容风险评估
+
+| 模块 | 风险 | 状态 |
+|------|------|------|
+| `HandlePoolBase::ExpandCapacity` | 并发扩容时原子操作与指针替换非原子 | 低风险，有 mutex 保护 |
+| `TextureManager::AllocateEntry` | SRV 索引依赖 DescriptorSlotAllocator，后者已修复 | 已消除 |
+| `RingBuffer` (FrameResourceManager/TerrainManager) | 扩容时 `Shutdown()` 销毁旧 GPU 资源，若 GPU 仍在读取则 use-after-free | **中风险**，当前通过 fence 延迟回收规避，暂无实际触发 |
+| `MaterialManager::GetGPUMaterialList` | 空洞填充可能导致数组膨胀 | 低风险 |
+
+---
+
+## 第二轮修复：Resource 层底层分配器安全审查
+
+### Bug 5：RenderTargetPool/DepthStencilPool PurgeUnused 使用 vector::erase 导致索引前移
+
+**文件**: `RenderTargetPool.cpp`, `DepthStencilPool.cpp`
+
+`PurgeUnused` 释放资源后调用 `m_pool.erase(it)` 删除条目，导致被删条目之后所有条目的索引前移。如果外部持有指向后续条目的 `RenderTargetHandle`，`handle.poolIndex` 会指向错误条目。generation 检查只能防止访问已释放的条目，但无法防止访问到索引前移后的错误条目。
+
+**修复**: 不再 erase，改为递增 `entry.generation` 使旧句柄失效。空闲条目留在 `m_pool` 中等待 `FindMatchingEntry` 复用。
+
+### Bug 6：SamplerCache PurgeUnused 使用 vector::erase 导致索引前移
+
+**文件**: `SamplerCache.cpp`
+
+与 Bug 5 相同，且 `m_presetIndices` 中缓存的索引也会失效。此外 `GetCpuHandle`/`GetGpuHandle` 不验证 generation。
+
+**修复**: 不再 erase，递增 generation 使旧句柄失效；`GetCpuHandle`/`GetGpuHandle` 添加 generation 验证。
+
+### Bug 7：GeometryResourceManager generation 截断
+
+**文件**: `GeometryResourceManager.cpp`, `GeometryHandle.h`
+
+`GeometryHandle::generation` 是 10 位字段，但 `Entry::generation` 和 `m_nextGeneration` 是 32 位。当 `m_nextGeneration >= 1024` 时，`handle.generation = entry.generation` 会截断到低 10 位，`IsValid` 中 `entry.generation == handle.generation` 永远不匹配，所有句柄失效。
+
+**修复**: 赋值时 `handle.generation = entry.generation & 0x3FF`，比较时取低 10 位比较。
+
+### Bug 8：HandlePoolBase::m_capacity 非原子读取
+
+**文件**: `HandlePoolBase.h`, `CpuHandlePool.cpp`, `GpuHandlePool.cpp`
+
+TLS 缓存无锁路径中 `index >= m_capacity` 读取 `m_capacity`（普通 uint32_t），而扩容线程在锁内写入 `m_capacity`，形成 data race (UB)。
+
+**修复**: `m_capacity` 改为 `std::atomic<uint32_t>`。
+
+### 其余模块风险评估（更新）
+
+| 模块 | 风险 | 状态 |
+|------|------|------|
+| `HandlePoolBase::ExpandCapacity` | 并发扩容时原子操作与指针替换非原子 | 低风险，有 mutex 保护 |
+| `TextureManager::AllocateEntry` | SRV 索引依赖 DescriptorSlotAllocator，后者已修复 | 已消除 |
+| `RingBuffer` (FrameResourceManager/TerrainManager) | 扩容时 `Shutdown()` 销毁旧 GPU 资源 | 中风险，fence 延迟回收，暂无实际触发 |
+| `MaterialManager::GetGPUMaterialList` | 空洞填充可能导致数组膨胀 | 低风险 |
+| `AssetDataManager::ReleaseRef` | refCount==0 立即释放不考虑 GPU 使用 | 中风险 |
+| `AssetDataManager::Reclaim` | 路径收集和释放的非原子性 | 中风险 |
+| `DataPool::Reset` | 旧指针悬垂（依赖调用方纪律） | 低风险 |
+| `GpuResourceManager::Shutdown` | 强制释放可能 GPU 仍在使用 | 低风险 |

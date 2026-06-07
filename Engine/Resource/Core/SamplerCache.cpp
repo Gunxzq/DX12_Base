@@ -221,14 +221,24 @@ SamplerHandle SamplerCache::GetOrCreate(const SamplerDesc &desc) {
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE SamplerCache::GetCpuHandle(SamplerHandle handle) const {
+    // BugFix: 添加 generation 验证，防止 PurgeUnused 后旧句柄访问错误条目
     if (!handle.IsValid() || handle.slot >= m_cache.size()) {
+        return {};
+    }
+    const auto &entry = m_cache[handle.slot];
+    if (entry.generation != handle.generation) {
         return {};
     }
     return m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Sampler, handle.slot);
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE SamplerCache::GetGpuHandle(SamplerHandle handle) const {
+    // BugFix: 添加 generation 验证，防止 PurgeUnused 后旧句柄访问错误条目
     if (!handle.IsValid() || handle.slot >= m_cache.size()) {
+        return {};
+    }
+    const auto &entry = m_cache[handle.slot];
+    if (entry.generation != handle.generation) {
         return {};
     }
     return m_descriptorHeaps->GetGpuHandle(DescriptorHeapType::Sampler, handle.slot);
@@ -252,23 +262,20 @@ void SamplerCache::Reclaim(uint64_t completedFence) {
 }
 
 void SamplerCache::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames) {
+    // BugFix: 不再从 m_cache 中 erase 条目，而是递增 generation 使旧句柄失效。
+    // erase 会导致后续条目的索引前移，使得外部持有的 handle（如 m_presetIndices）指向错误条目。
     for (auto &entry : m_cache) {
-        if (!entry.inUse) {
-            if (currentFrame - entry.lastUsedFrame > maxAgeFrames) {
-                m_descriptorHeaps->Free(DescriptorHeapType::Sampler, entry.slot, UINT64_MAX);
-                entry.slot = UINT32_MAX;
-            }
+        if (!entry.inUse && currentFrame - entry.lastUsedFrame > maxAgeFrames) {
+            m_descriptorHeaps->Free(DescriptorHeapType::Sampler, entry.slot, UINT64_MAX);
+            entry.slot = UINT32_MAX;
+            // 递增 generation 使所有指向此条目的旧句柄立即失效
+            entry.generation = m_nextGeneration++;
         }
     }
 
-    auto it = m_cache.begin();
-    while (it != m_cache.end()) {
-        if (it->slot == UINT32_MAX && !it->inUse) {
-            it = m_cache.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    // 注意：不再 erase 条目。被 Purge 的条目 generation 已递增，旧句柄无法通过
+    // generation 验证（GetCpuHandle/GetGpuHandle 已添加 generation 检查）。
+    // 空闲条目（slot==UINT32_MAX, inUse==false）留在 m_cache 中等待 FindOrCreateSlot 复用。
 }
 
 } // namespace DX12Engine::Resource

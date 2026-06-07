@@ -77,13 +77,18 @@ CpuResourceHandle CpuHandlePool::AllocateSlot(CpuResourceType type, uint8_t pool
         }
     }
 
+    // snapshot 持有 shared_ptr 引用，防止 ExpandCapacity 替换数组时访问已释放内存
+    auto states = m_states;
+    auto dataPtrs = m_dataPtrs;
+    auto generations = m_generations;
+
     m_types[index] = type;
-    m_states[index].store(initialState, std::memory_order_relaxed);
-    m_dataPtrs[index].store(nullptr, std::memory_order_relaxed);
+    states[index].store(initialState, std::memory_order_relaxed);
+    dataPtrs[index].store(nullptr, std::memory_order_relaxed);
 
     CpuResourceHandle handle;
     handle.index = index;
-    handle.generation = m_generations[index].load(std::memory_order_relaxed);
+    handle.generation = generations[index].load(std::memory_order_relaxed);
     handle.poolId = poolId;
 
     return handle;

@@ -77,8 +77,12 @@ void DescriptorSlotAllocator::Expand(uint32_t newCapacity) {
     if (newCapacity <= m_capacity)
         return;
 
-    for (uint32_t i = m_capacity; i < newCapacity; ++i) {
-        m_freeIndices.push_back(i);
+    // LinearAlloc 模式：不需要填充 m_freeIndices（始终从 m_nextIndex 分配）
+    // FreeList 模式：将新索引推入 m_freeIndices 供后续复用
+    if (!HasFlag(m_config.flags, DescriptorSlotFlags::LinearAlloc)) {
+        for (uint32_t i = m_capacity; i < newCapacity; ++i) {
+            m_freeIndices.push_back(i);
+        }
     }
 
     m_capacity = newCapacity;
@@ -179,7 +183,8 @@ uint32_t DescriptorSlotAllocator::AllocateConsecutive(uint32_t count) {
         if (m_nextIndex + count > m_capacity) {
             if (HasFlag(m_config.flags, DescriptorSlotFlags::EnableExpand)) {
                 uint32_t newCapacity = m_capacity == 0 ? m_config.initialCapacity : m_capacity * 2;
-                while (newCapacity < m_nextIndex + count) newCapacity *= 2;
+                while (newCapacity < m_nextIndex + count)
+                    newCapacity *= 2;
                 Expand(newCapacity);
             }
             if (m_nextIndex + count > m_capacity)
@@ -228,8 +233,35 @@ uint32_t DescriptorSlotAllocator::AllocateConsecutive(uint32_t count) {
     // 尝试扩容
     if (HasFlag(m_config.flags, DescriptorSlotFlags::EnableExpand)) {
         uint32_t newCapacity = m_capacity == 0 ? m_config.initialCapacity : m_capacity * 2;
-        while (newCapacity < m_nextIndex + count) newCapacity *= 2;
+        while (newCapacity < m_nextIndex + count)
+            newCapacity *= 2;
         Expand(newCapacity);
+
+        // BugFix: 扩容后 m_freeIndices 已被填充新索引，必须从 m_freeIndices 中扫描连续块，
+        // 不能走 m_nextIndex 路径，否则会和 m_freeIndices 中的索引冲突导致双重分配。
+        if (!m_freeIndices.empty()) {
+            std::sort(m_freeIndices.begin(), m_freeIndices.end());
+
+            uint32_t runStart = m_freeIndices[0];
+            uint32_t runLen = 1;
+            for (size_t i = 1; i < m_freeIndices.size(); ++i) {
+                if (m_freeIndices[i] == m_freeIndices[i - 1] + 1) {
+                    runLen++;
+                    if (runLen >= count) {
+                        uint32_t baseIndex = runStart;
+                        auto it = std::lower_bound(m_freeIndices.begin(), m_freeIndices.end(), baseIndex);
+                        m_freeIndices.erase(it, it + count);
+                        m_allocatedCount += count;
+                        return baseIndex;
+                    }
+                } else {
+                    runStart = m_freeIndices[i];
+                    runLen = 1;
+                }
+            }
+        }
+
+        // 扩容后 freeList 中也没有连续块，再走 m_nextIndex（此时 freeList 中不应有 m_nextIndex 范围的索引）
         if (m_nextIndex + count <= m_capacity) {
             uint32_t baseIndex = m_nextIndex;
             m_nextIndex += count;

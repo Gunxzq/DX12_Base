@@ -24,9 +24,10 @@ public:
     // 非虚方法（可直接继承）
     void Initialize(const InitConfig &config = {}) {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_initialized || m_capacity == 0 || m_types.empty() || !m_states) {
+        uint32_t cap = m_capacity.load(std::memory_order_relaxed);
+        if (!m_initialized || cap == 0 || m_types.empty() || !m_states) {
             uint32_t targetCapacity = config.maxTotalHandles > 0 ? config.maxTotalHandles : INITIAL_CAPACITY;
-            if (targetCapacity > m_capacity) {
+            if (targetCapacity > cap) {
                 Preallocate_Locked(targetCapacity);
             }
             m_initialized = true;
@@ -50,51 +51,77 @@ public:
     }
 
     void SetState(HandleType handle, StateEnum state) {
-        if (!Validate(handle))
+        // snapshot 持有 shared_ptr 引用，防止 ExpandCapacity 替换数组时访问已释放内存
+        auto states = m_states;
+        auto generations = m_generations;
+        uint32_t cap = m_capacity.load(std::memory_order_relaxed);
+        if (!m_initialized || !states || handle.index >= cap)
             return;
-        m_states[handle.index].store(state, std::memory_order_release);
+        if (generations[handle.index].load(std::memory_order_acquire) != handle.generation)
+            return;
+        states[handle.index].store(state, std::memory_order_release);
     }
 
     StateEnum GetState(HandleType handle) const {
-        if (!Validate(handle))
+        auto states = m_states;
+        auto generations = m_generations;
+        uint32_t cap = m_capacity.load(std::memory_order_relaxed);
+        if (!m_initialized || !states || handle.index >= cap)
             return StateEnum::Empty;
-        return m_states[handle.index].load(std::memory_order_acquire);
+        if (generations[handle.index].load(std::memory_order_acquire) != handle.generation)
+            return StateEnum::Empty;
+        return states[handle.index].load(std::memory_order_acquire);
     }
 
     void SetDataPtr(HandleType handle, void *ptr) {
-        if (!Validate(handle))
+        auto dataPtrs = m_dataPtrs;
+        auto generations = m_generations;
+        uint32_t cap = m_capacity.load(std::memory_order_relaxed);
+        if (!m_initialized || !dataPtrs || handle.index >= cap)
             return;
-        m_dataPtrs[handle.index].store(ptr, std::memory_order_release);
+        if (generations[handle.index].load(std::memory_order_acquire) != handle.generation)
+            return;
+        dataPtrs[handle.index].store(ptr, std::memory_order_release);
     }
 
     void *GetDataPtr(HandleType handle) const {
-        if (!Validate(handle))
+        auto dataPtrs = m_dataPtrs;
+        auto generations = m_generations;
+        uint32_t cap = m_capacity.load(std::memory_order_relaxed);
+        if (!m_initialized || !dataPtrs || handle.index >= cap)
             return nullptr;
-        return m_dataPtrs[handle.index].load(std::memory_order_acquire);
+        if (generations[handle.index].load(std::memory_order_acquire) != handle.generation)
+            return nullptr;
+        return dataPtrs[handle.index].load(std::memory_order_acquire);
     }
 
     bool Validate(HandleType handle) const {
-        if (!m_initialized || !m_states)
-            return false;
-        if (handle.index >= m_capacity)
+        auto states = m_states;
+        auto generations = m_generations;
+        uint32_t cap = m_capacity.load(std::memory_order_relaxed);
+        if (!m_initialized || !states || handle.index >= cap)
             return false;
 
-        uint32_t currentGen = m_generations[handle.index].load(std::memory_order_acquire);
+        uint32_t currentGen = generations[handle.index].load(std::memory_order_acquire);
         if (currentGen != handle.generation)
             return false;
 
-        StateEnum state = m_states[handle.index].load(std::memory_order_acquire);
+        StateEnum state = states[handle.index].load(std::memory_order_acquire);
         if (state == StateEnum::Empty || state == StateEnum::PendingRelease)
             return false;
 
-        currentGen = m_generations[handle.index].load(std::memory_order_acquire);
+        currentGen = generations[handle.index].load(std::memory_order_acquire);
         return currentGen == handle.generation;
     }
 
     uint32_t GetActiveCount() const {
+        auto states = m_states;
+        uint32_t cap = m_capacity.load(std::memory_order_relaxed);
+        if (!states)
+            return 0;
         uint32_t count = 0;
-        for (uint32_t i = 0; i < m_capacity; ++i) {
-            StateEnum s = m_states[i].load(std::memory_order_relaxed);
+        for (uint32_t i = 0; i < cap; ++i) {
+            StateEnum s = states[i].load(std::memory_order_relaxed);
             if (s != StateEnum::Empty && s != StateEnum::PendingRelease) {
                 count++;
             }
@@ -105,15 +132,23 @@ public:
 protected:
     mutable std::mutex m_mutex;
     std::vector<TypeEnum> m_types;
-    std::unique_ptr<std::atomic<StateEnum>[]> m_states;
-    std::unique_ptr<std::atomic<uint32_t>[]> m_generations;
-    std::unique_ptr<std::atomic<void *>[]> m_dataPtrs;
+    // BugFix: 使用 shared_ptr 替代 unique_ptr，无锁路径通过 snapshot 持有引用，
+    // 确保 ExpandCapacity/Shutdown 替换数组时旧内存不会被提前释放
+    std::shared_ptr<std::atomic<StateEnum>[]> m_states;
+    std::shared_ptr<std::atomic<uint32_t>[]> m_generations;
+    std::shared_ptr<std::atomic<void *>[]> m_dataPtrs;
     std::vector<uint32_t> m_freeIndices;
-    uint32_t m_capacity = 0;
+    // BugFix: m_capacity 在 TLS 无锁路径中被读取，必须是 atomic 以避免 data race
+    std::atomic<uint32_t> m_capacity = 0;
     bool m_initialized = false;
 
     void ExpandCapacity() {
-        uint32_t oldCapacity = (!m_states || m_types.empty()) ? 0 : m_capacity;
+        uint32_t oldCapacity;
+        if (!m_states || m_types.empty()) {
+            oldCapacity = 0;
+        } else {
+            oldCapacity = m_capacity.load(std::memory_order_relaxed);
+        }
 
         uint32_t newCapacity;
         if (oldCapacity == 0) {
@@ -128,9 +163,9 @@ protected:
         assert(newCapacity <= 10000000 && "ExpandCapacity: newCapacity too large!");
         (void)newCapacity;
 
-        auto newStates = std::make_unique<std::atomic<StateEnum>[]>(newCapacity);
-        auto newDataPtrs = std::make_unique<std::atomic<void *>[]>(newCapacity);
-        auto newGenerations = std::make_unique<std::atomic<uint32_t>[]>(newCapacity);
+        auto newStates = std::make_shared<std::atomic<StateEnum>[]>(newCapacity);
+        auto newDataPtrs = std::make_shared<std::atomic<void *>[]>(newCapacity);
+        auto newGenerations = std::make_shared<std::atomic<uint32_t>[]>(newCapacity);
 
         std::vector<TypeEnum> newTypes;
         newTypes.reserve(newCapacity);
@@ -165,8 +200,8 @@ protected:
     }
 
     void Preallocate_Locked(uint32_t targetCapacity) {
-        while (m_capacity < targetCapacity) {
-            uint32_t oldCapacity = m_capacity;
+        while (m_capacity.load(std::memory_order_relaxed) < targetCapacity) {
+            uint32_t oldCapacity = m_capacity.load(std::memory_order_relaxed);
             uint32_t newCapacity;
             if (oldCapacity == 0) {
                 newCapacity = INITIAL_CAPACITY;
@@ -180,9 +215,9 @@ protected:
                 newCapacity = targetCapacity;
             }
 
-            auto newStates = std::make_unique<std::atomic<StateEnum>[]>(newCapacity);
-            auto newDataPtrs = std::make_unique<std::atomic<void *>[]>(newCapacity);
-            auto newGenerations = std::make_unique<std::atomic<uint32_t>[]>(newCapacity);
+            auto newStates = std::make_shared<std::atomic<StateEnum>[]>(newCapacity);
+            auto newDataPtrs = std::make_shared<std::atomic<void *>[]>(newCapacity);
+            auto newGenerations = std::make_shared<std::atomic<uint32_t>[]>(newCapacity);
 
             std::vector<TypeEnum> newTypes;
             newTypes.reserve(newCapacity);

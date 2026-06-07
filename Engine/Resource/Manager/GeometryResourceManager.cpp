@@ -60,7 +60,8 @@ GeometryHandle GeometryResourceManager::RegisterGeometryVariant(const GeometryVa
 
     GeometryHandle handle;
     handle.index = index;
-    handle.generation = entry.generation;
+    // BugFix: handle.generation 是 10 位字段，需要取模避免截断导致 IsValid 失败
+    handle.generation = entry.generation & 0x3FF; // 低 10 位
 
     char buf[256];
     sprintf_s(buf, "[INFO] Registered geometry type %zu at index %d\n", geometry.index(), index);
@@ -116,7 +117,8 @@ bool GeometryResourceManager::IsValid(GeometryHandle handle) const {
     }
 
     const Entry &entry = m_entries[handle.index];
-    return entry.inUse && entry.generation == handle.generation;
+    // BugFix: handle.generation 是 10 位，取低 10 位比较
+    return entry.inUse && (entry.generation & 0x3FF) == (handle.generation & 0x3FF);
 }
 
 const Math::BoundingVolumeVariant *GeometryResourceManager::GetBounds(GeometryHandle handle) const {
