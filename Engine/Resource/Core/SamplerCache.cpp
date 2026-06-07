@@ -173,7 +173,7 @@ uint32_t SamplerCache::FindOrCreateSlot(const SamplerDesc &desc) {
     memcpy(d3dDesc.BorderColor, desc.borderColor, sizeof(d3dDesc.BorderColor));
     d3dDesc.MinLOD = desc.minLOD;
     d3dDesc.MaxLOD = desc.maxLOD;
-    ThrowIfFailed(m_device->CreateSampler(&d3dDesc, cpuHandle));
+    m_device->CreateSampler(&d3dDesc, cpuHandle);
 
     CachedSampler entry;
     entry.desc = desc;

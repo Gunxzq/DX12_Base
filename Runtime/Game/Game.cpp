@@ -175,15 +175,14 @@ void Game::RegisterEngineSystems() {
                               .priority = TaskPriority::High,
                               .interestedMessages = {Event::FullscreenToggleEvent::StaticTypeHash}});
 
-    SystemRegistry::Register({.name = "PreRenderPipeline",
+    SystemRegistry::Register({.name = "CullingLODPipeline",
                               .func =
                                   [this](Registry &reg, const MessageContext &ctx) {
-                                      // 串行执行：剔除 + LOD
+                                      // PreCulling 阶段：剔除 + LOD 计算
                                       m_context->CullingSystem->Execute(reg, m_context->cullingResult);
                                       m_context->LODSystem->Execute(reg, m_context->lodResult);
-                                      m_world.BuildRenderQueue();
                                   },
-                              .phase = TaskPhase::PreRender,
+                              .phase = TaskPhase::PreCulling,
                               .threadType = ThreadType::Worker,
                               .alwaysRun = true});
 }

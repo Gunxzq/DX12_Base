@@ -210,7 +210,12 @@ bool FrameDriver::Tick() {
     ExecutePhase(TaskPhase::EarlyUpdate);
     ExecutePhase(TaskPhase::Update);
     ExecutePhase(TaskPhase::LateUpdate);
-    ExecutePhase(TaskPhase::PreRender); // 剔除结果存入 Slot N
+
+    // PreCulling：剔除 + LOD 计算（CullingSystem + LODSystem）
+    ExecutePhase(TaskPhase::PreCulling);
+
+    // PreRender：构建器并行生成渲染队列（Opaque/Transparent/Terrain/Billboard）
+    ExecutePhase(TaskPhase::PreRender);
 
     // ========================================================================
     // 4. 帧同步 (FrameSync)

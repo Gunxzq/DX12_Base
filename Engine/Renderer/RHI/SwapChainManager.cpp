@@ -107,7 +107,7 @@ void SwapChainManager::CreateRenderTargetViews(ID3D12Device *device) {
     // 为每个缓冲区创建 RTV
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHeapHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
     for (UINT i = 0; i < m_backBuffers.size(); i++) {
-        ThrowIfFailed(device->CreateRenderTargetView(m_backBuffers[i].Get(), nullptr, rtvHeapHandle));
+        device->CreateRenderTargetView(m_backBuffers[i].Get(), nullptr, rtvHeapHandle);
         rtvHeapHandle.Offset(1, m_rtvDescriptorSize);
     }
 }
@@ -151,7 +151,7 @@ void SwapChainManager::CreateDepthStencilView(ID3D12Device *device) {
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     dsvDesc.Format = m_params.depthStencilFormat;
     dsvDesc.Texture2D.MipSlice = 0;
-    ThrowIfFailed(device->CreateDepthStencilView(m_depthStencilBuffer.Get(), &dsvDesc, GetDepthStencilView()));
+    device->CreateDepthStencilView(m_depthStencilBuffer.Get(), &dsvDesc, GetDepthStencilView());
 }
 
 void SwapChainManager::ReleaseRenderTargetViews() { m_rtvHeap.Reset(); }

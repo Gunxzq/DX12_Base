@@ -290,6 +290,9 @@ void Bootstrap::InitializeModules() {
         m_lodSystem.SetCameraManager(&DX12Engine::Renderer::CameraManager::GetInstance());
         m_lodSystem.SetGeometryManager(&m_geometryResourceManager);
 
+        // CullingSystem 也需要相机管理器引用（用于预测视锥体剔除）
+        m_cullingSystem.SetCameraManager(&DX12Engine::Renderer::CameraManager::GetInstance());
+
         InitializeDebugUI();
 
         // 5. MessageDispatcher 单例 (Event 层，调度系统需要)

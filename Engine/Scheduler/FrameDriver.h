@@ -71,7 +71,7 @@ using FrameSyncCallback = std::function<void()>;
  * 2. DAG 构建：BuildFromBuckets 从消息构建本帧任务图
  * 3. Immediate 回调：零延迟路径（相机、UI）
  * 4. Render Phase：渲染提交（录制命令列表）
- * 5. Update Phases：EarlyUpdate → Update → LateUpdate → PreRender
+ * 5. Update Phases：EarlyUpdate → Update → LateUpdate → PreCulling → PreRender
  * 6. Frame Sync：L4 多缓冲交换回调
  * ```
  *

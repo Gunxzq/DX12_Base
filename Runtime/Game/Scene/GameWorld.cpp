@@ -140,6 +140,9 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
 
     // 注册地形渲染系统
     RegisterTerrainRenderSystem();
+
+    // 注册构建器 System（PreRender 阶段并行执行）
+    RegisterBuilderSystems();
 }
 
 void GameWorld::Clear() {
@@ -162,37 +165,70 @@ void GameWorld::Clear() {
     }
 }
 
-void GameWorld::BuildRenderQueue() {
-    if (!m_registry)
-        return;
+void GameWorld::RegisterBuilderSystems() {
+    // =========================================================================
+    // 每个构建器注册为独立的 System，在 PreRender 阶段并行执行
+    // TaskGraph 会自动调度同阶段内无依赖的 Task 并行运行
+    // =========================================================================
 
-    // 设置每帧数据
-    m_opaqueBuilder->SetCullingResult(&m_context->cullingResult);
-    m_opaqueBuilder->SetLODResult(&m_context->lodResult);
+    // 1. 不透明构建器（双队列：Standard + Instanced）
+    SystemRegistry::Register({
+        .name = "OpaqueBuilder",
+        .func =
+            [this](Registry &reg, const MessageContext &) {
+                m_opaqueBuilder->SetCullingResult(&m_context->cullingResult);
+                m_opaqueBuilder->SetLODResult(&m_context->lodResult);
+                m_opaqueBuilder->BuildDualQueue(reg, m_opaqueQueueStandard, m_opaqueQueueInstanced);
+            },
+        .phase = TaskPhase::PreRender,
+        .threadType = ThreadType::Worker,
+        .alwaysRun = true,
+    });
 
-    m_transparentBuilder->SetCullingResult(&m_context->cullingResult);
-    m_transparentBuilder->SetLODResult(&m_context->lodResult);
+    // 2. 透明构建器（远到近排序，需要相机位置）
+    SystemRegistry::Register({
+        .name = "TransparentBuilder",
+        .func =
+            [this](Registry &reg, const MessageContext &) {
+                m_transparentBuilder->SetCullingResult(&m_context->cullingResult);
+                m_transparentBuilder->SetLODResult(&m_context->lodResult);
+                m_transparentBuilder->BuildTyped(reg, m_transparentQueue);
+            },
+        .phase = TaskPhase::PreRender,
+        .threadType = ThreadType::Worker,
+        .alwaysRun = true,
+    });
 
-    // 构建不透明渲染双队列（Standard / Instanced 分离，避免渲染时 PSO 切换）
-    m_opaqueBuilder->BuildDualQueue(*m_registry, m_opaqueQueueStandard, m_opaqueQueueInstanced);
-
-    // 构建透明渲染队列（从远到近排序）
-    m_transparentBuilder->BuildTyped(*m_registry, m_transparentQueue);
-
-    // 构建公告牌队列
+    // 3. 公告牌构建器（需要相机位置做朝向计算）
     if (m_billboardBuilder) {
-        m_billboardBuilder->SetCullingResult(&m_context->cullingResult);
-        m_billboardBuilder->SetLODResult(&m_context->lodResult);
-        // 从相机管理器获取相机位置
-        const auto &camera = m_context->CameraMgr->GetMainCamera();
-        m_billboardBuilder->SetCameraPosition(camera.Position);
-        m_billboardBuilder->BuildTyped(*m_registry, m_billboardQueue);
+        SystemRegistry::Register({
+            .name = "BillboardBuilder",
+            .func =
+                [this](Registry &reg, const MessageContext &) {
+                    m_billboardBuilder->SetCullingResult(&m_context->cullingResult);
+                    m_billboardBuilder->SetLODResult(&m_context->lodResult);
+                    m_billboardBuilder->SetCameraPosition(m_context->CameraMgr->GetMainCamera().Position);
+                    m_billboardBuilder->BuildTyped(reg, m_billboardQueue);
+                },
+            .phase = TaskPhase::PreRender,
+            .threadType = ThreadType::Worker,
+            .alwaysRun = true,
+        });
     }
 
-    // 构建地形队列
+    // 4. 地形构建器
     if (m_terrainBuilder) {
-        m_terrainBuilder->SetCullingResult(&m_context->cullingResult);
-        m_terrainBuilder->BuildTyped(*m_registry, m_terrainQueue);
+        SystemRegistry::Register({
+            .name = "TerrainBuilder",
+            .func =
+                [this](Registry &reg, const MessageContext &) {
+                    m_terrainBuilder->SetCullingResult(&m_context->cullingResult);
+                    m_terrainBuilder->BuildTyped(reg, m_terrainQueue);
+                },
+            .phase = TaskPhase::PreRender,
+            .threadType = ThreadType::Worker,
+            .alwaysRun = true,
+        });
     }
 }
 
@@ -963,77 +999,82 @@ void GameWorld::RegisterCubeRenderSystem() {
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
                      m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
 
-                //  一个堆
-                cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+                 //  一个堆
+                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
-                // ========================================================================
-                // [DESCRIPTOR SLOT DEBUG] 追踪所有纹理的 SRV 槽位和 GPU 句柄
-                // ========================================================================
-                static int s_dbgFrameCount = 0;
-                if (s_dbgFrameCount++ < 3) {
-                    auto logSlot = [this](const char* name, TextureHandle handle) {
-                        if (handle.IsValid()) {
-                            uint32_t idx = m_context->TextureMgr->GetSRVIndex(handle);
-                            D3D12_GPU_DESCRIPTOR_HANDLE gpuH = m_context->TextureMgr->GetSRV(handle);
-                            m_context->Logging->Info("[SlotDBG] {} srvIndex={} gpuHandle.ptr=0x{:X}", name, idx, gpuH.ptr);
-                        } else {
-                            m_context->Logging->Info("[SlotDBG] {} INVALID", name);
-                        }
-                    };
+                 // ========================================================================
+                 // [DESCRIPTOR SLOT DEBUG] 追踪所有纹理的 SRV 槽位和 GPU 句柄
+                 // ========================================================================
+                 static int s_dbgFrameCount = 0;
+                 if (s_dbgFrameCount++ < 3) {
+                     auto logSlot = [this](const char *name, TextureHandle handle) {
+                         if (handle.IsValid()) {
+                             uint32_t idx = m_context->TextureMgr->GetSRVIndex(handle);
+                             D3D12_GPU_DESCRIPTOR_HANDLE gpuH = m_context->TextureMgr->GetSRV(handle);
+                             m_context->Logging->Info("[SlotDBG] {} srvIndex={} gpuHandle.ptr=0x{:X}", name, idx,
+                                                      gpuH.ptr);
+                         } else {
+                             m_context->Logging->Info("[SlotDBG] {} INVALID", name);
+                         }
+                     };
 
-                    // 地形纹理
-                    logSlot("terrainHeight", m_terrainTextureHandle);
-                    logSlot("terrainAlbedo", m_terrainAlbedoHandle);
-                    // Skybox (Cube)
-                    logSlot("skybox",       m_skyboxTextureHandle);
-                    // 测试纹理
-                    logSlot("testTexture",  m_testTextureHandle);
-                    // 水面纹理
-                    logSlot("waterTexture", m_waterTextureHandle);
-                    // 公告牌纹理数组
-                    for (int i = 0; i < 4; ++i) {
-                        char name[32];
-                        sprintf_s(name, "billboard[%d]", i);
-                        logSlot(name, m_billboardTextureHandles[i]);
-                    }
+                     // 地形纹理
+                     logSlot("terrainHeight", m_terrainTextureHandle);
+                     logSlot("terrainAlbedo", m_terrainAlbedoHandle);
+                     // Skybox (Cube)
+                     logSlot("skybox", m_skyboxTextureHandle);
+                     // 测试纹理
+                     logSlot("testTexture", m_testTextureHandle);
+                     // 水面纹理
+                     logSlot("waterTexture", m_waterTextureHandle);
+                     // 公告牌纹理数组
+                     for (int i = 0; i < 4; ++i) {
+                         char name[32];
+                         sprintf_s(name, "billboard[%d]", i);
+                         logSlot(name, m_billboardTextureHandles[i]);
+                     }
 
-                    // LightManager 的 shadowData SRV 和 shadowMap SRV
-                    auto& lm = LightManager::GetInstance();
-                    m_context->Logging->Info("[SlotDBG] LightMgr shadowDataSRV gpuHandle.ptr=0x{:X}", shadowDataSRV.ptr);
-                    m_context->Logging->Info("[SlotDBG] LightMgr shadowMapSRV  gpuHandle.ptr=0x{:X}", shadowMapSRV.ptr);
-                    m_context->Logging->Info("[SlotDBG] LightMgr shadowDataSrvBaseSlot={} shadowMapSrvDirSlot={}",
-                        lm.GetShadowDataSrvSlot(), lm.GetShadowMapSrvDirSlot());
+                     // LightManager 的 shadowData SRV 和 shadowMap SRV
+                     auto &lm = LightManager::GetInstance();
+                     m_context->Logging->Info("[SlotDBG] LightMgr shadowDataSRV gpuHandle.ptr=0x{:X}",
+                                              shadowDataSRV.ptr);
+                     m_context->Logging->Info("[SlotDBG] LightMgr shadowMapSRV  gpuHandle.ptr=0x{:X}",
+                                              shadowMapSRV.ptr);
+                     m_context->Logging->Info("[SlotDBG] LightMgr shadowDataSrvBaseSlot={} shadowMapSrvDirSlot={}",
+                                              lm.GetShadowDataSrvSlot(), lm.GetShadowMapSrvDirSlot());
 
-                    // 材质 buffer SRV
-                    m_context->Logging->Info("[SlotDBG] materialBufferSRV gpuHandle.ptr=0x{:X}", materialBufferSRV.ptr);
+                     // 材质 buffer SRV
+                     m_context->Logging->Info("[SlotDBG] materialBufferSRV gpuHandle.ptr=0x{:X}",
+                                              materialBufferSRV.ptr);
 
-                    // 堆容量
-                    uint32_t heapSize = m_context->DescriptorHeaps->GetHeapSize(DescriptorHeapType::CbvSrvUav);
-                    uint32_t allocated = m_context->DescriptorHeaps->GetAllocatedCount(DescriptorHeapType::CbvSrvUav);
-                    m_context->Logging->Info("[SlotDBG] CbvSrvUav heap size={} allocated={}", heapSize, allocated);
-                }
+                     // 堆容量
+                     uint32_t heapSize = m_context->DescriptorHeaps->GetHeapSize(DescriptorHeapType::CbvSrvUav);
+                     uint32_t allocated = m_context->DescriptorHeaps->GetAllocatedCount(DescriptorHeapType::CbvSrvUav);
+                     m_context->Logging->Info("[SlotDBG] CbvSrvUav heap size={} allocated={}", heapSize, allocated);
+                 }
 
-                // 开始渲染（传入阴影数据和阴影贴图 SRV）
-                m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
-                                       shadowMapSRV);
+                 // 开始渲染（传入阴影数据和阴影贴图 SRV）
+                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
+                                        shadowMapSRV);
 
-                D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}; // TODO: 从场景获取
+                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}; // TODO: 从场景获取
 
-                // 打印 envMapSRV 和第一个物体的 textureSRV 的句柄
-                static int s_dbgDrawCount = 0;
-                if (s_dbgDrawCount++ < 3) {
-                    m_context->Logging->Info("[DrawDBG] envMapSRV.ptr=0x{:X} (slot5, t10)", envMapSRV.ptr);
-                }
+                 // 打印 envMapSRV 和第一个物体的 textureSRV 的句柄
+                 static int s_dbgDrawCount = 0;
+                 if (s_dbgDrawCount++ < 3) {
+                     m_context->Logging->Info("[DrawDBG] envMapSRV.ptr=0x{:X} (slot5, t10)", envMapSRV.ptr);
+                 }
 
-                for (const auto &item : m_opaqueQueueStandard) {
-                    if (!item.IsValid())
-                        continue;
-                    if (s_dbgDrawCount <= 4) {
-                        m_context->Logging->Info("[DrawDBG] DrawMesh textureSRV.ptr=0x{:X} (slot4, t0)", item.textureSRV.ptr);
-                    }
-                    m_renderer->DrawMesh(cmdList, item.geometryHandle, DirectX::XMMatrixIdentity(),
-                                         item.standard.constantBuffer, item.textureSRV, envMapSRV);
-                }
+                 for (const auto &item : m_opaqueQueueStandard) {
+                     if (!item.IsValid())
+                         continue;
+                     if (s_dbgDrawCount <= 4) {
+                         m_context->Logging->Info("[DrawDBG] DrawMesh textureSRV.ptr=0x{:X} (slot4, t0)",
+                                                  item.textureSRV.ptr);
+                     }
+                     m_renderer->DrawMesh(cmdList, item.geometryHandle, DirectX::XMMatrixIdentity(),
+                                          item.standard.constantBuffer, item.textureSRV, envMapSRV);
+                 }
 
                  for (const auto &item : m_opaqueQueueInstanced) {
                      if (!item.IsValid())
@@ -1561,13 +1602,14 @@ void GameWorld::RegisterTerrainSystems() {
                                        state.albedoCreated.load(std::memory_order_acquire) &&
                                        state.albedoGpuHandle.IsValid();
 
-                    if (needHeight && needAlbedo) {
-                        // 两纹理都需要：使用 AllocateConsecutive(2) 确保描述符连续
-                        uint32_t baseSrvIdx =
-                            descriptorHeaps->AllocateConsecutive(Resource::DescriptorHeapType::CbvSrvUav, 2);
-                        m_context->Logging->Info("[SlotDBG] TerrainGPUCreate AllocateConsecutive(2) baseSrvIdx={} (height={} albedo={})",
-                            baseSrvIdx, baseSrvIdx, baseSrvIdx + 1);
-                        if (baseSrvIdx != UINT32_MAX) {
+                     if (needHeight && needAlbedo) {
+                         // 两纹理都需要：使用 AllocateConsecutive(2) 确保描述符连续
+                         uint32_t baseSrvIdx =
+                             descriptorHeaps->AllocateConsecutive(Resource::DescriptorHeapType::CbvSrvUav, 2);
+                         m_context->Logging->Info(
+                             "[SlotDBG] TerrainGPUCreate AllocateConsecutive(2) baseSrvIdx={} (height={} albedo={})",
+                             baseSrvIdx, baseSrvIdx, baseSrvIdx + 1);
+                         if (baseSrvIdx != UINT32_MAX) {
                              uint32_t heightSrvIdx = baseSrvIdx;
                              uint32_t albedoSrvIdx = baseSrvIdx + 1;
 
@@ -1766,20 +1808,20 @@ void GameWorld::RegisterTerrainRenderSystem() {
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
-                // 开始地形渲染
-                m_terrainRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
+                 // 开始地形渲染
+                 m_terrainRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
 
-                // 遍历地形队列
-                static int s_dbgTerrainCount = 0;
-                for (const auto &item : m_terrainQueue.GetItems()) {
-                    if (!item.IsValid())
-                        continue;
-                    if (s_dbgTerrainCount++ < 3) {
-                        m_context->Logging->Info("[DrawDBG] DrawTerrain heightMapSRV.ptr=0x{:X} albedoSRV.ptr=0x{:X}",
-                            item.heightMapSRV.ptr, item.albedoSRV.ptr);
-                    }
-                    m_terrainRenderer->DrawTerrain(cmdList, item);
-                }
+                 // 遍历地形队列
+                 static int s_dbgTerrainCount = 0;
+                 for (const auto &item : m_terrainQueue.GetItems()) {
+                     if (!item.IsValid())
+                         continue;
+                     if (s_dbgTerrainCount++ < 3) {
+                         m_context->Logging->Info("[DrawDBG] DrawTerrain heightMapSRV.ptr=0x{:X} albedoSRV.ptr=0x{:X}",
+                                                  item.heightMapSRV.ptr, item.albedoSRV.ptr);
+                     }
+                     m_terrainRenderer->DrawTerrain(cmdList, item);
+                 }
 
                  m_terrainRenderer->EndFrame();
 

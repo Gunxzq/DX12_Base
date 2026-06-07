@@ -1,4 +1,6 @@
 #include "CameraManager.h"
+#include "Boot/GameContext.h"
+#include "Scheduler/FrameDriver.h"
 #include <DirectXMath.h>
 #include <stdexcept>
 
@@ -54,6 +56,26 @@ const Camera &CameraManager::GetMainCamera() const { return m_mainCamera; }
 void CameraManager::UpdateMainCamera() {
     // 保存上一帧的 ViewProj 矩阵
     m_mainCamera.PrevViewProjMatrix = m_mainCamera.ViewProjMatrix;
+
+    // 计算相机速度（用于下一帧的预测剔除）
+    // Velocity = (Position - PrevPosition) / deltaTime
+    float deltaTime = 1.0f / 60.0f; // 默认 60fps 兜底
+    // 尝试从全局上下文获取实际 deltaTime
+    auto &schedulerCtx = Scheduler::GetSchedulerContext();
+    if (schedulerCtx.frameDriver && schedulerCtx.frameDriver->GetGameContext()) {
+        deltaTime = schedulerCtx.frameDriver->GetGameContext()->MainTimer->GetDeltaTime();
+        if (deltaTime <= 0.0f)
+            deltaTime = 1.0f / 60.0f;
+    }
+
+    XMVECTOR posVec = XMLoadFloat3(&m_mainCamera.Position);
+    XMVECTOR prevPosVec = XMLoadFloat3(&m_mainCamera.PrevPosition);
+    XMVECTOR velVec = (posVec - prevPosVec) / deltaTime;
+    XMStoreFloat3(&m_mainCamera.Velocity, velVec);
+
+    // 保存当前位置为上一帧位置
+    m_mainCamera.PrevPosition = m_mainCamera.Position;
+
     CalculateMatrices(m_mainCamera);
 }
 

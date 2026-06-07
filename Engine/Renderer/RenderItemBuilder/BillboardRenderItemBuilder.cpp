@@ -23,8 +23,7 @@ struct BillboardInstanceData {
 };
 
 BillboardRenderItemBuilder::BillboardRenderItemBuilder(FrameResourceManager *frameResources,
-                                                       TextureManager *textureManager,
-                                                       MaterialManager *materialManager)
+                                                       TextureManager *textureManager, MaterialManager *materialManager)
     : m_frameResourceManager(frameResources), m_textureManager(textureManager), m_materialManager(materialManager) {}
 
 void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<BillboardRenderItem> &outQueue) {
@@ -35,7 +34,6 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
     }
 
     // 所有公告牌共享同一个 Texture2DArray，通过实例数据中的 TextureArrayIndex 区分切片
-    // 因此可以合为一个批次
     std::vector<BillboardInstanceData> instances;
 
     for (auto entity : m_cullingResult->visibleEntities) {

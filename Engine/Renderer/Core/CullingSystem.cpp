@@ -3,10 +3,40 @@
 #include "Common/Common.h"
 
 #include "ECS/Core/Components.h"
+#include "Renderer/Scene/CameraManager.h"
+#include "Scheduler/FrameDriver.h"
 
 using namespace DX12Engine::Math;
 
 namespace DX12Engine::Renderer {
+
+// ============================================================================
+// 构建预测视锥体（相机运动补偿）
+// ============================================================================
+
+Frustum CullingSystem::BuildPredictedFrustum(float dt) const {
+    if (!m_cameraManager) {
+        // 无相机管理器时回退：直接从主相机构建（无预测）
+        return Frustum{};
+    }
+
+    const Camera &camera = m_cameraManager->GetMainCamera();
+
+    // 计算预测位置：PredictedPos = P + V * dt * K
+    float dtK = dt * m_predictionFactor;
+    DirectX::XMFLOAT3 predictedPos;
+    predictedPos.x = camera.Position.x + camera.Velocity.x * dtK;
+    predictedPos.y = camera.Position.y + camera.Velocity.y * dtK;
+    predictedPos.z = camera.Position.z + camera.Velocity.z * dtK;
+
+    // 可选：扩大 FOV 增加安全余量（变速/转向场景）
+    float predictedFOV = camera.FOV * 1.05f; // 略微扩大 5%
+
+    Frustum frustum;
+    frustum.BuildFromCamera(predictedPos, camera.Forward, camera.Up, predictedFOV, camera.AspectRatio,
+                            camera.NearPlane, camera.FarPlane);
+    return frustum;
+}
 
 // ============================================================================
 // 执行
