@@ -1,6 +1,7 @@
 #include "SamplerCache.h"
 #include "DescriptorHeapCollection.h"
 #include "DescriptorSlotAllocator.h"
+#include "Common/ThrowHelper.h"
 #include <cstring>
 
 namespace DX12Engine::Resource {
@@ -172,7 +173,7 @@ uint32_t SamplerCache::FindOrCreateSlot(const SamplerDesc &desc) {
     memcpy(d3dDesc.BorderColor, desc.borderColor, sizeof(d3dDesc.BorderColor));
     d3dDesc.MinLOD = desc.minLOD;
     d3dDesc.MaxLOD = desc.maxLOD;
-    m_device->CreateSampler(&d3dDesc, cpuHandle);
+    ThrowIfFailed(m_device->CreateSampler(&d3dDesc, cpuHandle));
 
     CachedSampler entry;
     entry.desc = desc;

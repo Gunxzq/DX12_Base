@@ -1,6 +1,7 @@
 #include "DepthStencilPool.h"
 #include "DescriptorHeapCollection.h"
 #include "DescriptorSlotAllocator.h"
+#include "Common/ThrowHelper.h"
 #include <cassert>
 
 namespace DX12Engine::Resource {
@@ -85,7 +86,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc) {
     }
 
     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, dsvSlot);
-    m_device->CreateDepthStencilView(resource.Get(), nullptr, dsvHandle);
+    ThrowIfFailed(m_device->CreateDepthStencilView(resource.Get(), nullptr, dsvHandle));
 
     uint32_t srvSlot = UINT32_MAX;
     if (!(desc.flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)) {
@@ -115,7 +116,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc) {
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             srvDesc.Texture2D.MipLevels = 1;
-            m_device->CreateShaderResourceView(resource.Get(), &srvDesc, srvHandle);
+            ThrowIfFailed(m_device->CreateShaderResourceView(resource.Get(), &srvDesc, srvHandle));
         }
     }
 

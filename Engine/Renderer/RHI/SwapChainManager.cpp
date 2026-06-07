@@ -32,7 +32,7 @@ void SwapChainManager::Initialize(ID3D12Device *device, ID3D12CommandQueue *comm
     ThrowIfFailed(swapChain1.As(&m_swapChain));
 
     // 禁用 Alt+Enter 全屏切换，由我们手动控制
-    factory->MakeWindowAssociation(params.hwnd, DXGI_MWA_NO_ALT_ENTER);
+    ThrowIfFailed(factory->MakeWindowAssociation(params.hwnd, DXGI_MWA_NO_ALT_ENTER));
 
     m_backBuffers.resize(params.bufferCount);
     for (UINT i = 0; i < params.bufferCount; ++i) {
@@ -107,7 +107,7 @@ void SwapChainManager::CreateRenderTargetViews(ID3D12Device *device) {
     // 为每个缓冲区创建 RTV
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHeapHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
     for (UINT i = 0; i < m_backBuffers.size(); i++) {
-        device->CreateRenderTargetView(m_backBuffers[i].Get(), nullptr, rtvHeapHandle);
+        ThrowIfFailed(device->CreateRenderTargetView(m_backBuffers[i].Get(), nullptr, rtvHeapHandle));
         rtvHeapHandle.Offset(1, m_rtvDescriptorSize);
     }
 }
@@ -151,7 +151,7 @@ void SwapChainManager::CreateDepthStencilView(ID3D12Device *device) {
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     dsvDesc.Format = m_params.depthStencilFormat;
     dsvDesc.Texture2D.MipSlice = 0;
-    device->CreateDepthStencilView(m_depthStencilBuffer.Get(), &dsvDesc, GetDepthStencilView());
+    ThrowIfFailed(device->CreateDepthStencilView(m_depthStencilBuffer.Get(), &dsvDesc, GetDepthStencilView()));
 }
 
 void SwapChainManager::ReleaseRenderTargetViews() { m_rtvHeap.Reset(); }

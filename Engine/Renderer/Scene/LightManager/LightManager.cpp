@@ -3,6 +3,7 @@
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Struct/Descriptor.h"
+#include "Common/ThrowHelper.h"
 #include <cstring>
 
 using namespace DX12Engine::Renderer;
@@ -72,9 +73,9 @@ void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *de
             // t11: DirShadowData
             srvDesc.Buffer.NumElements = MAX_LIGHTS;
             srvDesc.Buffer.StructureByteStride = sizeof(DirLightShadowConstants);
-            device->CreateShaderResourceView(
+            ThrowIfFailed(device->CreateShaderResourceView(
                 GpuResourceManager::GetInstance().GetResource(m_dirShadowDataBufferHandle), &srvDesc,
-                descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_shadowDataSrvBaseSlot));
+                descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_shadowDataSrvBaseSlot)));
 
             m_shadowDataSRV = descriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, m_shadowDataSrvBaseSlot);
         }
@@ -706,8 +707,8 @@ void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint3
     dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     dsvDesc.Texture2D.MipSlice = 0;
-    m_device->CreateDepthStencilView(gpuMgr.GetResource(m_dirShadow.textureHandle), &dsvDesc,
-                                     m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, m_dirShadow.dsvSlot));
+    ThrowIfFailed(m_device->CreateDepthStencilView(gpuMgr.GetResource(m_dirShadow.textureHandle), &dsvDesc,
+                                                   m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, m_dirShadow.dsvSlot)));
 
     // 3. 分配 SRV 槽并创建 SRV
     m_dirShadow.srvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
@@ -722,16 +723,16 @@ void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint3
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(
+    ThrowIfFailed(m_device->CreateShaderResourceView(
         gpuMgr.GetResource(m_dirShadow.textureHandle), &srvDesc,
-        m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_dirShadow.srvSlot));
+        m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_dirShadow.srvSlot)));
 
     // 同时在 t14 槽位创建 SRV（供 OpaqueRenderer 根签名 slot 7 使用）
     // 注：不能使用 CopyDescriptorsSimple，因为 Shader Visible 堆的 CPU 端是只读的
     if (m_shadowMapSrvDirSlot != UINT32_MAX) {
-        m_device->CreateShaderResourceView(
+        ThrowIfFailed(m_device->CreateShaderResourceView(
             gpuMgr.GetResource(m_dirShadow.textureHandle), &srvDesc,
-            m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_shadowMapSrvDirSlot));
+            m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_shadowMapSrvDirSlot)));
     }
 
     m_dirShadow.isValid = true;
