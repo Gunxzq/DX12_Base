@@ -48,6 +48,9 @@ void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQu
         if (!materialHandle.IsValid() || !textureHandle.IsValid())
             continue;
 
+        auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
+        bool isStatic = (staticComp != nullptr);
+
         // 计算到相机的距离（用于远到近排序）
         float depth = CalculateDepth(transform->position, cameraPos);
 
@@ -61,9 +64,27 @@ void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQu
         objCB.MaterialIndex = m_materialManager->GetGPUIndex(materialHandle);
         objCB.ReceiveShadow = 0; // 透明物体通常不接收阴影
 
-        // 分配常量缓冲
-        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
-            m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
+        // 分配常量缓冲：静态/动态分离
+        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress;
+        if (isStatic) {
+            if (staticComp->persistentCBAddress == 0) {
+                // 首次分配持久化 CB
+                objectCBAddress = m_frameResourceManager->AllocatePersistentObjectCB(
+                    &objCB, sizeof(ObjectConstants));
+                staticComp->persistentCBAddress = objectCBAddress;
+                staticComp->worldDirty = false;
+            } else {
+                // 检查脏标记
+                if (staticComp->worldDirty) {
+                    m_frameResourceManager->UpdatePersistentBuffer(
+                        staticComp->persistentCBAddress, &objCB, sizeof(ObjectConstants));
+                    staticComp->worldDirty = false;
+                }
+                objectCBAddress = staticComp->persistentCBAddress;
+            }
+        } else {
+            objectCBAddress = m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
+        }
 
         // 构建渲染项
         TransparentRenderItem item;

@@ -105,5 +105,15 @@ struct BillboardComponent {
 
     bool IsValid() const { return textureHandle.IsValid(); }
 };
+
+// 标记组件：附加到需要持久化缓存的实体上
+struct StaticComponent {
+    D3D12_GPU_VIRTUAL_ADDRESS persistentCBAddress = 0;       // 持久化常量缓冲区地址
+    D3D12_GPU_VIRTUAL_ADDRESS persistentInstanceAddress = 0; // 持久化实例数据地址
+    uint32_t batchInstanceIndex = UINT32_MAX;
+
+    bool worldDirty = true;
+    uint64_t lastUpdateFrame = 0;
+};
 } // namespace ECS
 } // namespace DX12Engine

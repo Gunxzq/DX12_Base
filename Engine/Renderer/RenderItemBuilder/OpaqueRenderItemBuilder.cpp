@@ -10,18 +10,21 @@ using namespace DX12Engine::ECS;
 
 namespace DX12Engine::Renderer {
 
-// 分组键：相同 Mesh + 相同 Material 的实体可以合批
+// 分组键：相同 Mesh + 相同 Material + 相同静态/动态标志的实体可以合批
 struct BatchKey {
     GeometryHandle geometry;
     uint32_t materialIdx;
+    bool isStatic;
 
     bool operator==(const BatchKey &other) const {
-        return geometry.index == other.geometry.index && materialIdx == other.materialIdx;
+        return geometry.index == other.geometry.index && materialIdx == other.materialIdx && isStatic == other.isStatic;
     }
 };
 
 struct BatchKeyHash {
-    size_t operator()(const BatchKey &key) const { return ((size_t)key.geometry.index << 32) ^ key.materialIdx; }
+    size_t operator()(const BatchKey &key) const {
+        return ((size_t)key.geometry.index << 32) ^ (key.materialIdx << 1) ^ (key.isStatic ? 1 : 0);
+    }
 };
 
 OpaqueRenderItemBuilder::OpaqueRenderItemBuilder(FrameResourceManager *frameResources, MaterialManager *materialManager,
@@ -32,9 +35,10 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
     // 单队列兼容模式：按原有逻辑构建
     outQueue.Clear();
 
-    // 扩展 batch：同时记录 TextureHandle 用于获取 SRV
+    // 扩展 batch：同时记录 TextureHandle 用于获取 SRV 及实体列表
     struct BatchEntry {
         std::vector<InstanceData> instances;
+        std::vector<Entity> entities;
         Resource::TextureHandle textureHandle;
     };
     std::unordered_map<BatchKey, BatchEntry, BatchKeyHash> batches;
@@ -52,6 +56,9 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         if (!transform)
             continue;
 
+        auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
+        bool isStatic = (staticComp != nullptr);
+
         uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp->materialHandle);
 
         InstanceData instData;
@@ -63,10 +70,10 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         instData.MaterialIndex = materialIdx;
         instData.ReceiveShadow = meshComp->receivesShadow ? 1 : 0;
 
-        BatchKey key{geoHandle, materialIdx};
+        BatchKey key{geoHandle, materialIdx, isStatic};
         auto &entry = batches[key];
         entry.instances.push_back(instData);
-        // 同一批次内纹理相同，取第一个即可
+        entry.entities.push_back(entity);
         if (!entry.textureHandle.IsValid()) {
             entry.textureHandle = meshComp->textureHandle;
         }
@@ -75,27 +82,73 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
     constexpr uint32_t MIN_INSTANCE_COUNT = 2;
 
     for (auto &[key, entry] : batches) {
-        // 从 TextureManager 获取实际的 GPU SRV handle
         D3D12_GPU_DESCRIPTOR_HANDLE textureSRV = m_textureManager->GetSRV(entry.textureHandle);
         auto &instances = entry.instances;
 
         if (instances.size() >= MIN_INSTANCE_COUNT) {
-            D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer =
-                m_frameResourceManager->AllocateInstance(instances.data(), instances.size() * sizeof(InstanceData));
+            // 实例化模式
+            D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer;
+
+            if (key.isStatic) {
+                Entity firstEntity = entry.entities[0];
+                auto *staticComp = registry.TryGetComponent<StaticComponent>(firstEntity);
+
+                if (staticComp->persistentInstanceAddress == 0) {
+                    uint32_t dataSize = static_cast<uint32_t>(instances.size() * sizeof(InstanceData));
+                    instanceBuffer = m_frameResourceManager->AllocatePersistentInstanceBuffer(
+                        instances.data(), dataSize);
+                    staticComp->persistentInstanceAddress = instanceBuffer;
+                    staticComp->worldDirty = false;
+                } else {
+                    if (staticComp->worldDirty) {
+                        uint32_t dataSize = static_cast<uint32_t>(instances.size() * sizeof(InstanceData));
+                        m_frameResourceManager->UpdatePersistentBuffer(
+                            staticComp->persistentInstanceAddress, instances.data(), dataSize);
+                        staticComp->worldDirty = false;
+                    }
+                    instanceBuffer = staticComp->persistentInstanceAddress;
+                }
+            } else {
+                instanceBuffer = m_frameResourceManager->AllocateInstance(
+                    instances.data(), instances.size() * sizeof(InstanceData));
+            }
 
             OpaqueRenderItem item = OpaqueRenderItem::CreateInstanced(key.geometry, key.materialIdx, textureSRV,
                                                                       instanceBuffer, (uint32_t)instances.size());
             outQueue.Add(item);
         } else {
-            for (auto &instData : instances) {
+            // 单物体模式
+            for (size_t i = 0; i < instances.size(); ++i) {
+                auto &instData = instances[i];
+                Entity entity = entry.entities[i];
+
                 ObjectConstants objCB;
                 objCB.World = instData.World;
                 objCB.WorldInvTranspose = instData.WorldInvTranspose;
                 objCB.MaterialIndex = instData.MaterialIndex;
                 objCB.ReceiveShadow = instData.ReceiveShadow;
 
-                D3D12_GPU_VIRTUAL_ADDRESS cbAddress =
-                    m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
+                D3D12_GPU_VIRTUAL_ADDRESS cbAddress;
+
+                if (key.isStatic) {
+                    auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
+
+                    if (staticComp->persistentCBAddress == 0) {
+                        cbAddress = m_frameResourceManager->AllocatePersistentObjectCB(
+                            &objCB, sizeof(ObjectConstants));
+                        staticComp->persistentCBAddress = cbAddress;
+                        staticComp->worldDirty = false;
+                    } else {
+                        if (staticComp->worldDirty) {
+                            m_frameResourceManager->UpdatePersistentBuffer(
+                                staticComp->persistentCBAddress, &objCB, sizeof(ObjectConstants));
+                            staticComp->worldDirty = false;
+                        }
+                        cbAddress = staticComp->persistentCBAddress;
+                    }
+                } else {
+                    cbAddress = m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
+                }
 
                 OpaqueRenderItem item =
                     OpaqueRenderItem::CreateStandard(key.geometry, key.materialIdx, textureSRV, cbAddress);
@@ -110,9 +163,10 @@ void OpaqueRenderItemBuilder::BuildDualQueue(ECS::Registry &registry, TRenderQue
     outStandard.Clear();
     outInstanced.Clear();
 
-    // 1. 收集实例数据，按 (Geometry, Material) 分组
+    // 1. 收集实例数据，按 (Geometry, Material, isStatic) 分组
     struct BatchEntry {
         std::vector<InstanceData> instances;
+        std::vector<Entity> entities; // 记录实体，用于读取 StaticComponent
         Resource::TextureHandle textureHandle;
     };
     std::unordered_map<BatchKey, BatchEntry, BatchKeyHash> batches;
@@ -130,6 +184,9 @@ void OpaqueRenderItemBuilder::BuildDualQueue(ECS::Registry &registry, TRenderQue
         if (!transform)
             continue;
 
+        auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
+        bool isStatic = (staticComp != nullptr);
+
         uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp->materialHandle);
 
         InstanceData instData;
@@ -141,21 +198,21 @@ void OpaqueRenderItemBuilder::BuildDualQueue(ECS::Registry &registry, TRenderQue
         instData.MaterialIndex = materialIdx;
         instData.ReceiveShadow = meshComp->receivesShadow ? 1 : 0;
 
-        BatchKey key{geoHandle, materialIdx};
+        BatchKey key{geoHandle, materialIdx, isStatic};
         auto &entry = batches[key];
         entry.instances.push_back(instData);
+        entry.entities.push_back(entity);
         if (!entry.textureHandle.IsValid()) {
             entry.textureHandle = meshComp->textureHandle;
         }
     }
 
-    // 2. 为每个批次生成 RenderItem，按类型分入不同队列
+    // 2. 为每个批次生成 RenderItem，静态/动态分离处理
     constexpr uint32_t MIN_INSTANCE_COUNT = 2;
 
     for (auto &[key, entry] : batches) {
         D3D12_GPU_DESCRIPTOR_HANDLE textureSRV = m_textureManager->GetSRV(entry.textureHandle);
 
-        // 诊断：验证纹理 SRV 是否有效
         if (textureSRV.ptr == 0 && entry.textureHandle.IsValid()) {
             char msg[256];
             sprintf_s(msg, "[WARN] OpaqueRenderItemBuilder: GetSRV returned null for textureHandle index=%u gen=%u\n",
@@ -166,24 +223,81 @@ void OpaqueRenderItemBuilder::BuildDualQueue(ECS::Registry &registry, TRenderQue
         auto &instances = entry.instances;
 
         if (instances.size() >= MIN_INSTANCE_COUNT) {
-            // 实例化模式 → Instanced 队列
-            D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer =
-                m_frameResourceManager->AllocateInstance(instances.data(), instances.size() * sizeof(InstanceData));
+            // ================================================================
+            // 实例化模式
+            // ================================================================
+            D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer;
+
+            if (key.isStatic) {
+                // 静态批次：使用持久化实例缓冲区
+                Entity firstEntity = entry.entities[0];
+                auto *staticComp = registry.TryGetComponent<StaticComponent>(firstEntity);
+
+                if (staticComp->persistentInstanceAddress == 0) {
+                    // 首次分配
+                    uint32_t dataSize = static_cast<uint32_t>(instances.size() * sizeof(InstanceData));
+                    instanceBuffer = m_frameResourceManager->AllocatePersistentInstanceBuffer(
+                        instances.data(), dataSize);
+                    staticComp->persistentInstanceAddress = instanceBuffer;
+                    staticComp->worldDirty = false;
+                } else {
+                    // 检查脏标记，仅更新变化的数据
+                    if (staticComp->worldDirty) {
+                        uint32_t dataSize = static_cast<uint32_t>(instances.size() * sizeof(InstanceData));
+                        m_frameResourceManager->UpdatePersistentBuffer(
+                            staticComp->persistentInstanceAddress,
+                            instances.data(), dataSize);
+                        staticComp->worldDirty = false;
+                    }
+                    instanceBuffer = staticComp->persistentInstanceAddress;
+                }
+            } else {
+                // 动态批次：每帧使用环形缓冲区
+                instanceBuffer = m_frameResourceManager->AllocateInstance(
+                    instances.data(), instances.size() * sizeof(InstanceData));
+            }
 
             OpaqueRenderItem item = OpaqueRenderItem::CreateInstanced(key.geometry, key.materialIdx, textureSRV,
                                                                       instanceBuffer, (uint32_t)instances.size());
             outInstanced.Add(item);
         } else {
-            // 单物体模式 → Standard 队列
-            for (auto &instData : instances) {
+            // ================================================================
+            // 单物体模式
+            // ================================================================
+            for (size_t i = 0; i < instances.size(); ++i) {
+                auto &instData = instances[i];
+                Entity entity = entry.entities[i];
+
                 ObjectConstants objCB;
                 objCB.World = instData.World;
                 objCB.WorldInvTranspose = instData.WorldInvTranspose;
                 objCB.MaterialIndex = instData.MaterialIndex;
                 objCB.ReceiveShadow = instData.ReceiveShadow;
 
-                D3D12_GPU_VIRTUAL_ADDRESS cbAddress =
-                    m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
+                D3D12_GPU_VIRTUAL_ADDRESS cbAddress;
+
+                if (key.isStatic) {
+                    auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
+
+                    if (staticComp->persistentCBAddress == 0) {
+                        // 首次分配持久化 CB
+                        cbAddress = m_frameResourceManager->AllocatePersistentObjectCB(
+                            &objCB, sizeof(ObjectConstants));
+                        staticComp->persistentCBAddress = cbAddress;
+                        staticComp->worldDirty = false;
+                    } else {
+                        // 脏标记：仅更新变化的数据
+                        if (staticComp->worldDirty) {
+                            m_frameResourceManager->UpdatePersistentBuffer(
+                                staticComp->persistentCBAddress, &objCB, sizeof(ObjectConstants));
+                            staticComp->worldDirty = false;
+                        }
+                        cbAddress = staticComp->persistentCBAddress;
+                    }
+                } else {
+                    // 动态物体：每帧使用环形缓冲区
+                    cbAddress = m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
+                }
 
                 OpaqueRenderItem item =
                     OpaqueRenderItem::CreateStandard(key.geometry, key.materialIdx, textureSRV, cbAddress);

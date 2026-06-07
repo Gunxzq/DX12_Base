@@ -3,6 +3,7 @@
 #include "RingBuffer.h"
 #include "Struct/FrameResourceTypes.h"
 #include <d3d12.h>
+#include <unordered_map>
 #include <wrl/client.h>
 
 namespace DX12Engine {
@@ -46,7 +47,7 @@ public:
     void UpdatePassConstants(); // 将 m_passConstants 拷贝到 GPU
 
     // ========================================================================
-    // 环形缓冲区分配接口
+    // 环形缓冲区分配接口（每帧动态分配）
     // ========================================================================
 
     D3D12_GPU_VIRTUAL_ADDRESS AllocateObjectCB(const void *data, uint32_t size);
@@ -55,6 +56,20 @@ public:
     D3D12_GPU_VIRTUAL_ADDRESS AllocateWaterCB(const void *data, uint32_t size);
 
     void *GetCPUAddress(uint32_t offset);
+
+    // ========================================================================
+    // 持久化缓冲区（静态实体，分配后不随帧回收）
+    // ========================================================================
+
+    /// 分配持久化缓冲区（独立于环形缓冲区，不受 Reclaim 影响）
+    D3D12_GPU_VIRTUAL_ADDRESS AllocatePersistentObjectCB(const void *data, uint32_t size);
+    D3D12_GPU_VIRTUAL_ADDRESS AllocatePersistentInstanceBuffer(const void *data, uint32_t size);
+
+    /// 更新已分配的持久化缓冲区内容
+    void UpdatePersistentBuffer(D3D12_GPU_VIRTUAL_ADDRESS address, const void *data, uint32_t size);
+
+    /// 释放持久化缓冲区（实体销毁时调用）
+    void ReleasePersistentBuffer(D3D12_GPU_VIRTUAL_ADDRESS address);
 
     // ========================================================================
     // 临时描述符（从 DescriptorHeapCollection 分配）
@@ -79,6 +94,21 @@ private:
     D3D12_GPU_VIRTUAL_ADDRESS AllocateWithRetry(RingBuffer &buffer, const void *data, uint32_t size, uint64_t fence);
 
     void CreatePassCB(ID3D12Device *device);
+
+    // ========================================================================
+    // 持久化缓冲管理
+    // ========================================================================
+
+    struct PersistentAllocation {
+        Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+        void *mappedData = nullptr;
+        D3D12_GPU_VIRTUAL_ADDRESS gpuAddress = 0;
+        uint32_t size = 0;
+    };
+
+    std::unordered_map<D3D12_GPU_VIRTUAL_ADDRESS, PersistentAllocation> m_persistentAllocs;
+
+    D3D12_GPU_VIRTUAL_ADDRESS AllocatePersistentInternal(const void *data, uint32_t size);
 
     ID3D12Device *m_device = nullptr;
     Resource::DescriptorHeapCollection *m_descriptorHeaps = nullptr;

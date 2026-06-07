@@ -149,20 +149,31 @@ void GameWorld::Clear() {
     if (!m_registry)
         return;
 
+    // 辅助 lambda：销毁实体前释放持久化 GPU 资源
+    auto DestroyEntityWithCleanup = [this](ECS::Entity entity) {
+        if (entity == INVALID_ENTITY) return;
+        auto* staticComp = m_registry->TryGetComponent<ECS::StaticComponent>(entity);
+        if (staticComp) {
+            if (staticComp->persistentCBAddress != 0) {
+                m_context->FrameResourceManager->ReleasePersistentBuffer(staticComp->persistentCBAddress);
+            }
+            if (staticComp->persistentInstanceAddress != 0) {
+                m_context->FrameResourceManager->ReleasePersistentBuffer(staticComp->persistentInstanceAddress);
+            }
+        }
+        m_registry->DestroyEntity(entity);
+    };
+
     // 移除所有测试立方体
     for (auto entity : m_cubeEntities) {
-        if (entity != INVALID_ENTITY) {
-            m_registry->DestroyEntity(entity);
-        }
+        DestroyEntityWithCleanup(entity);
     }
     m_cubeEntities.clear();
     m_cubeEntity = INVALID_ENTITY;
 
     // 移除地面平面
-    if (m_groundPlaneEntity != INVALID_ENTITY) {
-        m_registry->DestroyEntity(m_groundPlaneEntity);
-        m_groundPlaneEntity = INVALID_ENTITY;
-    }
+    DestroyEntityWithCleanup(m_groundPlaneEntity);
+    m_groundPlaneEntity = INVALID_ENTITY;
 }
 
 void GameWorld::RegisterBuilderSystems() {
@@ -354,6 +365,8 @@ void GameWorld::CreateGroundPlane() {
     meshComp.receivesShadow = true;
     m_registry->AddComponent<MeshComponent>(m_groundPlaneEntity, std::move(meshComp));
 
+    m_registry->AddComponent<StaticComponent>(m_groundPlaneEntity);
+
     OutputDebugStringW(L"[GameWorld] Ground plane created at Y=60.0 (10x10)\n");
 }
 
@@ -474,6 +487,8 @@ void GameWorld::CreateTestCube() {
         meshComp.materialHandle = m_cubeMaterialHandle;
         meshComp.textureHandle = m_testTextureHandle;
         m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
+
+        m_registry->AddComponent<StaticComponent>(entity);
 
         m_cubeEntities.push_back(entity);
     }
@@ -1239,6 +1254,8 @@ void GameWorld::CreateWater() {
     meshComp.textureHandle = m_waterTextureHandle;
     m_registry->AddComponent<TransparentMeshComponent>(m_waterEntity, std::move(meshComp));
 
+    m_registry->AddComponent<StaticComponent>(m_waterEntity);
+
     // 绘制调用
     RegisterWaterRenderSystem();
 }
@@ -1720,6 +1737,8 @@ void GameWorld::RegisterTerrainSystems() {
                  terrainComp.heightScale = m_terrainLoadData ? m_terrainLoadData->maxHeight : 20.0f;
                  reg.AddComponent<ECS::TerrainComponent>(entity, std::move(terrainComp));
 
+                 reg.AddComponent<ECS::StaticComponent>(entity);
+
                  m_context->Logging->Info("[TerrainCombine] Entity created: entity={}, request={}, geoHandle={}, "
                                           "heightMapHandle={}, albedoHandle={}",
                                           static_cast<uint32_t>(entity), requestId, m_terrainGeometryHandle.index,
@@ -2107,6 +2126,9 @@ void GameWorld::CreateBillboardTrees() {
         billboardComp.textureArrayIndex = i % m_billboardTotalSlices;
 
         m_registry->AddComponent<BillboardComponent>(entity, std::move(billboardComp));
+
+        m_registry->AddComponent<StaticComponent>(entity);
+
         m_billboardEntities.push_back(entity);
     }
 

@@ -34,7 +34,13 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
     }
 
     // 所有公告牌共享同一个 Texture2DArray，通过实例数据中的 TextureArrayIndex 区分切片
-    std::vector<BillboardInstanceData> instances;
+    // 按 isStatic 分两组
+    struct BatchEntry {
+        std::vector<BillboardInstanceData> instances;
+        Entity firstEntity = INVALID_ENTITY; // 用于静态批次的持久化地址
+    };
+    BatchEntry staticBatch;
+    BatchEntry dynamicBatch;
 
     for (auto entity : m_cullingResult->visibleEntities) {
         auto *billboardComp = registry.TryGetComponent<BillboardComponent>(entity);
@@ -71,24 +77,60 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
         inst.MaterialIndex = m_materialManager->GetGPUIndex(billboardComp->materialHandle);
         inst.Pad = 0.0f;
 
-        instances.push_back(inst);
+        auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
+        if (staticComp) {
+            if (staticBatch.firstEntity == INVALID_ENTITY)
+                staticBatch.firstEntity = entity;
+            staticBatch.instances.push_back(inst);
+        } else {
+            dynamicBatch.instances.push_back(inst);
+        }
     }
 
-    if (instances.empty())
-        return;
+    // 处理静态公告牌批次
+    if (!staticBatch.instances.empty()) {
+        D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress;
+        auto *staticComp = registry.TryGetComponent<StaticComponent>(staticBatch.firstEntity);
 
-    // 上传实例数据到 GPU
-    D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = m_frameResourceManager->AllocateInstance(
-        instances.data(), static_cast<uint32_t>(instances.size() * sizeof(BillboardInstanceData)));
+        if (staticComp->persistentInstanceAddress == 0) {
+            // 首次分配持久化实例缓冲区
+            uint32_t dataSize = static_cast<uint32_t>(staticBatch.instances.size() * sizeof(BillboardInstanceData));
+            instanceBufferAddress = m_frameResourceManager->AllocatePersistentInstanceBuffer(
+                staticBatch.instances.data(), dataSize);
+            staticComp->persistentInstanceAddress = instanceBufferAddress;
+            staticComp->worldDirty = false;
+        } else {
+            if (staticComp->worldDirty) {
+                uint32_t dataSize = static_cast<uint32_t>(staticBatch.instances.size() * sizeof(BillboardInstanceData));
+                m_frameResourceManager->UpdatePersistentBuffer(
+                    staticComp->persistentInstanceAddress,
+                    staticBatch.instances.data(), dataSize);
+                staticComp->worldDirty = false;
+            }
+            instanceBufferAddress = staticComp->persistentInstanceAddress;
+        }
 
-    if (instanceBufferAddress == 0)
-        return;
+        if (instanceBufferAddress != 0) {
+            BillboardRenderItem item;
+            item.instanceBufferAddress = instanceBufferAddress;
+            item.instanceCount = static_cast<uint32_t>(staticBatch.instances.size());
+            outQueue.Add(item);
+        }
+    }
 
-    BillboardRenderItem item;
-    item.instanceBufferAddress = instanceBufferAddress;
-    item.instanceCount = static_cast<uint32_t>(instances.size());
+    // 处理动态公告牌批次
+    if (!dynamicBatch.instances.empty()) {
+        D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = m_frameResourceManager->AllocateInstance(
+            dynamicBatch.instances.data(),
+            static_cast<uint32_t>(dynamicBatch.instances.size() * sizeof(BillboardInstanceData)));
 
-    outQueue.Add(item);
+        if (instanceBufferAddress != 0) {
+            BillboardRenderItem item;
+            item.instanceBufferAddress = instanceBufferAddress;
+            item.instanceCount = static_cast<uint32_t>(dynamicBatch.instances.size());
+            outQueue.Add(item);
+        }
+    }
 }
 
 } // namespace DX12Engine::Renderer
