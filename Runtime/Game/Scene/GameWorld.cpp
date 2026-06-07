@@ -167,69 +167,41 @@ void GameWorld::Clear() {
 
 void GameWorld::RegisterBuilderSystems() {
     // =========================================================================
-    // 每个构建器注册为独立的 System，在 PreRender 阶段并行执行
-    // TaskGraph 会自动调度同阶段内无依赖的 Task 并行运行
+    // 所有构建器合并在一个 System 中串行执行，避免 RingBuffer 多线程竞争
     // =========================================================================
 
-    // 1. 不透明构建器（双队列：Standard + Instanced）
     SystemRegistry::Register({
-        .name = "OpaqueBuilder",
+        .name = "RenderBuilders",
         .func =
             [this](Registry &reg, const MessageContext &) {
+                // 1. 不透明构建器（双队列：Standard + Instanced）
                 m_opaqueBuilder->SetCullingResult(&m_context->cullingResult);
                 m_opaqueBuilder->SetLODResult(&m_context->lodResult);
                 m_opaqueBuilder->BuildDualQueue(reg, m_opaqueQueueStandard, m_opaqueQueueInstanced);
-            },
-        .phase = TaskPhase::PreRender,
-        .threadType = ThreadType::Worker,
-        .alwaysRun = true,
-    });
 
-    // 2. 透明构建器（远到近排序，需要相机位置）
-    SystemRegistry::Register({
-        .name = "TransparentBuilder",
-        .func =
-            [this](Registry &reg, const MessageContext &) {
+                // 2. 透明构建器（远到近排序，需要相机位置）
                 m_transparentBuilder->SetCullingResult(&m_context->cullingResult);
                 m_transparentBuilder->SetLODResult(&m_context->lodResult);
                 m_transparentBuilder->BuildTyped(reg, m_transparentQueue);
-            },
-        .phase = TaskPhase::PreRender,
-        .threadType = ThreadType::Worker,
-        .alwaysRun = true,
-    });
 
-    // 3. 公告牌构建器（需要相机位置做朝向计算）
-    if (m_billboardBuilder) {
-        SystemRegistry::Register({
-            .name = "BillboardBuilder",
-            .func =
-                [this](Registry &reg, const MessageContext &) {
+                // 3. 公告牌构建器（需要相机位置做朝向计算）
+                if (m_billboardBuilder) {
                     m_billboardBuilder->SetCullingResult(&m_context->cullingResult);
                     m_billboardBuilder->SetLODResult(&m_context->lodResult);
                     m_billboardBuilder->SetCameraPosition(m_context->CameraMgr->GetMainCamera().Position);
                     m_billboardBuilder->BuildTyped(reg, m_billboardQueue);
-                },
-            .phase = TaskPhase::PreRender,
-            .threadType = ThreadType::Worker,
-            .alwaysRun = true,
-        });
-    }
+                }
 
-    // 4. 地形构建器
-    if (m_terrainBuilder) {
-        SystemRegistry::Register({
-            .name = "TerrainBuilder",
-            .func =
-                [this](Registry &reg, const MessageContext &) {
+                // 4. 地形构建器
+                if (m_terrainBuilder) {
                     m_terrainBuilder->SetCullingResult(&m_context->cullingResult);
                     m_terrainBuilder->BuildTyped(reg, m_terrainQueue);
-                },
-            .phase = TaskPhase::PreRender,
-            .threadType = ThreadType::Worker,
-            .alwaysRun = true,
-        });
-    }
+                }
+            },
+        .phase = TaskPhase::PreRender,
+        .threadType = ThreadType::Worker,
+        .alwaysRun = true,
+    });
 }
 
 void GameWorld::RegisterWaterConstantsCallback() {

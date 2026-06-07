@@ -70,8 +70,8 @@ public:
     void LoadBillboardTextures();
     void CreateBillboardTrees();
 
-    // 每帧 PreRender 阶段：收集实体并构建渲染队列
-    void BuildRenderQueue();
+    // 注册构建器 System（PreRender 阶段并行执行）
+    void RegisterBuilderSystems();
 
     // 注册水常量立即回调（每帧上传水波动画数据）
     void RegisterWaterConstantsCallback();
