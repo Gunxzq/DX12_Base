@@ -21,6 +21,7 @@ public:
 
     // 描述符槽管理
     uint32_t Allocate();
+    uint32_t AllocateConsecutive(uint32_t count);  // 分配 count 个连续槽位，返回起始索引
     void Free(uint32_t index, uint64_t fenceValue);
     void Reclaim(uint64_t completedFence);
 

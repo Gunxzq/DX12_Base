@@ -6,6 +6,7 @@
 #include "Renderer/RenderItemBuilder/BillboardRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/OpaqueRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/TRenderQueue.h"
+#include "Renderer/RenderItemBuilder/TerrainRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/TransparentRenderItemBuilder.h"
 #include "Resource/AssetLoader/Loader/TerrainLoader.h"
 #include "Resource/Struct/GeometryHandle.h"
@@ -32,6 +33,7 @@ class SkyRenderer;
 class WaterRenderer;
 class ShadowRenderer;
 class BillboardRenderer;
+class TerrainRenderer;
 } // namespace Renderer
 } // namespace DX12Engine
 
@@ -74,6 +76,9 @@ public:
     // 注册水常量立即回调（每帧上传水波动画数据）
     void RegisterWaterConstantsCallback();
 
+    // 注册地形常量立即回调（LightManager 模式：Immediate 中分配+上传地形常量）
+    void RegisterTerrainImmediateCallback();
+
     // 注册阴影渲染系统
     void RegisterShadowRenderSystem();
 
@@ -89,6 +94,7 @@ private:
     void RegisterSkyboxSystem();
     void RegisterWaterRenderSystem();
     void RegisterBillboardRenderSystem();
+    void RegisterTerrainRenderSystem();
 
     // 注册地形异步加载响应 System
     // 架构：后台线程完成所有 GPU 资源创建 + 上传，主线程只注册句柄 + 创建 ECS 实体
@@ -115,6 +121,7 @@ private:
     std::unique_ptr<DX12Engine::Renderer::SkyRenderer> m_skyRenderer; // 天空盒渲染器
     std::unique_ptr<DX12Engine::Renderer::WaterRenderer> m_waterRenderer;
     std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer; // 阴影渲染器
+    std::unique_ptr<DX12Engine::Renderer::TerrainRenderer> m_terrainRenderer; // 地形渲染器
 
     // 构建器和双队列（Standard 和 Instanced 分离，避免 PSO 切换）
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderItemBuilder> m_opaqueBuilder;
@@ -123,6 +130,9 @@ private:
 
     std::unique_ptr<DX12Engine::Renderer::TransparentRenderItemBuilder> m_transparentBuilder;
     DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::TransparentRenderItem> m_transparentQueue;
+
+    std::unique_ptr<DX12Engine::Renderer::TerrainRenderItemBuilder> m_terrainBuilder;
+    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::TerrainRenderItem> m_terrainQueue;
 
     DX12Engine::Resource::TextureHandle m_testTextureHandle; // 存储纹理句柄
     DX12Engine::Resource::MaterialHandle m_cubeMaterialHandle;
@@ -143,6 +153,7 @@ private:
     DX12Engine::Resource::GeometryHandle m_terrainGeometryHandle;
     DX12Engine::Resource::MaterialHandle m_terrainMaterialHandle;
     DX12Engine::Resource::TextureHandle m_terrainTextureHandle = DX12Engine::Resource::TextureHandle::Invalid();
+    DX12Engine::Resource::TextureHandle m_terrainAlbedoHandle = DX12Engine::Resource::TextureHandle::Invalid();
     DX12Engine::ECS::Entity m_terrainEntity;
 
     // 地形异步加载状态（后台线程写入 GPU 资源，主线程读取后注册句柄）

@@ -26,6 +26,7 @@ public:
     uint32_t GetDescriptorSize(DescriptorHeapType type) const;
 
     uint32_t Allocate(DescriptorHeapType type);
+    uint32_t AllocateConsecutive(DescriptorHeapType type, uint32_t count);
     void Free(DescriptorHeapType type, uint32_t index, uint64_t fenceValue);
     void Reclaim(DescriptorHeapType type, uint64_t completedFence);
 

@@ -19,6 +19,7 @@
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/Pipeline/ShadowRenderer.h"
 #include "Renderer/Pipeline/SkyRenderer.h"
+#include "Renderer/Pipeline/TerrainRenderer.h"
 #include "Renderer/Pipeline/WaterRenderer.h"
 
 #include "Renderer/RHI/Command/CommandManager.h"
@@ -31,6 +32,7 @@
 #include "Resource/AssetLoader/Loader/DDSLoader.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Geometry/GridGeometry.h"
+#include "Resource/Geometry/PatchMesh.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
@@ -43,6 +45,8 @@
 #include "Async/BackgroundExecutor.h"
 #include "Async/ResourceTransitionTask.h"
 #include "Async/TerrainLoadTask.h"
+
+#include "Renderer/Scene/TerrainManager/TerrainManager.h"
 
 #include <DirectXMath.h>
 #include <wrl/client.h>
@@ -87,6 +91,20 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_shadowRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
     m_shadowRenderer->Initialize();
 
+    // 初始化地形渲染器（曲面细分 PSO）
+    m_terrainRenderer = std::make_unique<TerrainRenderer>();
+    m_terrainRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_terrainRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
+    m_terrainRenderer->SetMaterialManager(m_context->MaterialMgr);
+    m_terrainRenderer->Initialize();
+
+    // 初始化地形常量缓冲区管理器
+    TerrainManager::GetInstance().Initialize(m_context->DeviceContext->GetDevice());
+
+    // 初始化地形渲染项构建器
+    m_terrainBuilder =
+        std::make_unique<TerrainRenderItemBuilder>(m_context->FrameResourceManager, m_context->TextureMgr);
+
     LoadTestTexture();
     LoadWaterTexture();
 
@@ -114,8 +132,14 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     // 注册水常量立即回调（每帧上传水波动画数据）
     RegisterWaterConstantsCallback();
 
+    // 注册地形常量立即回调（LightManager 模式：Immediate 中分配+上传地形常量）
+    RegisterTerrainImmediateCallback();
+
     // 注册阴影渲染系统
     RegisterShadowRenderSystem();
+
+    // 注册地形渲染系统
+    RegisterTerrainRenderSystem();
 }
 
 void GameWorld::Clear() {
@@ -164,6 +188,12 @@ void GameWorld::BuildRenderQueue() {
         m_billboardBuilder->SetCameraPosition(camera.Position);
         m_billboardBuilder->BuildTyped(*m_registry, m_billboardQueue);
     }
+
+    // 构建地形队列
+    if (m_terrainBuilder) {
+        m_terrainBuilder->SetCullingResult(&m_context->cullingResult);
+        m_terrainBuilder->BuildTyped(*m_registry, m_terrainQueue);
+    }
 }
 
 void GameWorld::RegisterWaterConstantsCallback() {
@@ -191,13 +221,60 @@ void GameWorld::RegisterWaterConstantsCallback() {
     });
 }
 
+void GameWorld::RegisterTerrainImmediateCallback() {
+    if (!m_context || !m_context->FrameDriver || !m_registry)
+        return;
+
+    m_context->FrameDriver->RegisterImmediateCallback(
+        [this]() {
+            auto &terrainMgr = TerrainManager::GetInstance();
+
+            // 收集所有可见地形块的 TerrainConstants
+            // 注意：此时尚未做剔除，我们遍历所有 TerrainComponent
+            // 如果后续有剔除需求，可以只上传可见块
+            std::vector<TerrainConstants> pendingConstants;
+            pendingConstants.reserve(16);
+
+            auto view = m_registry->view<TerrainComponent>();
+            for (auto entity : view) {
+                auto *terrainComp = m_registry->TryGetComponent<TerrainComponent>(entity);
+                if (!terrainComp || !terrainComp->geometryHandle.IsValid())
+                    continue;
+
+                TerrainConstants constants = {};
+                DirectX::XMStoreFloat4x4(&constants.World, DirectX::XMMatrixIdentity());
+                DirectX::XMStoreFloat4x4(&constants.WorldInvTranspose, DirectX::XMMatrixIdentity());
+                DirectX::XMStoreFloat4x4(&constants.PrevWorld, DirectX::XMMatrixIdentity());
+                constants.MaterialIndex = terrainComp->materialIndex;
+                constants.ReceiveShadow = 1;
+                constants.HeightScale = terrainComp->heightScale;
+                constants.HeightOffset = terrainComp->heightOffset;
+                constants.TessellationFactor = terrainComp->tessellationFactor;
+                constants.TessellationDistanceMin = terrainComp->tessellationDistanceMin;
+                constants.TessellationDistanceMax = terrainComp->tessellationDistanceMax;
+                constants.HeightMapIndex = 0;          // 高度图 — gTerrainTextures[0] (H_Runtime_heightmap)
+                constants.AlbedoMapIndex = 1;          // 漫反射 — gTerrainTextures[1] (D_heightmap)
+                constants.NormalMapIndex = 0xFFFFFFFF; // 暂无独立法线贴图
+
+                pendingConstants.push_back(constants);
+            }
+
+            // 设置待上传数据并一次性分配+上传
+            if (!pendingConstants.empty()) {
+                terrainMgr.SetPendingConstants(std::move(pendingConstants));
+                terrainMgr.UpdateAndUpload(m_context->GetNextFence());
+            }
+        },
+        "TerrainImmediate");
+}
+
 void GameWorld::CreateGroundPlane() {
     if (!m_registry || !m_renderer || !m_context)
         return;
 
     // 1. 生成 10x10 平面几何体（XZ 平面，法线朝上）
     GeometryGenerator geoGen;
-    auto meshData = geoGen.CreateGrid(10.0f, 10.0f, 10, 10); // 10x10 平面，2x2 顶点
+    auto meshData = geoGen.CreateGrid(10.0f, 10.0f, 10, 10);
 
     // 2. 创建 GPU 资源
     auto &gpuMgr = GpuResourceManager::GetInstance();
@@ -238,7 +315,7 @@ void GameWorld::CreateGroundPlane() {
 
     // 包围盒：10x10 平面在 XZ，Y=0
     BoundingAABB bounds;
-    bounds.min = XMFLOAT3(-5.0f, 0.0f, -5.0f);
+    bounds.min = XMFLOAT3(-5.0f, 20.0f, -5.0f);
     bounds.max = XMFLOAT3(5.0f, 0.0f, 5.0f);
 
     auto &geoMgr = m_context->GeometryResourceManager;
@@ -253,10 +330,10 @@ void GameWorld::CreateGroundPlane() {
     lodMesh.lodChain = {geoHandle};
     LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
 
-    // 5. 创建实体 — 平面放在 Y=5.0f，立方体底部与之重合
+    // 5. 创建实体 — 平面抬高到远离水面（水面 Y=0，地形 Y=-30）
     m_groundPlaneEntity = m_registry->CreateEntity();
 
-    XMFLOAT3 position(0.0f, 10.0f, 0.0f);
+    XMFLOAT3 position(0.0f, 30.0f, 0.0f);
     XMFLOAT3 rotation(0.0f, 0.0f, 0.0f);
     XMFLOAT3 scale(1.0f, 1.0f, 1.0f);
     m_registry->AddComponent<TransformComponent>(m_groundPlaneEntity, position, rotation, scale);
@@ -269,7 +346,7 @@ void GameWorld::CreateGroundPlane() {
     meshComp.receivesShadow = true;
     m_registry->AddComponent<MeshComponent>(m_groundPlaneEntity, std::move(meshComp));
 
-    OutputDebugStringW(L"[GameWorld] Ground plane created at Y=5.0 (10x10)\n");
+    OutputDebugStringW(L"[GameWorld] Ground plane created at Y=60.0 (10x10)\n");
 }
 
 void GameWorld::CreateTestCube() {
@@ -342,8 +419,8 @@ void GameWorld::CreateTestCube() {
         return;
     }
 
-    // 平面在 Y=5.0f，立方体底部 = 平面Y + 立方体半高 = 5.0 + scale*0.5
-    constexpr float PLANE_Y = 10.0f;
+    // 立方体抬高到远离水面（水面 Y=0，地形 Y=-30）
+    constexpr float PLANE_Y = 30.0f;
 
     struct CubePlacement {
         XMFLOAT3 position;
@@ -1101,7 +1178,7 @@ void GameWorld::CreateWater() {
     // 计算包围盒
     BoundingAABB bounds;
     bounds.min = XMFLOAT3(-128.0f, 0.0f, -128.0f);
-    bounds.max = XMFLOAT3(128.0f, 0.0f, 128.0f);
+    bounds.max = XMFLOAT3(128.0f, 0.1f, 128.0f);
 
     auto &geoMgr = m_context->GeometryResourceManager;
     GeometryHandle geoHandle = geoMgr->RegisterGeometry<GridGeometry>(waterMesh);
@@ -1114,7 +1191,7 @@ void GameWorld::CreateWater() {
     // 5. 创建实体
     m_waterEntity = m_registry->CreateEntity();
 
-    XMFLOAT3 position(0.0f, 0.0f, 0.0f); // 在地形高度范围内
+    XMFLOAT3 position(0.0f, 10.0f, 0.0f); // 水面在地形上方，确保可见
     XMFLOAT3 rotation(0.0f, 0.0f, 0.0f);
     XMFLOAT3 scale(1.0f, 1.0f, 1.0f);
     m_registry->AddComponent<TransformComponent>(m_waterEntity, position, rotation, scale);
@@ -1200,7 +1277,7 @@ void GameWorld::RegisterWaterRenderSystem() {
                  cmdList.Get()->ResourceBarrier(1, &barrier);
 
                  cmdList.Close();
-                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Billboard, cmdListHandle);
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Transparent, cmdListHandle);
 
                  uint64_t sequence = m_context->GetNextSequence();
                  m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
@@ -1208,7 +1285,7 @@ void GameWorld::RegisterWaterRenderSystem() {
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Render,
          .priority = TaskPriority::Normal,
-         .renderPhase = RenderPhase::Billboard,
+         .renderPhase = RenderPhase::Transparent,
          .alwaysRun = true});
 }
 
@@ -1350,8 +1427,11 @@ void GameWorld::LoadTerrainAsync() {
     // 创建后台任务（CPU 加载 + GPU 资源创建 + 上传录制 + 注册 GpuWorkItem）
     // 此时并没有执行任何 GPU 操作，只是创建了任务和数据结构
     Async::TerrainLoadDataPtr terrainData;
-    auto loadTask = Async::TerrainLoadTaskFactory::Create(requestId, L"Content/Terrain/heightmap.png", 256.0f, 256.0f,
-                                                          20.0f, 257, terrainData, input);
+    // H_Source_heightmap.png: 1280 灰度图，用于 CPU 端顶点生成
+    // H_Runtime_heightmap.dds: 256x256 DDS，用于 GPU 端 DS 顶点置换
+    // D_heightmap.dds: 1280x1280 DDS，用于 PS 漫反射采样
+    auto loadTask = Async::TerrainLoadTaskFactory::Create(requestId, L"Content/Terrain/H_Source_heightmap.png", 256.0f,
+                                                          256.0f, 20.0f, 256, terrainData, input);
     m_terrainLoadData = terrainData; // 传递指针
 
     // 提交到 BackgroundExecutor
@@ -1418,63 +1498,135 @@ void GameWorld::RegisterTerrainSystems() {
                  }
 
                  // ── 注册 GeometryHandle（主线程，非线程安全 API）──
-                 Resource::TriangleMesh mesh;
+                 uint32_t indexCount = static_cast<uint32_t>(m_terrainLoadData->indices.size());
+
+                 Resource::PatchMesh mesh;
                  mesh.vertexBufferHandle = state.vbHandle;
                  mesh.indexBufferHandle = state.ibHandle;
                  mesh.vertexCount = static_cast<uint32_t>(m_terrainLoadData->vertices.size());
-                 mesh.indexCount = static_cast<uint32_t>(m_terrainLoadData->indices.size());
+                 mesh.indexCount = indexCount;
+                 mesh.patchCount = indexCount / 4; // 四边形面片，4 索引/patch
                  mesh.vertexStride = sizeof(GeometryGenerator::Vertex);
                  mesh.indexFormat = DXGI_FORMAT_R32_UINT;
-                 mesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+                 mesh.patchType = Resource::PatchType::Quad;
                  mesh.isGpuReady = true;
                  mesh.localBounds = state.bounds;
 
                  auto geoMgr = m_context->GeometryResourceManager;
-                 auto handle = geoMgr->RegisterGeometry<TriangleMesh>(mesh);
+                 auto handle = geoMgr->RegisterGeometry<PatchMesh>(mesh);
                  m_terrainGeometryHandle = handle;
                  m_context->Logging->Info("[TerrainGPUCreate] Geometry registered: handle(idx={}, gen={})",
                                           handle.index, handle.generation);
 
                  // ── 处理纹理：分配 SRV + 创建 SRV + 注册 TextureHandle ──
                  // BackgroundExecutor 已保证 GPU 工作完成（COPY + DIRECT + fence wait）
-                 // textureCreated 由 onComplete 回调设置
-                 if (!m_terrainTextureHandle.IsValid() && state.textureCreated.load(std::memory_order_acquire)) {
-                     if (state.textureGpuHandle.IsValid()) {
-                         // 分配 SRV 描述符（主线程，非线程安全 API）
-                         auto &descriptorHeaps = m_context->DescriptorHeaps;
-                         uint32_t srvIndex = descriptorHeaps->Allocate(Resource::DescriptorHeapType::CbvSrvUav);
-                         if (srvIndex != UINT32_MAX) {
-                             auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
+                 //
+                 // 高度图 (t0) + 漫反射 (t1) 需要连续描述符，因为 slot 4 的
+                 // descriptor table 从 heightMapSRV 开始连续 8 个槽位。
+                 // 我们一次性分配两个连续的 SRV 索引。
+                 if ((!m_terrainTextureHandle.IsValid() && state.heightMapCreated.load(std::memory_order_acquire)) ||
+                     (!m_terrainAlbedoHandle.IsValid() && state.albedoCreated.load(std::memory_order_acquire))) {
 
-                             // 创建 SRV（主线程），使用 DDS 解析出的完整纹理描述
+                     auto &descriptorHeaps = m_context->DescriptorHeaps;
+                     ID3D12Device *device = m_context->DeviceContext->GetDevice();
+                     auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
+                     auto *texMgr = m_context->TextureMgr;
+
+                     bool needHeight = !m_terrainTextureHandle.IsValid() &&
+                                       state.heightMapCreated.load(std::memory_order_acquire) &&
+                                       state.heightMapGpuHandle.IsValid();
+                     bool needAlbedo = !m_terrainAlbedoHandle.IsValid() &&
+                                       state.albedoCreated.load(std::memory_order_acquire) &&
+                                       state.albedoGpuHandle.IsValid();
+
+                     if (needHeight && needAlbedo) {
+                         // 两纹理都需要：使用 AllocateConsecutive(2) 确保描述符连续
+                         uint32_t baseSrvIdx =
+                             descriptorHeaps->AllocateConsecutive(Resource::DescriptorHeapType::CbvSrvUav, 2);
+                         if (baseSrvIdx != UINT32_MAX) {
+                             uint32_t heightSrvIdx = baseSrvIdx;
+                             uint32_t albedoSrvIdx = baseSrvIdx + 1;
+
+                             // 创建高度图 SRV (t0)
                              D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                             srvDesc.Format = state.textureDesc.Format;
+                             srvDesc.Format = state.heightMapDesc.Format;
                              srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                              srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                              srvDesc.Texture2D.MostDetailedMip = 0;
-                             srvDesc.Texture2D.MipLevels = state.textureDesc.MipLevels;
+                             srvDesc.Texture2D.MipLevels = state.heightMapDesc.MipLevels;
 
                              D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
-                                 descriptorHeaps->GetCpuHandle(Resource::DescriptorHeapType::CbvSrvUav, srvIndex);
-                             ID3D12Device *device = m_context->DeviceContext->GetDevice();
-                             device->CreateShaderResourceView(gpuMgr.GetResource(state.textureGpuHandle), &srvDesc,
+                                 descriptorHeaps->GetCpuHandle(Resource::DescriptorHeapType::CbvSrvUav, heightSrvIdx);
+                             device->CreateShaderResourceView(gpuMgr.GetResource(state.heightMapGpuHandle), &srvDesc,
                                                               cpuHandle);
 
-                             // 注册 TextureHandle（主线程，非线程安全 API）
-                             auto *texMgr = m_context->TextureMgr;
-                             m_terrainTextureHandle = texMgr->RegisterTexture(state.textureGpuHandle, srvIndex);
+                             // 创建漫反射 SRV (t1)
+                             srvDesc.Format = state.albedoDesc.Format;
+                             srvDesc.Texture2D.MipLevels = state.albedoDesc.MipLevels;
+
+                             cpuHandle =
+                                 descriptorHeaps->GetCpuHandle(Resource::DescriptorHeapType::CbvSrvUav, albedoSrvIdx);
+                             device->CreateShaderResourceView(gpuMgr.GetResource(state.albedoGpuHandle), &srvDesc,
+                                                              cpuHandle);
+
+                             m_terrainTextureHandle = texMgr->RegisterTexture(state.heightMapGpuHandle, heightSrvIdx);
+                             m_terrainAlbedoHandle = texMgr->RegisterTexture(state.albedoGpuHandle, albedoSrvIdx);
 
                              m_context->Logging->Info(
-                                 "[TerrainGPUCreate] Texture registered: handle(idx={}, gen={}), SRV idx={}",
-                                 m_terrainTextureHandle.index, m_terrainTextureHandle.generation, srvIndex);
+                                 "[TerrainGPUCreate] Both textures registered: heightMap(idx={}), albedo(idx={})",
+                                 m_terrainTextureHandle.index, m_terrainAlbedoHandle.index);
                          } else {
-                             m_context->Logging->Error("[TerrainGPUCreate] Failed to allocate SRV descriptor");
+                             m_context->Logging->Error("[TerrainGPUCreate] Failed to allocate consecutive SRVs");
                          }
-                     } else {
-                         m_context->Logging->Warn("[TerrainGPUCreate] Texture GPU handle invalid, skipping");
+                     } else if (needHeight) {
+                         uint32_t heightSrvIdx = descriptorHeaps->Allocate(Resource::DescriptorHeapType::CbvSrvUav);
+                         if (heightSrvIdx != UINT32_MAX) {
+                             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                             srvDesc.Format = state.heightMapDesc.Format;
+                             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                             srvDesc.Texture2D.MostDetailedMip = 0;
+                             srvDesc.Texture2D.MipLevels = state.heightMapDesc.MipLevels;
+
+                             D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
+                                 descriptorHeaps->GetCpuHandle(Resource::DescriptorHeapType::CbvSrvUav, heightSrvIdx);
+                             device->CreateShaderResourceView(gpuMgr.GetResource(state.heightMapGpuHandle), &srvDesc,
+                                                              cpuHandle);
+
+                             m_terrainTextureHandle = texMgr->RegisterTexture(state.heightMapGpuHandle, heightSrvIdx);
+                             m_context->Logging->Info("[TerrainGPUCreate] HeightMap registered: handle(idx={})",
+                                                      m_terrainTextureHandle.index);
+                         }
+                     } else if (needAlbedo) {
+                         uint32_t albedoSrvIdx = descriptorHeaps->Allocate(Resource::DescriptorHeapType::CbvSrvUav);
+                         if (albedoSrvIdx != UINT32_MAX) {
+                             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                             srvDesc.Format = state.albedoDesc.Format;
+                             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                             srvDesc.Texture2D.MostDetailedMip = 0;
+                             srvDesc.Texture2D.MipLevels = state.albedoDesc.MipLevels;
+
+                             D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
+                                 descriptorHeaps->GetCpuHandle(Resource::DescriptorHeapType::CbvSrvUav, albedoSrvIdx);
+                             device->CreateShaderResourceView(gpuMgr.GetResource(state.albedoGpuHandle), &srvDesc,
+                                                              cpuHandle);
+
+                             m_terrainAlbedoHandle = texMgr->RegisterTexture(state.albedoGpuHandle, albedoSrvIdx);
+                             m_context->Logging->Info("[TerrainGPUCreate] Albedo registered: handle(idx={})",
+                                                      m_terrainAlbedoHandle.index);
+                         }
                      }
-                 } else if (m_terrainTextureHandle.IsValid()) {
-                     m_context->Logging->Info("[TerrainGPUCreate] Terrain texture already loaded, skipping");
+
+                     // 验证是否注册成功
+                     if (needHeight && !m_terrainTextureHandle.IsValid()) {
+                         m_context->Logging->Error("[TerrainGPUCreate] Failed to allocate SRV for height map");
+                     }
+                     if (needAlbedo && !m_terrainAlbedoHandle.IsValid()) {
+                         m_context->Logging->Error("[TerrainGPUCreate] Failed to allocate SRV for albedo");
+                     }
+                 } else if (m_terrainTextureHandle.IsValid() && m_terrainAlbedoHandle.IsValid()) {
+                     m_context->Logging->Info("[TerrainGPUCreate] Terrain textures already loaded, skipping");
                  }
 
                  // ── 发送 TerrainReady 事件 ──
@@ -1505,17 +1657,11 @@ void GameWorld::RegisterTerrainSystems() {
                      "[TerrainCombine] Triggered by TerrainReady (request={}, handleIdx={}, handleGen={})", requestId,
                      handleIdx, handleGen);
 
-                 // 注册 LODMesh
-                 Resource::LODMesh lodMesh;
-                 lodMesh.lodChain = {m_terrainGeometryHandle};
-                 Resource::LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
-                 m_context->Logging->Info("[TerrainCombine] LODMesh registered: lodHandle idx={}", lodHandle.index);
-
                  // 创建 ECS 实体
                  auto entity = reg.CreateEntity();
                  m_terrainEntity = entity;
 
-                 XMFLOAT3 position(0.0f, -10.0f, 0.0f);
+                 XMFLOAT3 position(0.0f, -50.0f, 0.0f);
                  XMFLOAT3 rotation(0.0f, 0.0f, 0.0f);
                  XMFLOAT3 scale(1.0f, 1.0f, 1.0f);
                  reg.AddComponent<ECS::TransformComponent>(entity, position, rotation, scale);
@@ -1528,17 +1674,18 @@ void GameWorld::RegisterTerrainSystems() {
                      bounds = m_terrainReadyState->bounds;
                  }
 
-                 ECS::MeshComponent meshComp;
-                 meshComp.lodMeshHandle = lodHandle;
-                 meshComp.localBounds = bounds;
-                 meshComp.materialHandle = m_terrainMaterialHandle;
-                 meshComp.textureHandle = m_terrainTextureHandle;
-                 reg.AddComponent<ECS::MeshComponent>(entity, std::move(meshComp));
+                 ECS::TerrainComponent terrainComp;
+                 terrainComp.geometryHandle = m_terrainGeometryHandle;
+                 terrainComp.heightMapHandle = m_terrainTextureHandle;
+                 terrainComp.albedoHandle = m_terrainAlbedoHandle;
+                 terrainComp.localBounds = bounds;
+                 terrainComp.heightScale = m_terrainLoadData ? m_terrainLoadData->maxHeight : 20.0f;
+                 reg.AddComponent<ECS::TerrainComponent>(entity, std::move(terrainComp));
 
                  m_context->Logging->Info("[TerrainCombine] Entity created: entity={}, request={}, geoHandle={}, "
-                                          "texHandle={}, matHandle={}, lodHandle={}",
+                                          "heightMapHandle={}, albedoHandle={}",
                                           static_cast<uint32_t>(entity), requestId, m_terrainGeometryHandle.index,
-                                          m_terrainTextureHandle.index, m_terrainMaterialHandle.index, lodHandle.index);
+                                          m_terrainTextureHandle.index, m_terrainAlbedoHandle.index);
 
                  // 清理状态（句柄已保存到成员变量，不再需要 readyState）
                  m_terrainReadyState.reset();
@@ -1547,6 +1694,86 @@ void GameWorld::RegisterTerrainSystems() {
          .threadType = ThreadType::Main,
          .priority = TaskPriority::Normal,
          .interestedMessages = {static_cast<uint32_t>(Event::EventType::TerrainReadyEvent)}});
+}
+
+void GameWorld::RegisterTerrainRenderSystem() {
+    SystemRegistry::Register(
+        {.name = "TerrainRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 if (m_terrainQueue.Empty()) {
+                     return;
+                 }
+
+                 // 获取命令列表
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+                 // 设置视口、裁剪矩形、渲染目标（复用 Opaque 阶段的深度缓冲区）
+                 auto backBuffer = m_context->GetBackBuffer();
+                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
+                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
+
+                 // 屏障：PRESENT -> RENDER_TARGET（Opaque 阶段结束时已将 BackBuffer 转为 PRESENT）
+                 D3D12_RESOURCE_BARRIER beginBarrier = {};
+                 beginBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 beginBarrier.Transition.pResource = backBuffer;
+                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 beginBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
+
+                 const auto &viewport = m_context->DeviceContext->GetViewport();
+                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
+                 cmdList.Get()->RSSetViewports(1, &viewport);
+                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+                 // 设置描述符堆
+                 ID3D12DescriptorHeap *descriptorHeaps[] = {
+                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+
+                 // 获取通用资源
+                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
+                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
+                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
+
+                 // 开始地形渲染
+                 m_terrainRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
+
+                 // 遍历地形队列
+                 for (const auto &item : m_terrainQueue.GetItems()) {
+                     if (!item.IsValid())
+                         continue;
+                     m_terrainRenderer->DrawTerrain(cmdList, item);
+                 }
+
+                 m_terrainRenderer->EndFrame();
+
+                 // 屏障：RENDER_TARGET -> PRESENT
+                 D3D12_RESOURCE_BARRIER endBarrier = {};
+                 endBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 endBarrier.Transition.pResource = backBuffer;
+                 endBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 endBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+                 endBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &endBarrier);
+
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Terrain, cmdListHandle);
+
+                 uint64_t sequence = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Main,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::Terrain,
+         .alwaysRun = true});
 }
 
 void GameWorld::RegisterShadowRenderSystem() {
@@ -1601,7 +1828,8 @@ void GameWorld::RegisterShadowRenderSystem() {
                  // 开始阴影 Pass
                  // ================================================================
                  //  DSV被设置为渲染目标，深度信息会被写入shadowRes
-                 m_shadowRenderer->BeginOffscreen(cmdList, dirShadowAddr, dsvHandle, shadowRes.resolution, shadowRes.resolution);
+                 m_shadowRenderer->BeginOffscreen(cmdList, dirShadowAddr, dsvHandle, shadowRes.resolution,
+                                                  shadowRes.resolution);
 
                  // ================================================================
                  // 遍历 Standard 队列中的物体，绘制阴影
@@ -1725,8 +1953,8 @@ void GameWorld::LoadBillboardTextures() {
                                                          D3D12_RESOURCE_STATE_COPY_DEST);
     cmdList.Get()->ResourceBarrier(1, &barrier1);
 
-    UINT64 requiredSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
-                                                      static_cast<UINT>(ddsInfo.subresources.size()));
+    UINT64 requiredSize =
+        GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(ddsInfo.subresources.size()));
     GpuResourceHandle uploadHandle =
         gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
@@ -1758,8 +1986,8 @@ void GameWorld::LoadBillboardTextures() {
         m_billboardSliceOffsets[i] = 0;
     }
 
-    m_context->Logging->Info("[GameWorld] Billboard Texture2DArray created: {}x{}, {} slices, SRV index {}",
-                             desc.Width, desc.Height, arraySize, srvIndex);
+    m_context->Logging->Info("[GameWorld] Billboard Texture2DArray created: {}x{}, {} slices, SRV index {}", desc.Width,
+                             desc.Height, arraySize, srvIndex);
 }
 
 void GameWorld::CreateBillboardTrees() {
@@ -1778,7 +2006,7 @@ void GameWorld::CreateBillboardTrees() {
 
     // 在场景中随机放置树公告牌实体
     // 平面在 Y=10.0f，公告牌底部与平面齐平（公告牌中心 Y = 平面Y + 高度/2）
-    constexpr float PLANE_Y = 10.0f;
+    constexpr float PLANE_Y = 30.0f;
     constexpr int TREE_COUNT = 12;
 
     struct TreePlacement {

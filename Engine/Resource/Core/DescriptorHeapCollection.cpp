@@ -140,6 +140,21 @@ uint32_t DescriptorHeapCollection::Allocate(DescriptorHeapType type) {
 }
 
 /**
+ * @brief 分配 count 个连续描述符槽，返回起始索引
+ * @param type 分配的DescriptorHeap类型
+ * @param count 需要的连续槽位数量
+ * @return uint32_t 起始索引，失败返回 UINT32_MAX
+ * @date 2026-06-07
+ */
+uint32_t DescriptorHeapCollection::AllocateConsecutive(DescriptorHeapType type, uint32_t count) {
+    auto it = m_heaps.find(type);
+    if (it == m_heaps.end()) {
+        return UINT32_MAX;
+    }
+    return it->second.allocator->AllocateConsecutive(count);
+}
+
+/**
  * @brief 释放DescriptorHeap的Descriptor
  * @param type
  * @param index 释放的Descriptor索引

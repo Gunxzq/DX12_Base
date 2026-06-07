@@ -67,9 +67,9 @@ struct TerrainComponent {
 
     float heightScale = 20.0f;
     float heightOffset = 0.0f;
-    float tessellationFactor = 8.0f;       // 近距离最大细分因子 (1~64)
-    float tessellationDistanceMin = 5.0f;  // 在此距离内使用最大细分
-    float tessellationDistanceMax = 80.0f; // 超出此距离不再细分
+    float tessellationFactor = 32.0f;      // 近距离最大细分因子 (1~64)
+    float tessellationDistanceMin = 10.0f; // 在此距离内使用最大细分
+    float tessellationDistanceMax = 60.0f; // 超出此距离不再细分
 
     uint32_t materialIndex = 0;
     Math::BoundingVolumeVariant localBounds;

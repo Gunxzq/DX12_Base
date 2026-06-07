@@ -48,9 +48,6 @@ cbuffer cbPerObject : register(b0)
     row_major float4x4 gPrevWorld;
     uint gMaterialIndex;
     uint gReceiveShadow;
-    float2 gObjPad;
-
-    // 地形专用参数
     float gHeightScale;
     float gHeightOffset;
     float gTessellationFactor;
@@ -60,7 +57,7 @@ cbuffer cbPerObject : register(b0)
     uint gAlbedoMapIndex;
     uint gNormalMapIndex;
     float gTerrainPad;
-    float gPadaa[3];
+    float padsss[5];
 }
 
 // ---- cbPass (b1) - 与 Common_PBR.hlsl 完全一致 ----
@@ -188,6 +185,9 @@ HullControlPoint VS(VertexIn vin)
 
 // ============================================================================
 // 常量 Hull Shader - 根据面片到相机的距离计算细分因子 (LOD)
+//   - 使用 fraction_odd 细分模式，消除顶点跳变（蠕动）
+//   - 背面剔除：背对相机的面片直接不细分
+//   - 迟滞区间 (Hysteresis)：避免相机微小移动导致 LOD 跳变
 // ============================================================================
 HullConstantOutput ConstantHS(InputPatch<HullControlPoint, 4> patch, uint patchID : SV_PrimitiveID)
 {
@@ -196,6 +196,14 @@ HullConstantOutput ConstantHS(InputPatch<HullControlPoint, 4> patch, uint patchI
     // 计算面片中心的世界坐标
     float3 centerL = (patch[0].PosL + patch[1].PosL + patch[2].PosL + patch[3].PosL) * 0.25f;
     float3 centerW = mul(float4(centerL, 1.0f), gWorld).xyz;
+
+    // 背面剔除：计算面片法线，如果背对相机则不细分
+    float3 edgeA = patch[1].PosL - patch[0].PosL;
+    float3 edgeB = patch[2].PosL - patch[0].PosL;
+    float3 faceNormal = normalize(cross(edgeA, edgeB));
+    float3 faceCenterW = mul(float4(centerL, 1.0f), gWorld).xyz;
+    float3 viewDir = normalize(gCameraPos - faceCenterW);
+    float ndotv = dot(faceNormal, mul(viewDir, (float3x3)gWorld));
 
     // 距离自适应 LOD 细分
     //   distance <  Min  → 使用最大细分因子 (gTessellationFactor)
@@ -212,6 +220,22 @@ HullConstantOutput ConstantHS(InputPatch<HullControlPoint, 4> patch, uint patchI
         tess = lerp(gTessellationFactor, 1.0f,
                     (distance - gTessellationDistanceMin) / (gTessellationDistanceMax - gTessellationDistanceMin));
 
+    // 迟滞区间 (Hysteresis)：在过渡边界做 10% 的模糊，避免 LOD 频繁切换
+    float hysteresis = 0.1f * (gTessellationDistanceMax - gTessellationDistanceMin);
+    float range = gTessellationDistanceMax - gTessellationDistanceMin;
+    if (distance > gTessellationDistanceMin - hysteresis && distance < gTessellationDistanceMin + hysteresis)
+    {
+        // 在过渡区间做平滑
+        float t = (distance - (gTessellationDistanceMin - hysteresis)) / (2.0f * hysteresis);
+        tess = lerp(gTessellationFactor, tess, smoothstep(0.0f, 1.0f, t));
+    }
+
+    // 背面剔除：背向相机超过 85° 的面片不细分
+    if (ndotv < -0.08f)
+    {
+        tess = 1.0f;
+    }
+
     // 钳制范围（D3D12 支持的最大细分因子为 64）
     tess = clamp(tess, 1.0f, 64.0f);
 
@@ -227,9 +251,10 @@ HullConstantOutput ConstantHS(InputPatch<HullControlPoint, 4> patch, uint patchI
 
 // ============================================================================
 // Hull Shader - 传递控制点
+//   partitioning("fractional_odd") — 平滑插入/移除顶点，消除蠕动
 // ============================================================================
 [domain("quad")]
-    [partitioning("fractional_even")]
+    [partitioning("fractional_odd")]
     [outputtopology("triangle_cw")]
     [outputcontrolpoints(4)]
     [patchconstantfunc("ConstantHS")] HullControlPoint
@@ -239,32 +264,72 @@ HullConstantOutput ConstantHS(InputPatch<HullControlPoint, 4> patch, uint patchI
 }
 
     // ============================================================================
-    // Domain Shader - 顶点置换 + 世界空间变换
-    //   输出的 DomainOutput 与 color.hlsl 的 VertexOut 语义一致
+    // Domain Shader - 顶点置换 + 法线重建 + 世界空间变换
+    //   - 控制点 PosL.y 来自 PNG 高度图（粗网格 257x257）
+    //   - DDS 纹理（高分辨率）提供精细化偏移，叠加到插值后的粗网格高度上
+    //   - 用有限差分法采样高度图重建真实法线（解决棱角）
+    //   - 输出的 DomainOutput 与 color.hlsl VertexOut 语义一致
     // ============================================================================
     [domain("quad")] DomainOutput DS(HullConstantOutput input, float2 uv : SV_DomainLocation, const OutputPatch<HullControlPoint, 4> patch)
 {
     DomainOutput output;
 
-    float3 v1 = lerp(patch[0].PosL, patch[1].PosL, uv.x); // 上边：左上→右上
-    float3 v2 = lerp(patch[2].PosL, patch[3].PosL, uv.x); // 下边：左下→右下
-    float3 localPos = lerp(v1, v2, uv.y);                 // 纵向：远→近（上→下）
+    // D3D quad domain: patch[0]=(0,0)左上, patch[1]=(1,0)右上, patch[2]=(0,1)左下, patch[3]=(1,1)右下
+    // TerrainLoader 索引顺序: i0(左上), i1(右上), i2(左下), i3(右下) — 与 D3D 一致
 
-    // 2. 双线性插值 UV（必须在高度采样之前）
+    // 1. 双线性插值 UV
     float2 texCoord = lerp(
         lerp(patch[0].TexCoord, patch[1].TexCoord, uv.x),
         lerp(patch[2].TexCoord, patch[3].TexCoord, uv.x), uv.y);
 
-    // 3. 采样高度图进行顶点置换
-    float height = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord, 0).r;
-    localPos.y = height * gHeightScale + gHeightOffset;
+    // 2. 双线性插值位置（XZ + 粗粒度高度来自 CPU 端 PNG 采样结果）
+    float3 v1 = lerp(patch[0].PosL, patch[1].PosL, uv.x); // 上边：左上→右上
+    float3 v2 = lerp(patch[2].PosL, patch[3].PosL, uv.x); // 下边：左下→右下
+    float3 localPos = lerp(v1, v2, uv.y);
 
-    // 4. 双线性插值法线
-    float3 normal = normalize(lerp(
-        lerp(patch[0].NormalL, patch[1].NormalL, uv.x),
-        lerp(patch[2].NormalL, patch[3].NormalL, uv.x), uv.y));
+    // 3. 从高分辨率 DDS 纹理采样精细细节偏移（5 点平滑，消除高频噪点尖刺）
+    //    对中心点及上下左右 4 个相邻点取平均，模糊化像素间剧烈跳变
+    float texelU = 1.0f / 512.0f; // 高度图纹理像素步长（H_Runtime_heightmap 512 分辨率）
+    float texelV = 1.0f / 512.0f;
 
-    // 5. 双线性插值切线
+    float h0 = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord, 0).r;
+    float hU0 = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord + float2(texelU, 0), 0).r;
+    float hU1 = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord - float2(texelU, 0), 0).r;
+    float hV0 = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord + float2(0, texelV), 0).r;
+    float hV1 = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord - float2(0, texelV), 0).r;
+    float detailHeight = (h0 + hU0 + hU1 + hV0 + hV1) / 5.0f;
+
+    float detailOffset = (detailHeight - 0.5f) * gHeightScale + gHeightOffset;
+    localPos.y += detailOffset;
+
+    // 4. ★ 法线重建（有限差分法）— 解决棱角问题的关键
+    //    用较大步长采样左右/上下高度差，避免高频噪点导致法线抖动
+    float du = texelU * 2.0f; // 跨 2 像素步长，降低噪声敏感度
+    float dv = texelV * 2.0f;
+
+    float hL = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord + float2(-du, 0), 0).r;
+    float hR = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord + float2(+du, 0), 0).r;
+    float hD = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord + float2(0, -dv), 0).r;
+    float hU = gTerrainTextures[gHeightMapIndex].SampleLevel(gSamplerLinearWrap, texCoord + float2(0, +dv), 0).r;
+
+    // 高度图在世界空间的步长
+    //   UV 空间 1.0 = 256 world units
+    float worldTexelSize = 256.0f;
+
+    float dh_dx = (hR - hL) * gHeightScale / (2.0f * du * worldTexelSize);
+    float dh_dz = (hU - hD) * gHeightScale / (2.0f * dv * worldTexelSize);
+
+    // 切线方向 (XZ 平面)
+    float3 tangentX = float3(1.0f, dh_dx, 0.0f);
+    float3 tangentZ = float3(0.0f, dh_dz, 1.0f);
+
+    // 法线 = cross(tangentZ, tangentX)，确保朝上
+    float3 normal = normalize(cross(tangentZ, tangentX));
+    // 如果法线朝下则翻转
+    if (normal.y < 0.0f)
+        normal = -normal;
+
+    // 5. 切线（保持与原始几何一致的 TBN）
     float3 tangent = normalize(lerp(
         lerp(patch[0].TangentL, patch[1].TangentL, uv.x),
         lerp(patch[2].TangentL, patch[3].TangentL, uv.x), uv.y));

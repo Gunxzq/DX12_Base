@@ -158,6 +158,86 @@ uint32_t DescriptorSlotAllocator::AllocateFromFreeList() {
 }
 
 /**
+ * @brief 分配 count 个连续描述符槽，返回起始索引
+ * @param count 需要的连续槽位数量
+ * @return uint32_t 起始索引，失败返回 UINT32_MAX
+ * @note 仅 LinearAlloc 模式保证 O(1)；FreeList 模式会扫描空闲列表查找连续块
+ * @date 2026-06-07
+ */
+uint32_t DescriptorSlotAllocator::AllocateConsecutive(uint32_t count) {
+    if (!m_initialized || count == 0)
+        return UINT32_MAX;
+
+    bool linearAlloc = HasFlag(m_config.flags, DescriptorSlotFlags::LinearAlloc);
+
+    if (linearAlloc) {
+        // 线性分配：检查当前 m_nextIndex 开始的连续区域是否可用
+        if (m_nextIndex + count > m_capacity) {
+            if (HasFlag(m_config.flags, DescriptorSlotFlags::EnableExpand)) {
+                uint32_t newCapacity = m_capacity == 0 ? m_config.initialCapacity : m_capacity * 2;
+                while (newCapacity < m_nextIndex + count) newCapacity *= 2;
+                Expand(newCapacity);
+            }
+            if (m_nextIndex + count > m_capacity)
+                return UINT32_MAX;
+        }
+        uint32_t baseIndex = m_nextIndex;
+        m_nextIndex += count;
+        m_allocatedCount += count;
+        return baseIndex;
+    }
+
+    // FreeList 模式：扫描空闲列表查找连续块
+    if (!m_freeIndices.empty()) {
+        // 空闲列表是未排序的，先排序后扫描
+        std::sort(m_freeIndices.begin(), m_freeIndices.end());
+
+        uint32_t runStart = m_freeIndices[0];
+        uint32_t runLen = 1;
+        for (size_t i = 1; i < m_freeIndices.size(); ++i) {
+            if (m_freeIndices[i] == m_freeIndices[i - 1] + 1) {
+                runLen++;
+                if (runLen >= count) {
+                    // 找到连续块，从空闲列表中移除
+                    uint32_t baseIndex = runStart;
+                    // 移除这 count 个索引
+                    auto it = std::lower_bound(m_freeIndices.begin(), m_freeIndices.end(), baseIndex);
+                    m_freeIndices.erase(it, it + count);
+                    m_allocatedCount += count;
+                    return baseIndex;
+                }
+            } else {
+                runStart = m_freeIndices[i];
+                runLen = 1;
+            }
+        }
+    }
+
+    // 空闲列表中没找到连续块，尝试从 m_nextIndex 开始分配
+    if (m_nextIndex + count <= m_capacity) {
+        uint32_t baseIndex = m_nextIndex;
+        m_nextIndex += count;
+        m_allocatedCount += count;
+        return baseIndex;
+    }
+
+    // 尝试扩容
+    if (HasFlag(m_config.flags, DescriptorSlotFlags::EnableExpand)) {
+        uint32_t newCapacity = m_capacity == 0 ? m_config.initialCapacity : m_capacity * 2;
+        while (newCapacity < m_nextIndex + count) newCapacity *= 2;
+        Expand(newCapacity);
+        if (m_nextIndex + count <= m_capacity) {
+            uint32_t baseIndex = m_nextIndex;
+            m_nextIndex += count;
+            m_allocatedCount += count;
+            return baseIndex;
+        }
+    }
+
+    return UINT32_MAX;
+}
+
+/**
  * @brief 释放描述符槽索引
  * @param index 索引值
  * @param fenceValue 命令完成栏值
