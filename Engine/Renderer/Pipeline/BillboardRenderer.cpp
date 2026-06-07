@@ -183,8 +183,7 @@ void BillboardRenderer::CreateRootSignature() {
     staticSamplers[0].Init(2, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                            D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(9, slotRootParameter, 1, staticSamplers,
-                                            D3D12_ROOT_SIGNATURE_FLAG_NONE);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(9, slotRootParameter, 1, staticSamplers, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
     Microsoft::WRL::ComPtr<ID3DBlob> errorBlob = nullptr;

@@ -7,6 +7,7 @@
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
 #include "Renderer/RHI/Command/CommandManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
+#include "Renderer/Scene/TerrainManager/TerrainManager.h"
 #include "Scheduler/TaskGraphBuilder.h"
 #include <Common/Common.h>
 #include <Common/d3dx12.h>
@@ -168,6 +169,10 @@ bool FrameDriver::Tick() {
         uint64_t completedFence = m_gameContext->GetCompletedFence();
         uint64_t nextFence = m_gameContext->GetNextFence();
         m_gameContext->FrameResourceManager->BeginFrame(completedFence, nextFence);
+
+        // TerrainManager 的 Reclaim 已移到 UpdateAndUpload 内部（匹配 LightManager 模式）
+        // 这里只清空 pending 缓存
+        TerrainManager::GetInstance().BeginFrame(completedFence);
     }
 
     // ========================================================================
@@ -189,9 +194,9 @@ bool FrameDriver::Tick() {
     // B. 提交命令列表到 GPU
     // 注意：此时 GPU 开始执行第 N-1 帧的渲染任务
     ExecuteRenderPhase(RenderPhase::PrePass, 0);
-    ExecuteRenderPhase(RenderPhase::Opaque, 0);       // 清除颜色+深度，写入深度
-    ExecuteRenderPhase(RenderPhase::Terrain, 0);      // 复用 Opaque 深度缓冲区
-    ExecuteRenderPhase(RenderPhase::Billboard, 0);    // 复用 Opaque 深度，不写深度
+    ExecuteRenderPhase(RenderPhase::Opaque, 0);    // 清除颜色+深度，写入深度
+    ExecuteRenderPhase(RenderPhase::Terrain, 0);   // 复用 Opaque 深度缓冲区
+    ExecuteRenderPhase(RenderPhase::Billboard, 0); // 复用 Opaque 深度，不写深度
     ExecuteRenderPhase(RenderPhase::Transparent, 0);
     ExecuteRenderPhase(RenderPhase::PostProcess, 0);
     ExecuteRenderPhase(RenderPhase::FSR3_Upscale, 0);

@@ -100,22 +100,20 @@ float4 PS(VertexOut pin) : SV_Target
         directLight += ComputePointLight(gLights[j], mat, pin.WorldPos, N, V);
     for (uint k = gNumDirLights + gNumPointLights; k < gNumDirLights + gNumPointLights + gNumSpotLights; ++k)
         directLight += ComputeSpotLight(gLights[k], mat, pin.WorldPos, N, V);
-
     float3 R = reflect(-V, N);
     float3 reflection = ComputeEnvironmentReflection(R, albedo, metallic, roughness, N, V);
 
     // 使用 WaterConstants 中的参数
     float waterReflectionStrength = 0.6f;
     float waterDiffuseStrength = 0.3f;
-
-    // 泡沫效果（简单实现，根据波浪高度）
-    float foam = saturate((pin.WorldPos.y - 0.3f) * gFoamIntensity);
+    // 泡沫效果（基于波浪高度 y，只在波峰出现）
+    float foam = saturate(pin.WorldPos.y - 9.8f) * gFoamIntensity;
     float3 foamColor = float3(0.9f, 0.9f, 0.8f);
 
-    float3 litColor = ambient + directLight * waterDiffuseStrength + reflection * waterReflectionStrength + emissive;
+    float3 litColor = ambient + directLight * 0.3f + emissive;
 
     // 叠加泡沫
-    litColor = lerp(litColor, foamColor, foam);
+    litColor = lerp(litColor, foamColor, foam * 0.3f);
 
     return float4(litColor, mat.BaseColor.a);
 }

@@ -59,7 +59,6 @@ void TerrainRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS
 }
 
 void TerrainRenderer::DrawTerrain(CommandList &cmdList, const TerrainRenderItem &item) {
-    static int drawLogCount = 0;
 
     if (!m_geometryManager) {
         OutputDebugStringW(L"[ERROR] TerrainRenderer::DrawTerrain - GeometryResourceManager not set!\n");
@@ -69,15 +68,11 @@ void TerrainRenderer::DrawTerrain(CommandList &cmdList, const TerrainRenderItem 
     // 获取 PatchMesh（支持曲面细分）
     const PatchMesh *mesh = m_geometryManager->GetGeometry<PatchMesh>(item.geometryHandle);
     if (!mesh) {
-        if (drawLogCount++ < 3) {
-            OutputDebugStringW(L"[ERROR] TerrainRenderer::DrawTerrain - GetGeometry<PatchMesh> returned nullptr!\n");
-        }
+
         return;
     }
     if (!mesh->isGpuReady) {
-        if (drawLogCount++ < 3) {
-            OutputDebugStringW(L"[ERROR] TerrainRenderer::DrawTerrain - PatchMesh isGpuReady is false!\n");
-        }
+
         return;
     }
 

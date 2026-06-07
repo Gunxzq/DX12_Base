@@ -22,11 +22,11 @@ struct TerrainRenderItem {
     D3D12_GPU_DESCRIPTOR_HANDLE normalSRV;    // 法线贴图（可选）
 
     // 曲面细分参数（LOD 控制）
-    float heightScale = 1.0f;               // 高度缩放
-    float heightOffset = 0.0f;              // 高度偏移
-    float tessellationFactor = 8.0f;        // 近距离最大细分因子
-    float tessellationDistanceMin = 5.0f;   // 近距离边界
-    float tessellationDistanceMax = 80.0f;  // 远距离边界（超出后不细分）
+    float heightScale = 1.0f;              // 高度缩放
+    float heightOffset = 0.0f;             // 高度偏移
+    float tessellationFactor = 8.0f;       // 近距离最大细分因子
+    float tessellationDistanceMin = 5.0f;  // 近距离边界
+    float tessellationDistanceMax = 80.0f; // 远距离边界（超出后不细分）
 
     // 材质参数
     uint32_t materialIndex;

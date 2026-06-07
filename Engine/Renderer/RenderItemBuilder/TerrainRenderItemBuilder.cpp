@@ -2,6 +2,7 @@
 #include "TerrainRenderItemBuilder.h"
 #include "ECS/Core/Components.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
+#include "Renderer/Scene/TerrainManager/TerrainManager.h"
 #include "Resource/Texture/TextureManager.h"
 
 using namespace DX12Engine::Renderer;
@@ -17,8 +18,11 @@ void TerrainRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
     outQueue.Clear();
 
     if (!m_cullingResult) {
+        OutputDebugStringW(L"[TerrainBuilder] No culling result, skip\n");
         return;
     }
+
+    auto &terrainMgr = TerrainManager::GetInstance();
 
     for (auto entity : m_cullingResult->visibleEntities) {
         // 检查是否有地形组件
@@ -46,10 +50,14 @@ void TerrainRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
             normalSRV = m_textureManager->GetSRV(terrainComp->normalHandle);
         }
 
+        // LightManager 模式：从 TerrainManager 查询已上传的 GPU 地址
+        // Immediate 回调中已完成分配+上传，这里只需按索引查询
+        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress = terrainMgr.GetTerrainBlockAddress(blockIndex);
+
         // 构建渲染项
         TerrainRenderItem item;
         item.geometryHandle = geoHandle;
-        item.objectCBAddress = 0; // 由 TerrainManager 在分配时填充
+        item.objectCBAddress = objectCBAddress;
         item.heightMapSRV = heightMapSRV;
         item.albedoSRV = albedoSRV;
         item.normalSRV = normalSRV;

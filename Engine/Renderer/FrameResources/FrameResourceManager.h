@@ -68,6 +68,7 @@ public:
     // ========================================================================
 
     bool IsInitialized() const { return m_initialized; }
+    uint64_t GetCurrentFence() const { return m_currentFence; }
 
 private:
     RingBuffer m_objectCB;

@@ -29,7 +29,6 @@ struct TerrainConstants {
     DirectX::XMFLOAT4X4 PrevWorld;         // gPrevWorld (vs color.hlsl cbPerObject)
     uint32_t MaterialIndex;                // gMaterialIndex
     uint32_t ReceiveShadow;                // gReceiveShadow
-    float ObjPad[2];                       // gObjPad (16 bytes aligned)
     float HeightScale;                     // 高度缩放
     float HeightOffset;                    // 高度偏移
     float TessellationFactor;              // 基础细分因子
@@ -39,7 +38,7 @@ struct TerrainConstants {
     uint32_t AlbedoMapIndex;               // 漫反射纹理索引
     uint32_t NormalMapIndex;               // 法线贴图索引
     float TerrainPad;                      // gTerrainPad
-    float pad[3];
+    float pad[5];
 };
 
 // ============================================================================
