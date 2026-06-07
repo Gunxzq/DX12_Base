@@ -24,6 +24,7 @@ void TerrainRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
 
     auto &terrainMgr = TerrainManager::GetInstance();
 
+    UINT blockIndex = 0;
     for (auto entity : m_cullingResult->visibleEntities) {
         // 检查是否有地形组件
         auto *terrainComp = registry.TryGetComponent<TerrainComponent>(entity);
@@ -69,6 +70,7 @@ void TerrainRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
         item.materialIndex = terrainComp->materialIndex;
 
         outQueue.Add(item);
+        blockIndex++;
     }
 }
 
