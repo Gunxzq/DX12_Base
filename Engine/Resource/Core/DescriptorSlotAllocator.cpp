@@ -19,8 +19,10 @@ void DescriptorSlotAllocator::Initialize(const DescriptorSlotAllocatorConfig &co
     m_freeIndices.clear();
     m_pendingFree.clear();
 
-    Reserve(m_config.initialCapacity); // 初始化容量
+    // BugFix: 必须在 Reserve 之前设置 m_initialized = true，
+    // 否则 Reserve 的守卫条件会直接 return，导致 m_capacity 和 m_freeIndices 未初始化。
     m_initialized = true;
+    Reserve(m_config.initialCapacity); // 初始化容量
 }
 
 /**
@@ -146,9 +148,11 @@ uint32_t DescriptorSlotAllocator::AllocateFromFreeList() {
         uint32_t newCapacity = m_capacity == 0 ? m_config.initialCapacity : m_capacity * 2;
         Expand(newCapacity);
 
-        if (m_nextIndex < m_capacity) {
-            uint32_t index = m_nextIndex;
-            ++m_nextIndex;
+        // BugFix: 扩容后 m_freeIndices 已被填充，必须从 m_freeIndices 分配，
+        // 不能走 m_nextIndex 路径，否则会和 m_freeIndices 中的索引冲突导致双重分配。
+        if (!m_freeIndices.empty()) {
+            uint32_t index = m_freeIndices.back();
+            m_freeIndices.pop_back();
             ++m_allocatedCount;
             return index;
         }

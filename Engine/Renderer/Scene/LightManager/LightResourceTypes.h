@@ -4,17 +4,19 @@
 
 namespace DX12Engine::Renderer {
 
-// 光源
+// 光源 (必须与 LightingUtil.hlsl 中 Light 结构体严格对齐)
 struct Light {
-    DirectX::XMFLOAT4 Strength;
-    DirectX::XMFLOAT4 Direction;
-    DirectX::XMFLOAT4 Position;
-    float FalloffStart;
-    float FalloffEnd;
-    float SpotPower;
-    float Range;
-    int ShadowMapIndex;
-    float Pad[3];
+    DirectX::XMFLOAT4 Strength;  // offset 0
+    DirectX::XMFLOAT4 Direction; // offset 16
+    DirectX::XMFLOAT4 Position;  // offset 32
+    float FalloffStart;          // offset 48
+    float FalloffEnd;            // offset 52
+    float SpotPower;             // offset 56
+    float Range;                 // offset 60
+    float CastShadow;            // offset 64
+    float ShadowBias;            // offset 68
+    float ShadowMapIndex;        // offset 72
+    float Pad;                   // offset 76
 };
 
 struct LightConstants {

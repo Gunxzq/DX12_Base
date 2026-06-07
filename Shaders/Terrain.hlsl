@@ -92,10 +92,10 @@ cbuffer cbLights : register(b2)
 }
 
 // ============================================================================
-// 资源绑定 — 槽位与 Common_PBR.hlsl / color.hlsl 完全一致
+// 资源绑定 — 槽位与 Common_PBR.hlsl / color.hlsl 保持一致
 //   t0,space1: StructuredBuffer<MaterialData>
-//   t0:        gTexture / gTerrainTextures（color 用单个纹理，地形用纹理数组）
-//   t10:       gEnvMap
+//   t0,space0: gTerrainTextures（地形纹理数组）
+//   t10,space0: gEnvMap
 //   s0~s5:     采样器
 //   s10:       gEnvSampler
 //   s11:       gShadowSampler
@@ -114,8 +114,6 @@ SamplerState gSamplerAnisotropicClamp : register(s5);
 // gSampler = gSamplerLinearWrap（直接使用 gSamplerLinearWrap，无需别名）
 
 // ---- 地形纹理数组 (t0~t7, space0) ----
-// 使用固定大小数组避免与 ShadowSampling 中 space1 的无界数组冲突
-// color.hlsl: gTexture : register(t0)
 Texture2D gTerrainTextures[8] : register(t0, space0);
 
 // ============================================================================

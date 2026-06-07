@@ -144,7 +144,15 @@ void OpaqueRenderer::DrawMesh(CommandList &cmdList, DX12Engine::Resource::Geomet
 
     // 环境贴图 SRV (slot 5, t10)
     if (envMapSRV.ptr != 0) {
-        cmdList.Get()->SetGraphicsRootDescriptorTable(5, envMapSRV);
+        // cmdList.Get()->SetGraphicsRootDescriptorTable(5, envMapSRV);
+    } else {
+        static int dbgCount = 0;
+        if (dbgCount < 3) {
+            char msg[128];
+            sprintf_s(msg, "[DrawMesh] envMapSRV.ptr=0, slot5 NOT bound (t10 will read garbage from heap)\n");
+            OutputDebugStringA(msg);
+            dbgCount++;
+        }
     }
 
     cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);

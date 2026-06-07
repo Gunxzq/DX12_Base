@@ -500,6 +500,7 @@ void GameWorld::LoadTestTexture() {
 
     auto &descriptorHeaps = m_context->DescriptorHeaps;
     uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    m_context->Logging->Info("[SlotDBG] CreateTestTexture Allocate srvIndex={}", srvIndex);
 
     if (srvIndex == UINT32_MAX) {
         OutputDebugStringW(L"[ERROR] Failed to allocate SRV index\n");
@@ -695,6 +696,7 @@ void GameWorld::CreateMaterials() {
     // 分配 SRV 描述符
     auto &descriptorHeaps = m_context->DescriptorHeaps;
     uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    m_context->Logging->Info("[SlotDBG] CreateMaterials Allocate srvIndex={}", srvIndex);
     if (srvIndex == UINT32_MAX) {
         m_context->Logging->Error("[GameWorld] Failed to allocate SRV for material buffer");
         gpuMgr.Release(bufferHandle, sequence);
@@ -752,6 +754,7 @@ void GameWorld::CreateSkybox() {
 
     auto &descriptorHeaps = m_context->DescriptorHeaps;
     uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    m_context->Logging->Info("[SlotDBG] CreateSkybox Allocate srvIndex={}", srvIndex);
 
     if (srvIndex == UINT32_MAX) {
         m_context->Logging->Error("[GameWorld] Failed to allocate SRV for skybox");
@@ -960,59 +963,78 @@ void GameWorld::RegisterCubeRenderSystem() {
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
                      m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
 
-                 //  一个堆
-                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+                //  一个堆
+                cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
-                 // 开始渲染（传入阴影数据和阴影贴图 SRV）
-                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
-                                        shadowMapSRV);
+                // ========================================================================
+                // [DESCRIPTOR SLOT DEBUG] 追踪所有纹理的 SRV 槽位和 GPU 句柄
+                // ========================================================================
+                static int s_dbgFrameCount = 0;
+                if (s_dbgFrameCount++ < 3) {
+                    auto logSlot = [this](const char* name, TextureHandle handle) {
+                        if (handle.IsValid()) {
+                            uint32_t idx = m_context->TextureMgr->GetSRVIndex(handle);
+                            D3D12_GPU_DESCRIPTOR_HANDLE gpuH = m_context->TextureMgr->GetSRV(handle);
+                            m_context->Logging->Info("[SlotDBG] {} srvIndex={} gpuHandle.ptr=0x{:X}", name, idx, gpuH.ptr);
+                        } else {
+                            m_context->Logging->Info("[SlotDBG] {} INVALID", name);
+                        }
+                    };
 
-                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}; // TODO: 从场景获取
+                    // 地形纹理
+                    logSlot("terrainHeight", m_terrainTextureHandle);
+                    logSlot("terrainAlbedo", m_terrainAlbedoHandle);
+                    // Skybox (Cube)
+                    logSlot("skybox",       m_skyboxTextureHandle);
+                    // 测试纹理
+                    logSlot("testTexture",  m_testTextureHandle);
+                    // 水面纹理
+                    logSlot("waterTexture", m_waterTextureHandle);
+                    // 公告牌纹理数组
+                    for (int i = 0; i < 4; ++i) {
+                        char name[32];
+                        sprintf_s(name, "billboard[%d]", i);
+                        logSlot(name, m_billboardTextureHandles[i]);
+                    }
 
-                 // 诊断：打印队列状态
-                 {
-                     static int frameCount = 0;
-                     if (frameCount < 5) {
-                         char msg[256];
-                         size_t stdCount = 0, instCount = 0;
-                         D3D12_GPU_DESCRIPTOR_HANDLE firstStdSRV = {}, firstInstSRV = {};
-                         for (const auto &item : m_opaqueQueueStandard) {
-                             if (item.IsValid()) {
-                                 stdCount++;
-                                 if (firstStdSRV.ptr == 0)
-                                     firstStdSRV = item.textureSRV;
-                             }
-                         }
-                         for (const auto &item : m_opaqueQueueInstanced) {
-                             if (item.IsValid()) {
-                                 instCount++;
-                                 if (firstInstSRV.ptr == 0)
-                                     firstInstSRV = item.textureSRV;
-                             }
-                         }
-                         sprintf_s(msg,
-                                   "[CubeRender] Frame %d: Standard=%zu items (firstSRV=%llx), Instanced=%zu items "
-                                   "(firstSRV=%llx)\n",
-                                   frameCount, stdCount, (unsigned long long)firstStdSRV.ptr, instCount,
-                                   (unsigned long long)firstInstSRV.ptr);
-                         OutputDebugStringA(msg);
-                         frameCount++;
-                     }
-                 }
+                    // LightManager 的 shadowData SRV 和 shadowMap SRV
+                    auto& lm = LightManager::GetInstance();
+                    m_context->Logging->Info("[SlotDBG] LightMgr shadowDataSRV gpuHandle.ptr=0x{:X}", shadowDataSRV.ptr);
+                    m_context->Logging->Info("[SlotDBG] LightMgr shadowMapSRV  gpuHandle.ptr=0x{:X}", shadowMapSRV.ptr);
+                    m_context->Logging->Info("[SlotDBG] LightMgr shadowDataSrvBaseSlot={} shadowMapSrvDirSlot={}",
+                        lm.GetShadowDataSrvSlot(), lm.GetShadowMapSrvDirSlot());
 
-                 // ================================================================
-                 // Phase 1: 绑定 Standard PSO，绘制所有 Standard 物体
-                 // ================================================================
-                 for (const auto &item : m_opaqueQueueStandard) {
-                     if (!item.IsValid())
-                         continue;
-                     m_renderer->DrawMesh(cmdList, item.geometryHandle, DirectX::XMMatrixIdentity(),
-                                          item.standard.constantBuffer, item.textureSRV, envMapSRV);
-                 }
+                    // 材质 buffer SRV
+                    m_context->Logging->Info("[SlotDBG] materialBufferSRV gpuHandle.ptr=0x{:X}", materialBufferSRV.ptr);
 
-                 // ================================================================
-                 // Phase 2: 绑定 Instanced PSO，绘制所有 Instanced 批次
-                 // ================================================================
+                    // 堆容量
+                    uint32_t heapSize = m_context->DescriptorHeaps->GetHeapSize(DescriptorHeapType::CbvSrvUav);
+                    uint32_t allocated = m_context->DescriptorHeaps->GetAllocatedCount(DescriptorHeapType::CbvSrvUav);
+                    m_context->Logging->Info("[SlotDBG] CbvSrvUav heap size={} allocated={}", heapSize, allocated);
+                }
+
+                // 开始渲染（传入阴影数据和阴影贴图 SRV）
+                m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
+                                       shadowMapSRV);
+
+                D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}; // TODO: 从场景获取
+
+                // 打印 envMapSRV 和第一个物体的 textureSRV 的句柄
+                static int s_dbgDrawCount = 0;
+                if (s_dbgDrawCount++ < 3) {
+                    m_context->Logging->Info("[DrawDBG] envMapSRV.ptr=0x{:X} (slot5, t10)", envMapSRV.ptr);
+                }
+
+                for (const auto &item : m_opaqueQueueStandard) {
+                    if (!item.IsValid())
+                        continue;
+                    if (s_dbgDrawCount <= 4) {
+                        m_context->Logging->Info("[DrawDBG] DrawMesh textureSRV.ptr=0x{:X} (slot4, t0)", item.textureSRV.ptr);
+                    }
+                    m_renderer->DrawMesh(cmdList, item.geometryHandle, DirectX::XMMatrixIdentity(),
+                                         item.standard.constantBuffer, item.textureSRV, envMapSRV);
+                }
+
                  for (const auto &item : m_opaqueQueueInstanced) {
                      if (!item.IsValid())
                          continue;
@@ -1312,6 +1334,7 @@ void GameWorld::LoadWaterTexture() {
 
     auto &descriptorHeaps = m_context->DescriptorHeaps;
     uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    m_context->Logging->Info("[SlotDBG] LoadWaterTexture Allocate srvIndex={}", srvIndex);
 
     if (srvIndex == UINT32_MAX) {
         m_context->Logging->Error("[GameWorld] Failed to allocate SRV for water texture");
@@ -1521,9 +1544,8 @@ void GameWorld::RegisterTerrainSystems() {
                  // ── 处理纹理：分配 SRV + 创建 SRV + 注册 TextureHandle ──
                  // BackgroundExecutor 已保证 GPU 工作完成（COPY + DIRECT + fence wait）
                  //
-                 // 高度图 (t0) + 漫反射 (t1) 需要连续描述符，因为 slot 4 的
-                 // descriptor table 从 heightMapSRV 开始连续 8 个槽位。
-                 // 我们一次性分配两个连续的 SRV 索引。
+                 // 地形纹理绑定到 space2 t0，与实体纹理 (space0 t0) 完全隔离。
+                 // 分配在同一个 CbvSrvUav 堆中，但 shader 通过不同 register space 区分。
                  if ((!m_terrainTextureHandle.IsValid() && state.heightMapCreated.load(std::memory_order_acquire)) ||
                      (!m_terrainAlbedoHandle.IsValid() && state.albedoCreated.load(std::memory_order_acquire))) {
 
@@ -1539,11 +1561,13 @@ void GameWorld::RegisterTerrainSystems() {
                                        state.albedoCreated.load(std::memory_order_acquire) &&
                                        state.albedoGpuHandle.IsValid();
 
-                     if (needHeight && needAlbedo) {
-                         // 两纹理都需要：使用 AllocateConsecutive(2) 确保描述符连续
-                         uint32_t baseSrvIdx =
-                             descriptorHeaps->AllocateConsecutive(Resource::DescriptorHeapType::CbvSrvUav, 2);
-                         if (baseSrvIdx != UINT32_MAX) {
+                    if (needHeight && needAlbedo) {
+                        // 两纹理都需要：使用 AllocateConsecutive(2) 确保描述符连续
+                        uint32_t baseSrvIdx =
+                            descriptorHeaps->AllocateConsecutive(Resource::DescriptorHeapType::CbvSrvUav, 2);
+                        m_context->Logging->Info("[SlotDBG] TerrainGPUCreate AllocateConsecutive(2) baseSrvIdx={} (height={} albedo={})",
+                            baseSrvIdx, baseSrvIdx, baseSrvIdx + 1);
+                        if (baseSrvIdx != UINT32_MAX) {
                              uint32_t heightSrvIdx = baseSrvIdx;
                              uint32_t albedoSrvIdx = baseSrvIdx + 1;
 
@@ -1742,15 +1766,20 @@ void GameWorld::RegisterTerrainRenderSystem() {
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
-                 // 开始地形渲染
-                 m_terrainRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
+                // 开始地形渲染
+                m_terrainRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
 
-                 // 遍历地形队列
-                 for (const auto &item : m_terrainQueue.GetItems()) {
-                     if (!item.IsValid())
-                         continue;
-                     m_terrainRenderer->DrawTerrain(cmdList, item);
-                 }
+                // 遍历地形队列
+                static int s_dbgTerrainCount = 0;
+                for (const auto &item : m_terrainQueue.GetItems()) {
+                    if (!item.IsValid())
+                        continue;
+                    if (s_dbgTerrainCount++ < 3) {
+                        m_context->Logging->Info("[DrawDBG] DrawTerrain heightMapSRV.ptr=0x{:X} albedoSRV.ptr=0x{:X}",
+                            item.heightMapSRV.ptr, item.albedoSRV.ptr);
+                    }
+                    m_terrainRenderer->DrawTerrain(cmdList, item);
+                }
 
                  m_terrainRenderer->EndFrame();
 
@@ -1921,6 +1950,7 @@ void GameWorld::LoadBillboardTextures() {
 
     // Step 3: 分配 SRV
     uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    m_context->Logging->Info("[SlotDBG] LoadBillboardTextures Allocate srvIndex={}", srvIndex);
     if (srvIndex == UINT32_MAX) {
         m_context->Logging->Error("[GameWorld] Failed to allocate SRV slot for billboard Texture2DArray");
         return;

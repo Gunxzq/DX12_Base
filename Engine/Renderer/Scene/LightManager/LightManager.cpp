@@ -36,6 +36,19 @@ void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *de
     m_descriptorHeaps = descriptorHeaps;
     Clear();
 
+    // 校验描述符堆有效性
+    if (!descriptorHeaps || !descriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)) {
+        OutputDebugStringA("[LightManager] ERROR: DescriptorHeapCollection or CbvSrvUav heap is null!\n");
+        return;
+    }
+    {
+        char buf[128];
+        sprintf_s(buf, "[LightManager] CbvSrvUav heap valid, capacity=%u, allocated=%u\n",
+                  descriptorHeaps->GetHeapSize(DescriptorHeapType::CbvSrvUav),
+                  descriptorHeaps->GetAllocatedCount(DescriptorHeapType::CbvSrvUav));
+        OutputDebugStringA(buf);
+    }
+
     // 初始化内部 RingBuffer
     m_lightBuffer.Initialize(device, DEFAULT_LIGHT_BUFFER_SIZE);
     m_dirShadowBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE);

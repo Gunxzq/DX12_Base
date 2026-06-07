@@ -114,6 +114,10 @@ public:
     // 阴影贴图纹理的 GPU 描述符句柄 (t14, space1)
     D3D12_GPU_DESCRIPTOR_HANDLE GetShadowMapSRV() const { return m_shadowMapSRV; }
 
+    // 描述符堆槽位查询（调试用）
+    uint32_t GetShadowDataSrvSlot() const { return m_shadowDataSrvBaseSlot; }
+    uint32_t GetShadowMapSrvDirSlot() const { return m_shadowMapSrvDirSlot; }
+
     // const std::vector<DirLightShadowConstants> &GetDirShadowConstants() const { return m_dirShadowConstants; }
     // const std::vector<PointLightShadowConstants> &GetPointShadowConstants() const { return m_pointShadowConstants; }
     // const std::vector<SpotLightShadowConstants> &GetSpotShadowConstants() const { return m_spotShadowConstants; }

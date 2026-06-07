@@ -120,7 +120,7 @@ private:
     DX12Engine::Renderer::OpaqueRenderer *m_renderer = nullptr;
     std::unique_ptr<DX12Engine::Renderer::SkyRenderer> m_skyRenderer; // 天空盒渲染器
     std::unique_ptr<DX12Engine::Renderer::WaterRenderer> m_waterRenderer;
-    std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer; // 阴影渲染器
+    std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer;   // 阴影渲染器
     std::unique_ptr<DX12Engine::Renderer::TerrainRenderer> m_terrainRenderer; // 地形渲染器
 
     // 构建器和双队列（Standard 和 Instanced 分离，避免 PSO 切换）
