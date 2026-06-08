@@ -15,10 +15,9 @@ struct BillboardInstanceData
     float3 Position;
     float Width;
     float Height;
-    uint Mode; // BillboardMode 枚举值
+    uint Mode;              // BillboardMode 枚举值
     uint TextureArrayIndex; // 切片索引（0, 1, 2, 3...）
     uint MaterialIndex;
-    float PadS;
 };
 
 StructuredBuffer<BillboardInstanceData> gInstanceData : register(t12, space1);

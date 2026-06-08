@@ -19,7 +19,6 @@ struct BillboardInstanceData {
     uint32_t Mode;
     uint32_t TextureArrayIndex;
     uint32_t MaterialIndex;
-    float Pad;
 };
 
 BillboardRenderItemBuilder::BillboardRenderItemBuilder(FrameResourceManager *frameResources,
@@ -75,7 +74,6 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
         inst.Mode = static_cast<uint32_t>(billboardComp->mode);
         inst.TextureArrayIndex = billboardComp->textureArrayIndex; // Texture2DArray 切片索引
         inst.MaterialIndex = m_materialManager->GetGPUIndex(billboardComp->materialHandle);
-        inst.Pad = 0.0f;
 
         auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
         if (staticComp) {
@@ -95,16 +93,15 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
         if (staticComp->persistentInstanceAddress == 0) {
             // 首次分配持久化实例缓冲区
             uint32_t dataSize = static_cast<uint32_t>(staticBatch.instances.size() * sizeof(BillboardInstanceData));
-            instanceBufferAddress = m_frameResourceManager->AllocatePersistentInstanceBuffer(
-                staticBatch.instances.data(), dataSize);
+            instanceBufferAddress =
+                m_frameResourceManager->AllocatePersistentInstanceBuffer(staticBatch.instances.data(), dataSize);
             staticComp->persistentInstanceAddress = instanceBufferAddress;
             staticComp->worldDirty = false;
         } else {
             if (staticComp->worldDirty) {
                 uint32_t dataSize = static_cast<uint32_t>(staticBatch.instances.size() * sizeof(BillboardInstanceData));
-                m_frameResourceManager->UpdatePersistentBuffer(
-                    staticComp->persistentInstanceAddress,
-                    staticBatch.instances.data(), dataSize);
+                m_frameResourceManager->UpdatePersistentBuffer(staticComp->persistentInstanceAddress,
+                                                               staticBatch.instances.data(), dataSize);
                 staticComp->worldDirty = false;
             }
             instanceBufferAddress = staticComp->persistentInstanceAddress;
