@@ -61,16 +61,21 @@ void GameInputHandler::ResetCamera() {
     auto &mainCamera = m_context->CameraMgr->GetMainCamera();
 
     // 重置位置
-    mainCamera.Position = DirectX::XMFLOAT3(0.0f, 5.0f, -15.0f);
+    mainCamera.Position = DirectX::XMFLOAT3(0.0f, 2.0f, -15.0f);
 
-    // 重置旋转角度
+    // 重置基向量（龙书默认初始值）
+    mainCamera.Right   = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
+    mainCamera.Up      = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f);
+    mainCamera.Forward = DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f);
+
+    // 重置旋转角度（保留兼容）
     mainCamera.Rotation = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f);
 
     // 重置相机参数到默认值
-    m_moveSpeed = 8.0f;
+    m_moveSpeed = 10.0f;
     m_verticalSpeed = 6.0f;
 
-    m_context->Logging->Info("[Input] Camera Reset! (Free camera)");
+    m_context->Logging->Info("[Input] Camera Reset! (First-person style camera)");
 }
 
 void GameInputHandler::HandleCursorCapture() {
@@ -118,72 +123,43 @@ void GameInputHandler::HandleCameraInput(float deltaTime) {
     }
 
     // =========================================================================
-    // 相机旋转 (鼠标) - 仅当鼠标被捕获时生效
+    // 相机旋转 (鼠标) - 龙书风格：Pitch + RotateY，仅当鼠标被捕获时生效
     // =========================================================================
     if (window.IsCursorCaptured()) {
         FVector2D lookInput = inputSys.GetActionAxis2D(ActionId_Look);
 
-        // Yaw (左右旋转)
-        mainCamera.Rotation.y += lookInput.X * m_mouseSensitivity;
-        // Pitch (上下旋转)
-        mainCamera.Rotation.x += lookInput.Y * m_mouseSensitivity;
+        // 龙书风格：每个像素对应 0.25 度
+        float dx = XMConvertToRadians(0.25f * lookInput.X);
+        float dy = XMConvertToRadians(0.25f * lookInput.Y);
 
-        // 限制俯仰角，防止万向节死锁
-        const float maxPitch = XM_PIDIV2 - 0.01f;
-        mainCamera.Rotation.x = std::clamp(mainCamera.Rotation.x, -maxPitch, maxPitch);
-
-        // 归一化 Yaw 到 [0, 2PI)
-        if (mainCamera.Rotation.y > XM_2PI)
-            mainCamera.Rotation.y -= XM_2PI;
-        if (mainCamera.Rotation.y < 0.0f)
-            mainCamera.Rotation.y += XM_2PI;
+        Pitch(dy);
+        RotateY(dx);
     }
 
     // =========================================================================
-    // 相机移动 (WASD + Q/E)
+    // 相机移动 (WASD) - 龙书风格：Walk + Strafe
     // =========================================================================
-
-    // 获取移动输入
     FVector2D moveInput = inputSys.GetActionAxis2D(ActionId_Move);
     bool isSprinting = inputSys.IsActionHeld(ActionId_Sprint);
 
-    // 计算当前移动速度
     float currentSpeed = m_moveSpeed * (isSprinting ? m_sprintMultiplier : 1.0f);
+    float d = currentSpeed * deltaTime;
 
-    // 只有有输入时才计算移动
-    if (std::abs(moveInput.X) > 0.001f || std::abs(moveInput.Y) > 0.001f) {
-        // 直接使用 CameraManager 每帧计算好的前向和上向量
-        XMVECTOR fwdVec = XMLoadFloat3(&mainCamera.Forward);
-        XMVECTOR upVec = XMLoadFloat3(&mainCamera.Up);
+    // W/S: Walk (前后移动，沿 Look 方向)
+    if (moveInput.Y > 0.001f)
+        Walk(d);
+    else if (moveInput.Y < -0.001f)
+        Walk(-d);
 
-        // 右向 = 前向 x 上向（叉积，左手坐标系中为左手法则）
-        XMVECTOR rgtVec = XMVector3Cross(upVec, fwdVec);
-        rgtVec = XMVector3Normalize(rgtVec);
-
-        // 移除垂直分量用于水平移动计算
-        XMVECTOR horizontalFwd = XMVectorSet(XMVectorGetX(fwdVec), 0.0f, XMVectorGetZ(fwdVec), 0.0f);
-        horizontalFwd = XMVector3Normalize(horizontalFwd);
-
-        XMVECTOR pos = XMLoadFloat3(&mainCamera.Position);
-
-        // 前后移动 (Y 轴输入)
-        if (std::abs(moveInput.Y) > 0.001f) {
-            pos += horizontalFwd * (moveInput.Y * currentSpeed * deltaTime);
-        }
-
-        // 左右移动 (X 轴输入)
-        if (std::abs(moveInput.X) > 0.001f) {
-            pos += rgtVec * (moveInput.X * currentSpeed * deltaTime);
-        }
-
-        XMStoreFloat3(&mainCamera.Position, pos);
-    }
+    // A/D: Strafe (左右移动，沿 Right 方向)
+    if (moveInput.X > 0.001f)
+        Strafe(d);
+    else if (moveInput.X < -0.001f)
+        Strafe(-d);
 
     // =========================================================================
-    // 垂直升降 (Q 键上升，E 键下降)
+    // 垂直升降 (Space/Crouch)
     // =========================================================================
-    // 注意：需要先在 JSON 配置中为 Q/E 添加动作绑定
-    // 暂时使用备用方案：LeftControl 下降，Space 上升（如果没有独立 Q/E）
     bool moveUp = inputSys.IsActionHeld(ActionId_Jump);     // Space 上升
     bool moveDown = inputSys.IsActionHeld(ActionId_Crouch); // Crouch 下降
 
@@ -198,4 +174,49 @@ void GameInputHandler::HandleCameraInput(float deltaTime) {
         pos += XMVectorSet(0.0f, verticalMove * m_verticalSpeed * deltaTime, 0.0f, 0.0f);
         XMStoreFloat3(&mainCamera.Position, pos);
     }
+}
+
+// =========================================================================
+// 龙书风格相机操作
+// =========================================================================
+
+void GameInputHandler::Pitch(float angle) {
+    auto &camera = m_context->CameraMgr->GetMainCamera();
+
+    // 绕 Right 轴旋转 Up 和 Forward
+    XMMATRIX R = XMMatrixRotationAxis(XMLoadFloat3(&camera.Right), angle);
+
+    XMStoreFloat3(&camera.Up, XMVector3TransformNormal(XMLoadFloat3(&camera.Up), R));
+    XMStoreFloat3(&camera.Forward, XMVector3TransformNormal(XMLoadFloat3(&camera.Forward), R));
+}
+
+void GameInputHandler::RotateY(float angle) {
+    auto &camera = m_context->CameraMgr->GetMainCamera();
+
+    // 绕世界 Y 轴旋转所有基向量
+    XMMATRIX R = XMMatrixRotationY(angle);
+
+    XMStoreFloat3(&camera.Right, XMVector3TransformNormal(XMLoadFloat3(&camera.Right), R));
+    XMStoreFloat3(&camera.Up, XMVector3TransformNormal(XMLoadFloat3(&camera.Up), R));
+    XMStoreFloat3(&camera.Forward, XMVector3TransformNormal(XMLoadFloat3(&camera.Forward), R));
+}
+
+void GameInputHandler::Strafe(float d) {
+    auto &camera = m_context->CameraMgr->GetMainCamera();
+
+    // position += d * right
+    XMVECTOR s = XMVectorReplicate(d);
+    XMVECTOR r = XMLoadFloat3(&camera.Right);
+    XMVECTOR p = XMLoadFloat3(&camera.Position);
+    XMStoreFloat3(&camera.Position, XMVectorMultiplyAdd(s, r, p));
+}
+
+void GameInputHandler::Walk(float d) {
+    auto &camera = m_context->CameraMgr->GetMainCamera();
+
+    // position += d * forward
+    XMVECTOR s = XMVectorReplicate(d);
+    XMVECTOR l = XMLoadFloat3(&camera.Forward);
+    XMVECTOR p = XMLoadFloat3(&camera.Position);
+    XMStoreFloat3(&camera.Position, XMVectorMultiplyAdd(s, l, p));
 }

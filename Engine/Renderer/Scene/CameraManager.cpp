@@ -145,33 +145,43 @@ void CameraManager::OnResize(uint32_t width, uint32_t height) {
 // ========================================================================
 
 void CameraManager::CalculateMatrices(Camera &camera) {
-    // 1. 计算旋转矩阵
-    XMMATRIX rotMatrix = XMMatrixRotationRollPitchYaw(camera.Rotation.x, camera.Rotation.y, camera.Rotation.z);
+    // 使用龙书风格：基于基向量 (Right, Up, Forward) 手动构建 View 矩阵
+    // 基向量由输入层维护（Pitch/RotateY/Strafe/Walk），此处正交化并构建矩阵。
+    XMVECTOR R = XMLoadFloat3(&camera.Right);
+    XMVECTOR U = XMLoadFloat3(&camera.Up);
+    XMVECTOR L = XMLoadFloat3(&camera.Forward);
+    XMVECTOR P = XMLoadFloat3(&camera.Position);
 
-    // 2. 计算前向量和上向量（用于调试或后续逻辑）
-    XMVECTOR forwardVec = XMVector3TransformNormal(FXMVECTOR{0.0f, 0.0f, 1.0f}, rotMatrix);
-    XMVECTOR upVec = XMVector3TransformNormal(FXMVECTOR{0.0f, 1.0f, 0.0f}, rotMatrix);
+    // 保持坐标轴正交且单位化（龙书 UpdateViewMatrix 逻辑）
+    L = XMVector3Normalize(L);
+    U = XMVector3Normalize(XMVector3Cross(L, R));
+    R = XMVector3Cross(U, L);
 
-    XMStoreFloat3(&camera.Forward, forwardVec);
-    XMStoreFloat3(&camera.Up, upVec);
+    // 写回基向量
+    XMStoreFloat3(&camera.Right, R);
+    XMStoreFloat3(&camera.Up, U);
+    XMStoreFloat3(&camera.Forward, L);
 
-    // 3. 计算视图矩阵 (View Matrix)
-    // LookAtLH: EyePosition, FocusPosition, UpDirection
-    XMVECTOR posVec = XMLoadFloat3(&camera.Position);
-    XMVECTOR targetVec = posVec + forwardVec; // 看向正前方
+    // 计算平移分量
+    float x = -XMVectorGetX(XMVector3Dot(P, R));
+    float y = -XMVectorGetX(XMVector3Dot(P, U));
+    float z = -XMVectorGetX(XMVector3Dot(P, L));
 
-    camera.ViewMatrix = XMMatrixLookAtLH(posVec, targetVec, upVec);
+    // 手动填充 View 矩阵（与龙书完全一致）
+    camera.ViewMatrix.r[0] = XMVectorSet(camera.Right.x, camera.Up.x, camera.Forward.x, 0.0f);
+    camera.ViewMatrix.r[1] = XMVectorSet(camera.Right.y, camera.Up.y, camera.Forward.y, 0.0f);
+    camera.ViewMatrix.r[2] = XMVectorSet(camera.Right.z, camera.Up.z, camera.Forward.z, 0.0f);
+    camera.ViewMatrix.r[3] = XMVectorSet(x, y, z, 1.0f);
 
-    // 4. 计算投影矩阵 (Projection Matrix)
+    // 计算投影矩阵
     if (camera.Type == ProjectionType::Perspective) {
         camera.ProjMatrix = XMMatrixPerspectiveFovLH(camera.FOV, camera.AspectRatio, camera.NearPlane, camera.FarPlane);
     } else {
-        // Orthographic
         float orthoWidth = camera.OrthoSize * camera.AspectRatio;
         camera.ProjMatrix = XMMatrixOrthographicLH(orthoWidth, camera.OrthoSize, camera.NearPlane, camera.FarPlane);
     }
 
-    // 5. 计算 ViewProj 和逆矩阵
+    // 计算 ViewProj 和逆矩阵
     camera.ViewProjMatrix = camera.ViewMatrix * camera.ProjMatrix;
     camera.InverseView = XMMatrixInverse(nullptr, camera.ViewMatrix);
     camera.InverseProj = XMMatrixInverse(nullptr, camera.ProjMatrix);

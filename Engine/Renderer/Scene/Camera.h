@@ -36,9 +36,10 @@ struct Camera {
     XMFLOAT3 Velocity = {0.0f, 0.0f, 0.0f};      // 当前帧速度（米/秒）
     XMFLOAT3 PrevPosition = {0.0f, 0.0f, -5.0f};  // 上一帧位置
 
-    // 辅助向量（可选，用于简化某些逻辑，如 FPS 限制 Pitch）
-    XMFLOAT3 Forward = {0.0f, 0.0f, 1.0f};
-    XMFLOAT3 Up = {0.0f, 1.0f, 0.0f};
+    // 相机基向量（龙书风格，手动维护，避免欧拉角万向节死锁）
+    XMFLOAT3 Forward = {0.0f, 0.0f, 1.0f}; // Look direction
+    XMFLOAT3 Up = {0.0f, 1.0f, 0.0f};       // Up direction
+    XMFLOAT3 Right = {1.0f, 0.0f, 0.0f};    // Right direction
 
     XMMATRIX ViewMatrix;
     XMMATRIX ProjMatrix;

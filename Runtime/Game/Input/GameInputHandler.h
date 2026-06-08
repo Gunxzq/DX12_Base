@@ -23,7 +23,7 @@ class CameraManager;
  * @brief 游戏输入处理器
  *
  * 职责：
- * 1. 处理相机控制输入（WASD 移动、鼠标旋转）
+ * 1. 处理相机控制输入（WASD 移动、鼠标旋转）- 龙书风格第一人称相机
  * 2. 管理鼠标捕获状态
  * 3. 注册自己的输入处理系统到 ECS 调度器
  */
@@ -68,17 +68,32 @@ private:
      */
     void HandleCursorCapture();
 
+    // =========================================================================
+    // 龙书风格相机操作
+    // =========================================================================
+
+    /// 绕 Right 轴旋转（上下看）
+    void Pitch(float angle);
+
+    /// 绕世界 Y 轴旋转（左右看）
+    void RotateY(float angle);
+
+    /// 沿 Right 轴平移（左右移动）
+    void Strafe(float d);
+
+    /// 沿 Forward 轴平移（前后移动）
+    void Walk(float d);
+
 private:
     DX12Engine::Boot::GameContext *m_context = nullptr;
 
     // 跳过第一帧的鼠标输入（避免切换捕获时的视角跳变）
     bool m_skipLookInputThisFrame = false;
 
-    // 自由相机参数
-    float m_mouseSensitivity = 0.002f;
-    float m_moveSpeed = 8.0f;
+    // 相机移动参数
+    float m_moveSpeed = 10.0f;
     float m_sprintMultiplier = 2.5f;
 
-    // 垂直升降速度 (Q/E 键)
+    // 垂直升降速度
     float m_verticalSpeed = 6.0f;
 };
