@@ -19,6 +19,7 @@ class D3D12DeviceContext;
 //
 // 阴影贴图是一种离屏渲染：输出到深度纹理而非 BackBuffer。
 // BeginOffscreen / EndOffscreen 管理离屏 Pass 的生命周期。
+// 统一实例化模式：方向光阴影 VS 通过 StructuredBuffer<InstanceData> 传入世界矩阵
 // ============================================================================
 class ShadowRenderer : public OffscreenRenderer {
 public:
@@ -40,15 +41,13 @@ public:
     void BeginOffscreen(CommandList &cmdList) override;
 
     // 开始离屏阴影 Pass（设置 DSV、清除深度、设置视口/裁剪、绑定 PSO）
-    // 调用前：资源处于 SRV 状态（由调用方负责屏障转换）
-    // 调用后：资源处于 DEPTH_WRITE 状态，可进行 DrawMesh/DrawInstanced
     void BeginOffscreen(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
                         D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle, uint32_t width, uint32_t height);
 
-    // 结束离屏阴影 Pass（由调用方负责后续屏障转换回 SRV）
+    // 结束离屏阴影 Pass
     void EndOffscreen(CommandList &cmdList) override;
 
-    // 预设阴影 Pass 参数（用于基类 BeginOffscreen(CommandList&) 调用前）
+    // 预设阴影 Pass 参数
     void SetShadowPassParams(D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle,
                              uint32_t width, uint32_t height);
 
@@ -66,7 +65,6 @@ public:
     uint32_t GetHeight() const override { return m_passHeight; }
     bool IsValid() const override { return m_pso && m_rootSignature; }
 
-    // 重置离屏资源（阴影贴图尺寸变化时重建相关资源）
     void Resize(uint32_t width, uint32_t height) override;
 
     // ========================================================================
@@ -75,12 +73,8 @@ public:
     void SetGeometryResourceManager(Resource::GeometryResourceManager *mgr) { m_geometryManager = mgr; }
 
     // ========================================================================
-    // 阴影绘制接口（在 BeginOffscreen / EndOffscreen 之间调用）
+    // 阴影绘制接口（统一实例化模式，单物体 instanceCount=1）
     // ========================================================================
-
-    void DrawMesh(CommandList &cmdList, Resource::GeometryHandle geometryHandle, const DirectX::XMMATRIX &worldMatrix,
-                  D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress);
-
     void DrawInstanced(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
                        D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount);
 
@@ -88,7 +82,7 @@ public:
     ID3D12PipelineState *GetPSO() const { return m_pso.Get(); }
 
     // ========================================================================
-    // 便利方法：一站式执行完整阴影 Pass（BeginOffscreen + 绘制 + EndOffscreen）
+    // 便利方法：一站式执行完整阴影 Pass
     // ========================================================================
     template <typename DrawFunc>
     void ExecuteShadowPass(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
@@ -116,25 +110,22 @@ private:
     // 根签名
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
 
-    // PSO (Standard / Instanced)
+    // PSO（统一实例化模式）
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_psoInstanced;
 
     // 着色器字节码
     Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;
-    Microsoft::WRL::ComPtr<ID3DBlob> m_vsInstancedBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> m_psBlob;
 
     // 当前 Pass 状态
     bool m_inPass = false;
-    bool m_firstInstancedInPass = true;
 
     // 当前离屏渲染参数
     uint32_t m_passWidth = 0;
     uint32_t m_passHeight = 0;
     D3D12_CPU_DESCRIPTOR_HANDLE m_currentDsvHandle = {};
 
-    // 缓存的阴影 Pass 参数（供基类 BeginOffscreen(CommandList&) 使用）
+    // 缓存的阴影 Pass 参数
     D3D12_GPU_VIRTUAL_ADDRESS m_cachedLightCBAddress = 0;
 };
 
