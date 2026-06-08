@@ -113,7 +113,10 @@ struct StaticComponent {
     uint32_t batchInstanceIndex = UINT32_MAX;
 
     bool worldDirty = true;
-    uint64_t lastUpdateFrame = 0;
+
+    DirectX::XMFLOAT4X4 cachedWorld;             // 缓存的 World 矩阵
+    DirectX::XMFLOAT4X4 cachedWorldInvTranspose; // 缓存的 WorldInvTranspose
+    float cachedDistanceToCamera = 0.0f;         // 缓存的到相机距离（LOD 用）
 };
 } // namespace ECS
 } // namespace DX12Engine

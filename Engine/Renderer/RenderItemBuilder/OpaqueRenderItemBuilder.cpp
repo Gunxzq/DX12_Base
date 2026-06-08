@@ -62,11 +62,25 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp->materialHandle);
 
         InstanceData instData;
-        XMMATRIX world = transform->GetMatrix();
-        XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
 
-        XMStoreFloat4x4(&instData.World, world);
-        XMStoreFloat4x4(&instData.WorldInvTranspose, worldInvTranspose);
+        if (isStatic && !staticComp->worldDirty) {
+            // 静态物体：直接复用缓存的矩阵，跳过 XMMatrixInverse
+            instData.World = staticComp->cachedWorld;
+            instData.WorldInvTranspose = staticComp->cachedWorldInvTranspose;
+        } else {
+            XMMATRIX world = transform->GetMatrix();
+            XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+            XMStoreFloat4x4(&instData.World, world);
+            XMStoreFloat4x4(&instData.WorldInvTranspose, worldInvTranspose);
+
+            // 静态物体首次计算：缓存结果
+            // 存在线程安全性问题，无法保障多线程环境下的数据一致性
+            if (isStatic) {
+                staticComp->cachedWorld = instData.World;
+                staticComp->cachedWorldInvTranspose = instData.WorldInvTranspose;
+            }
+        }
+
         instData.MaterialIndex = materialIdx;
         instData.ReceiveShadow = meshComp->receivesShadow ? 1 : 0;
 
@@ -95,22 +109,25 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
 
                 if (staticComp->persistentInstanceAddress == 0) {
                     uint32_t dataSize = static_cast<uint32_t>(instances.size() * sizeof(InstanceData));
-                    instanceBuffer = m_frameResourceManager->AllocatePersistentInstanceBuffer(
-                        instances.data(), dataSize);
+                    instanceBuffer =
+                        m_frameResourceManager->AllocatePersistentInstanceBuffer(instances.data(), dataSize);
                     staticComp->persistentInstanceAddress = instanceBuffer;
                     staticComp->worldDirty = false;
                 } else {
+
+                    // 静态物体：检查是否有世界矩阵更新
+                    // 存在线程安全性问题，无法保障多线程环境下的数据一致性
                     if (staticComp->worldDirty) {
                         uint32_t dataSize = static_cast<uint32_t>(instances.size() * sizeof(InstanceData));
-                        m_frameResourceManager->UpdatePersistentBuffer(
-                            staticComp->persistentInstanceAddress, instances.data(), dataSize);
+                        m_frameResourceManager->UpdatePersistentBuffer(staticComp->persistentInstanceAddress,
+                                                                       instances.data(), dataSize);
                         staticComp->worldDirty = false;
                     }
                     instanceBuffer = staticComp->persistentInstanceAddress;
                 }
             } else {
-                instanceBuffer = m_frameResourceManager->AllocateInstance(
-                    instances.data(), instances.size() * sizeof(InstanceData));
+                instanceBuffer =
+                    m_frameResourceManager->AllocateInstance(instances.data(), instances.size() * sizeof(InstanceData));
             }
 
             OpaqueRenderItem item = OpaqueRenderItem::CreateInstanced(key.geometry, key.materialIdx, textureSRV,
@@ -134,14 +151,16 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
                     auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
 
                     if (staticComp->persistentCBAddress == 0) {
-                        cbAddress = m_frameResourceManager->AllocatePersistentObjectCB(
-                            &objCB, sizeof(ObjectConstants));
+                        cbAddress = m_frameResourceManager->AllocatePersistentObjectCB(&objCB, sizeof(ObjectConstants));
                         staticComp->persistentCBAddress = cbAddress;
                         staticComp->worldDirty = false;
                     } else {
+
+                        // 如果静态对象的世界矩阵有变化，更新持久化缓冲区
+                        // 存在线程安全性问题，无法保障多线程环境下的数据一致性
                         if (staticComp->worldDirty) {
-                            m_frameResourceManager->UpdatePersistentBuffer(
-                                staticComp->persistentCBAddress, &objCB, sizeof(ObjectConstants));
+                            m_frameResourceManager->UpdatePersistentBuffer(staticComp->persistentCBAddress, &objCB,
+                                                                           sizeof(ObjectConstants));
                             staticComp->worldDirty = false;
                         }
                         cbAddress = staticComp->persistentCBAddress;
@@ -190,11 +209,25 @@ void OpaqueRenderItemBuilder::BuildDualQueue(ECS::Registry &registry, TRenderQue
         uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp->materialHandle);
 
         InstanceData instData;
-        XMMATRIX world = transform->GetMatrix();
-        XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
 
-        XMStoreFloat4x4(&instData.World, world);
-        XMStoreFloat4x4(&instData.WorldInvTranspose, worldInvTranspose);
+        if (isStatic && !staticComp->worldDirty) {
+            // 静态物体：直接复用缓存的矩阵，跳过 XMMatrixInverse
+            instData.World = staticComp->cachedWorld;
+            instData.WorldInvTranspose = staticComp->cachedWorldInvTranspose;
+        } else {
+            XMMATRIX world = transform->GetMatrix();
+            XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+            XMStoreFloat4x4(&instData.World, world);
+            XMStoreFloat4x4(&instData.WorldInvTranspose, worldInvTranspose);
+
+            // 静态物体首次计算：缓存结果
+            // 存在线程安全性问题，无法保障多线程环境下的数据一致性
+            if (isStatic) {
+                staticComp->cachedWorld = instData.World;
+                staticComp->cachedWorldInvTranspose = instData.WorldInvTranspose;
+            }
+        }
+
         instData.MaterialIndex = materialIdx;
         instData.ReceiveShadow = meshComp->receivesShadow ? 1 : 0;
 
@@ -236,25 +269,26 @@ void OpaqueRenderItemBuilder::BuildDualQueue(ECS::Registry &registry, TRenderQue
                 if (staticComp->persistentInstanceAddress == 0) {
                     // 首次分配
                     uint32_t dataSize = static_cast<uint32_t>(instances.size() * sizeof(InstanceData));
-                    instanceBuffer = m_frameResourceManager->AllocatePersistentInstanceBuffer(
-                        instances.data(), dataSize);
+                    instanceBuffer =
+                        m_frameResourceManager->AllocatePersistentInstanceBuffer(instances.data(), dataSize);
                     staticComp->persistentInstanceAddress = instanceBuffer;
                     staticComp->worldDirty = false;
                 } else {
                     // 检查脏标记，仅更新变化的数据
+                    // 存在线程安全性问题，无法保障多线程环境下的数据一致性
                     if (staticComp->worldDirty) {
                         uint32_t dataSize = static_cast<uint32_t>(instances.size() * sizeof(InstanceData));
-                        m_frameResourceManager->UpdatePersistentBuffer(
-                            staticComp->persistentInstanceAddress,
-                            instances.data(), dataSize);
+                        m_frameResourceManager->UpdatePersistentBuffer(staticComp->persistentInstanceAddress,
+                                                                       instances.data(), dataSize);
                         staticComp->worldDirty = false;
                     }
+
                     instanceBuffer = staticComp->persistentInstanceAddress;
                 }
             } else {
                 // 动态批次：每帧使用环形缓冲区
-                instanceBuffer = m_frameResourceManager->AllocateInstance(
-                    instances.data(), instances.size() * sizeof(InstanceData));
+                instanceBuffer =
+                    m_frameResourceManager->AllocateInstance(instances.data(), instances.size() * sizeof(InstanceData));
             }
 
             OpaqueRenderItem item = OpaqueRenderItem::CreateInstanced(key.geometry, key.materialIdx, textureSRV,
@@ -281,15 +315,15 @@ void OpaqueRenderItemBuilder::BuildDualQueue(ECS::Registry &registry, TRenderQue
 
                     if (staticComp->persistentCBAddress == 0) {
                         // 首次分配持久化 CB
-                        cbAddress = m_frameResourceManager->AllocatePersistentObjectCB(
-                            &objCB, sizeof(ObjectConstants));
+                        cbAddress = m_frameResourceManager->AllocatePersistentObjectCB(&objCB, sizeof(ObjectConstants));
                         staticComp->persistentCBAddress = cbAddress;
                         staticComp->worldDirty = false;
                     } else {
                         // 脏标记：仅更新变化的数据
+                        // 存在线程安全性问题，无法保障多线程环境下的数据一致性
                         if (staticComp->worldDirty) {
-                            m_frameResourceManager->UpdatePersistentBuffer(
-                                staticComp->persistentCBAddress, &objCB, sizeof(ObjectConstants));
+                            m_frameResourceManager->UpdatePersistentBuffer(staticComp->persistentCBAddress, &objCB,
+                                                                           sizeof(ObjectConstants));
                             staticComp->worldDirty = false;
                         }
                         cbAddress = staticComp->persistentCBAddress;

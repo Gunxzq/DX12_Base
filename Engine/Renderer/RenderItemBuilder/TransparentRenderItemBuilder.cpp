@@ -56,11 +56,25 @@ void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQu
 
         // 构建 ObjectConstants
         ObjectConstants objCB;
-        XMMATRIX world = transform->GetMatrix();
-        XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+        XMMATRIX world;
 
-        XMStoreFloat4x4(&objCB.World, world);
-        XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
+        if (isStatic && !staticComp->worldDirty) {
+            // 静态物体：直接复用缓存的矩阵，跳过 XMMatrixInverse
+            objCB.World = staticComp->cachedWorld;
+            objCB.WorldInvTranspose = staticComp->cachedWorldInvTranspose;
+            world = XMLoadFloat4x4(&staticComp->cachedWorld);
+        } else {
+            world = transform->GetMatrix();
+            XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+            XMStoreFloat4x4(&objCB.World, world);
+            XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
+
+            // 静态物体首次计算：缓存结果
+            if (isStatic) {
+                staticComp->cachedWorld = objCB.World;
+                staticComp->cachedWorldInvTranspose = objCB.WorldInvTranspose;
+            }
+        }
         objCB.MaterialIndex = m_materialManager->GetGPUIndex(materialHandle);
         objCB.ReceiveShadow = 0; // 透明物体通常不接收阴影
 
