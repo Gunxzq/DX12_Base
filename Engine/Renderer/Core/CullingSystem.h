@@ -61,7 +61,7 @@ private:
     bool Intersects(const Frustum &frustum, const Math::BoundingAABB &bounds) const;
     bool Intersects(const Frustum &frustum, const Math::BoundingSphere &bounds) const;
     bool TestVisibility(const Frustum &frustum, const Math::BoundingVolumeVariant &bounds,
-                        const DirectX::XMFLOAT3 &worldPosition) const;
+                        const DirectX::XMMATRIX &worldMatrix) const;
 
     const Frustum *m_frustum = nullptr;
     CameraManager *m_cameraManager = nullptr;

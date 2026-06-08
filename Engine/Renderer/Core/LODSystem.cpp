@@ -68,8 +68,18 @@ void LODSystem::Execute(ECS::Registry &registry, LODResult &outResult) {
             continue;
         }
 
-        // 2. 计算距离
-        float distance = CalculateDistance(transform.position, cameraPos);
+        // 2. 计算距离（静态物体复用缓存，跳过 sqrt）
+        float distance;
+        auto *staticComp = registry.TryGetComponent<ECS::StaticComponent>(entity);
+        if (staticComp && !staticComp->worldDirty) {
+            distance = staticComp->cachedDistanceToCamera;
+        } else {
+            distance = CalculateDistance(transform.position, cameraPos);
+            // 多线程安全性，无法保障
+            if (staticComp) {
+                staticComp->cachedDistanceToCamera = distance;
+            }
+        }
 
         // 3. 获取 LOD 索引（配置请求）
         uint32_t requestedIndex = m_lodConfig.GetLODIndex(distance);
@@ -98,7 +108,17 @@ void LODSystem::Execute(ECS::Registry &registry, LODResult &outResult) {
         if (!lodMesh || !lodMesh->IsValid())
             continue;
 
-        float distance = CalculateDistance(transform.position, cameraPos);
+        float distance;
+        auto *staticComp = registry.TryGetComponent<ECS::StaticComponent>(entity);
+        if (staticComp && !staticComp->worldDirty) {
+            distance = staticComp->cachedDistanceToCamera;
+        } else {
+            distance = CalculateDistance(transform.position, cameraPos);
+            // 多线程安全性，无法保障
+            if (staticComp) {
+                staticComp->cachedDistanceToCamera = distance;
+            }
+        }
         uint32_t requestedIndex = m_lodConfig.GetLODIndex(distance);
         Resource::GeometryHandle geometryHandle = ResolveGeometryHandle(*lodMesh, requestedIndex);
         if (!geometryHandle.IsValid()) {
@@ -134,10 +154,6 @@ Resource::GeometryHandle LODSystem::ResolveGeometryHandle(const Resource::LODMes
     }
 
     // 情况2：请求的等级超出资产范围 → 返回资产的最后一级（最低精度）
-    // 例如：配置有 4 级 (0,1,2,3)，资产只有 2 级 (0,1)
-    //   距离近 → 用 LOD0
-    //   距离中 → 用 LOD1
-    //   距离远 → 用 LOD1（最末级）
     if (meshLODCount > 0) {
         return lodMesh.GetLowestLOD();
     }
