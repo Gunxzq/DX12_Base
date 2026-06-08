@@ -152,16 +152,16 @@ void Frustum::ComputePlanesFromCorners() {
                           XMLoadFloat3(&m_corners[CORNER_NEAR_TR]));
     m_planes[PLANE_TOP] = normalTop;
 
-    // 近平面: nearTL, nearBL, nearTR
+    // 近平面: nearTR, nearBL, nearTL（法线指向 +Z，视锥体内部）
     XMVECTOR normalNear =
-        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_NEAR_TL]), XMLoadFloat3(&m_corners[CORNER_NEAR_BL]),
-                          XMLoadFloat3(&m_corners[CORNER_NEAR_TR]));
+        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_NEAR_TR]), XMLoadFloat3(&m_corners[CORNER_NEAR_BL]),
+                          XMLoadFloat3(&m_corners[CORNER_NEAR_TL]));
     m_planes[PLANE_NEAR] = normalNear;
 
-    // 远平面: farTR, farBR, farTL
+    // 远平面: farTL, farBR, farTR（法线指向 -Z，视锥体内部）
     XMVECTOR normalFar =
-        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_FAR_TR]), XMLoadFloat3(&m_corners[CORNER_FAR_BR]),
-                          XMLoadFloat3(&m_corners[CORNER_FAR_TL]));
+        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_FAR_TL]), XMLoadFloat3(&m_corners[CORNER_FAR_BR]),
+                          XMLoadFloat3(&m_corners[CORNER_FAR_TR]));
     m_planes[PLANE_FAR] = normalFar;
 
     NormalizePlanes();
