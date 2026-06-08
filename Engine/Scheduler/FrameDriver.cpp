@@ -148,7 +148,9 @@ bool FrameDriver::Tick() {
         } catch (const std::runtime_error &e) {
             // 验证失败，清空图避免灾难
             m_taskGraph.Clear();
-            // TODO: 使用Logger记录错误
+            if (m_gameContext) {
+                m_gameContext->Logging->Error("[FrameDriver] Validate failed: {}", e.what());
+            }
         }
     }
 
@@ -187,7 +189,7 @@ bool FrameDriver::Tick() {
     // ========================================================================
 
     // A. 执行渲染逻辑 System (录制命令列表)
-    // 这些 System 会读取 ECS 中的 Transform 等组件的“只读视图”或“前端缓冲区”
+    // 这些 System 会读取 ECS 中的 Transform 等组件的"只读视图"或"前端缓冲区"
     ExecutePhase(TaskPhase::Render);
     ExecutePhase(TaskPhase::PostRender);
 
@@ -234,7 +236,9 @@ bool FrameDriver::Tick() {
     // 更新统计信息
     UpdateStats();
 
-    // 等待目标帧率
+    // ========================================================================
+    // 等待目标帧率（注意：sleep 时间会被计入 cpuIdleTime）
+    // ========================================================================
     WaitForTargetFPS();
 
     m_lastFrameTime = std::chrono::steady_clock::now(); // 更新
