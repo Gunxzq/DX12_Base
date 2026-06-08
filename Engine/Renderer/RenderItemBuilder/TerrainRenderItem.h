@@ -16,10 +16,8 @@ struct TerrainRenderItem {
     // 每物体常量缓冲区 GPU 地址（cbPerObject）
     D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress;
 
-    // 纹理 SRV
-    D3D12_GPU_DESCRIPTOR_HANDLE heightMapSRV; // 高度图（用于顶点置换，必需）
-    D3D12_GPU_DESCRIPTOR_HANDLE albedoSRV;    // 漫反射纹理（可选，用于像素着色）
-    D3D12_GPU_DESCRIPTOR_HANDLE normalSRV;    // 法线贴图（可选）
+    // 纹理数组 SRV（连续 2 个槽位：[0]=高度图, [1]=漫反射）
+    D3D12_GPU_DESCRIPTOR_HANDLE texTableSRV;
 
     // 曲面细分参数（LOD 控制）
     float heightScale = 1.0f;              // 高度缩放
@@ -31,7 +29,7 @@ struct TerrainRenderItem {
     // 材质参数
     uint32_t materialIndex;
 
-    bool IsValid() const { return geometryHandle.IsValid() && heightMapSRV.ptr != 0; }
+    bool IsValid() const { return geometryHandle.IsValid() && texTableSRV.ptr != 0 && objectCBAddress != 0; }
 };
 
 } // namespace DX12Engine::Renderer

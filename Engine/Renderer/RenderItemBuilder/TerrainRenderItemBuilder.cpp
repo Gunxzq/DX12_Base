@@ -36,19 +36,12 @@ void TerrainRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
         if (!geoHandle.IsValid())
             continue;
 
-        // 获取纹理 SRV
-        D3D12_GPU_DESCRIPTOR_HANDLE heightMapSRV = {};
-        D3D12_GPU_DESCRIPTOR_HANDLE albedoSRV = {};
-        D3D12_GPU_DESCRIPTOR_HANDLE normalSRV = {};
-
-        if (terrainComp->heightMapHandle.IsValid()) {
-            heightMapSRV = m_textureManager->GetSRV(terrainComp->heightMapHandle);
-        }
-        if (terrainComp->albedoHandle.IsValid()) {
-            albedoSRV = m_textureManager->GetSRV(terrainComp->albedoHandle);
-        }
-        if (terrainComp->normalHandle.IsValid()) {
-            normalSRV = m_textureManager->GetSRV(terrainComp->normalHandle);
+        // 获取纹理描述符表起始 SRV
+        // AllocateConsecutive(2) 保证 [0]=高度图, [1]=漫反射 在堆中连续
+        // 根签名 texTable 有 2 个 SRV，两者都必须有效才能渲染
+        D3D12_GPU_DESCRIPTOR_HANDLE texTableSRV = {};
+        if (terrainComp->heightMapHandle.IsValid() && terrainComp->albedoHandle.IsValid()) {
+            texTableSRV = m_textureManager->GetSRV(terrainComp->heightMapHandle);
         }
 
         // LightManager 模式：从 TerrainManager 查询已上传的 GPU 地址
@@ -59,9 +52,7 @@ void TerrainRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
         TerrainRenderItem item;
         item.geometryHandle = geoHandle;
         item.objectCBAddress = objectCBAddress;
-        item.heightMapSRV = heightMapSRV;
-        item.albedoSRV = albedoSRV;
-        item.normalSRV = normalSRV;
+        item.texTableSRV = texTableSRV;
         item.heightScale = terrainComp->heightScale;
         item.heightOffset = terrainComp->heightOffset;
         item.tessellationFactor = terrainComp->tessellationFactor;

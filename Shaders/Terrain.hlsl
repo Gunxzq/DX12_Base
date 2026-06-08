@@ -114,7 +114,7 @@ SamplerState gSamplerAnisotropicClamp : register(s5);
 // gSampler = gSamplerLinearWrap（直接使用 gSamplerLinearWrap，无需别名）
 
 // ---- 地形纹理数组 (t0~t7, space0) ----
-Texture2D gTerrainTextures[8] : register(t0, space0);
+Texture2D gTerrainTextures[2] : register(t0, space0);
 
 // ============================================================================
 // 环境反射（与 Common_PBR.hlsl 一致）

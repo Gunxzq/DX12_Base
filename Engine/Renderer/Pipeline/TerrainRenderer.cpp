@@ -106,7 +106,7 @@ void TerrainRenderer::DrawTerrain(CommandList &cmdList, const TerrainRenderItem 
     // 设置 PSO 和每物体常量（地形不需要实例化）
     cmdList.Get()->SetPipelineState(m_pso.Get());
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, item.objectCBAddress);
-    cmdList.Get()->SetGraphicsRootDescriptorTable(4, item.heightMapSRV);
+    cmdList.Get()->SetGraphicsRootDescriptorTable(4, item.texTableSRV);
     cmdList.Get()->DrawIndexedInstanced(indexCount, 1, 0, 0, 0);
 }
 
@@ -196,7 +196,7 @@ void TerrainRenderer::CreateRootSignature() {
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
     CD3DX12_DESCRIPTOR_RANGE texTable;
-    texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 8, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+    texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
     CD3DX12_DESCRIPTOR_RANGE envMapTable;
     envMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);

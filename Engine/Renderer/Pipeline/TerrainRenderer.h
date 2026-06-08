@@ -11,6 +11,7 @@
 namespace DX12Engine::Resource {
 class GeometryResourceManager;
 class MaterialManager;
+class DescriptorHeapCollection;
 } // namespace DX12Engine::Resource
 
 namespace DX12Engine::Renderer {
