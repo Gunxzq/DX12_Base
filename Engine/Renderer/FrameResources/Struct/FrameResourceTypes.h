@@ -57,15 +57,13 @@ struct SkinningConstants {
 // ============================================================================
 
 struct MaterialConstants {
-    DirectX::XMFLOAT4 BaseColor; // 基础颜色
-    float Metallic;              // 元金属度
-    float Roughness;             // 粗糙度
-    float Ambient;               // 环境光遮蔽强度
-    float Alpha;                 // 透明度
-
-    DirectX::XMFLOAT4 Emissive; // 自发光颜色
-    float AlphaCutoff;          // 透明度阈值
-
+    DirectX::XMFLOAT4 BaseColor;            // 基础颜色
+    float Metallic;                         // 元金属度
+    float Roughness;                        // 粗糙度
+    float Ambient;                          // 环境光遮蔽强度
+    float Alpha;                            // 透明度
+    DirectX::XMFLOAT4 Emissive;             // 自发光颜色
+    float AlphaCutoff;                      // 透明度阈值
     uint32_t BaseColorTextureIndex;         // 基础颜色纹理索引
     uint32_t NormalTextureIndex;            // 法线纹理索引
     uint32_t MetallicRoughnessTextureIndex; // 元金属度和粗糙度纹理索引
@@ -170,7 +168,6 @@ struct DecalConstants {
     uint32_t NormalTextureIndex;           // 法线纹理索引
     uint32_t MaskTextureIndex;             // 掩码纹理索引
     float Opacity;                         // 透明度
-    float Pad[3];
 };
 
 } // namespace DX12Engine::Renderer

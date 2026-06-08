@@ -74,8 +74,11 @@ cbuffer cbLights : register(b2)
 // =================================================================================================
 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
+
+#ifndef DISABLE_ENV_REFLECTION
 TextureCube gEnvMap : register(t10);
 SamplerState gEnvSampler : register(s10);
+#endif
 
 // 采样器
 SamplerState gSamplerPointWrap : register(s0);
@@ -93,12 +96,15 @@ SamplerState gSampler : register(s2);
 
 float3 ComputeEnvironmentReflection(float3 reflectDir, float3 albedo, float metallic, float roughness, float3 N, float3 V)
 {
+#ifndef DISABLE_ENV_REFLECTION
     float3 reflection = gEnvMap.Sample(gEnvSampler, reflectDir).rgb;
     float3 F0 = lerp(0.04f, albedo, metallic);
     float NdotV = max(dot(N, V), 0.0f);
     float3 fresnel = FresnelSchlick(NdotV, F0);
     float strength = 1.0f - roughness * 0.5f;
     return reflection * fresnel * strength;
+#else
+    return float3(0.0f, 0.0f, 0.0f);
+#endif
 }
-
 #endif

@@ -8,58 +8,30 @@
 namespace DX12Engine::Renderer {
 
 // ============================================================================
-// 渲染项 - 支持单物体和实例化两种模式
+// 渲染项 - 统一实例化模式（单物体 instanceCount=1）
 // ============================================================================
 struct OpaqueRenderItem {
-    enum class Type : uint8_t {
-        Standard, // 单物体模式：使用独立的 CBV
-        Instanced // 实例化模式：使用 InstanceData StructuredBuffer
-    } type;
 
-    // 公共数据
     Resource::GeometryHandle geometryHandle;
     uint32_t materialIndex;
     D3D12_GPU_DESCRIPTOR_HANDLE textureSRV;
+    D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer; // InstanceData 数组 GPU 地址
+    uint32_t instanceCount;                   // 实例数量（单物体=1）
 
-    // 模式专用数据
-    union {
-        struct {
-            D3D12_GPU_VIRTUAL_ADDRESS constantBuffer; // 单物体模式：ObjectConstants CBV
-        } standard;
-
-        struct {
-            D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer; // 实例化模式：InstanceData 数组
-            uint32_t instanceCount;                   // 实例数量
-        } instanced;
-    };
-
-    // 辅助方法
-    bool IsStandard() const { return type == Type::Standard; }
-    bool IsInstanced() const { return type == Type::Instanced; }
-    bool IsValid() const { return geometryHandle.IsValid(); }
-
-    // 工厂方法
-    static OpaqueRenderItem CreateStandard(Resource::GeometryHandle geometry, uint32_t materialIdx,
-                                           D3D12_GPU_DESCRIPTOR_HANDLE texture, D3D12_GPU_VIRTUAL_ADDRESS cbAddress) {
-        OpaqueRenderItem item;
-        item.type = Type::Standard;
-        item.geometryHandle = geometry;
-        item.materialIndex = materialIdx;
-        item.textureSRV = texture;
-        item.standard.constantBuffer = cbAddress;
-        return item;
+    bool IsValid() const {
+        return geometryHandle.IsValid() && instanceBuffer != 0 && instanceCount > 0;
     }
 
-    static OpaqueRenderItem CreateInstanced(Resource::GeometryHandle geometry, uint32_t materialIdx,
-                                            D3D12_GPU_DESCRIPTOR_HANDLE texture, D3D12_GPU_VIRTUAL_ADDRESS instBuffer,
-                                            uint32_t instCount) {
+    // 工厂方法
+    static OpaqueRenderItem Create(Resource::GeometryHandle geometry, uint32_t materialIdx,
+                                   D3D12_GPU_DESCRIPTOR_HANDLE texture, D3D12_GPU_VIRTUAL_ADDRESS instBuffer,
+                                   uint32_t instCount) {
         OpaqueRenderItem item;
-        item.type = Type::Instanced;
         item.geometryHandle = geometry;
         item.materialIndex = materialIdx;
         item.textureSRV = texture;
-        item.instanced.instanceBuffer = instBuffer;
-        item.instanced.instanceCount = instCount;
+        item.instanceBuffer = instBuffer;
+        item.instanceCount = instCount;
         return item;
     }
 };

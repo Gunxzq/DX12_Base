@@ -7,10 +7,12 @@
 //   - 聚光灯阴影 (SpotShadowVS / ShadowPS)       : 透视 VP 矩阵
 //
 // 输入布局：仅需要 Position
+// 统一实例化模式：方向光 VS 通过 StructuredBuffer<InstanceData> 传入世界矩阵
 //==============================================================================
 
 //==============================================================================
-// 物体常量缓冲 (b0)
+// 物体常量缓冲 (b0) — 点光源/聚光灯阴影 VS 使用
+// 方向光阴影 VS 使用 InstanceData StructuredBuffer，不使用此 CBV
 //==============================================================================
 cbuffer cbShadowObject : register(b0)
 {
@@ -63,6 +65,19 @@ cbuffer cbSpotShadow : register(b1)
 }
 
 //==============================================================================
+// 实例数据（统一实例化模式）
+//==============================================================================
+struct InstanceData
+{
+    row_major float4x4 World;             // 64 bytes
+    row_major float4x4 WorldInvTranspose; // 64 bytes
+    uint MaterialIndex;                   // 4 bytes
+    uint ReceiveShadow;                   // 4 bytes
+};
+
+StructuredBuffer<InstanceData> gInstanceData : register(t12, space1);
+
+//==============================================================================
 // 顶点输入/输出
 //==============================================================================
 struct VertexIn
@@ -82,25 +97,8 @@ struct GeoOut
 };
 
 //==============================================================================
-// 方向光阴影 VS — 使用方向光 VP 矩阵
+// 方向光阴影 VS — 从 InstanceData 读取世界矩阵
 //==============================================================================
-
-// InstanceData 结构体（与 C++ 侧 FrameResourceTypes.h 保持一致）
-// C++ 布局: XMFLOAT4X4 World (64B) + XMFLOAT4X4 WorldInvTranspose (64B)
-//          + uint32 MaterialIndex + uint32 ReceiveShadow + float Pad[2]
-//          = 144 bytes (含 HLSL 对齐填充)
-struct InstanceData
-{
-    row_major float4x4 World;             // 64 bytes
-    row_major float4x4 WorldInvTranspose; // 64 bytes
-    uint MaterialIndex;                   // 4 bytes
-    uint ReceiveShadow;                   // 4 bytes
-};
-
-#ifdef USE_INSTANCING
-// Instanced 模式：从 StructuredBuffer 读取每实例 World 矩阵
-StructuredBuffer<InstanceData> gInstanceData : register(t12, space1);
-
 VertexOut DirShadowVS(VertexIn vin, uint instanceID : SV_InstanceID)
 {
     VertexOut vout;
@@ -110,18 +108,6 @@ VertexOut DirShadowVS(VertexIn vin, uint instanceID : SV_InstanceID)
 
     return vout;
 }
-#else
-// Standard 模式：使用 gWorld CBV
-VertexOut DirShadowVS(VertexIn vin)
-{
-    VertexOut vout;
-
-    float4 worldPos = mul(float4(vin.PosL, 1.0f), gWorld);
-    vout.PosH = mul(worldPos, gDirLightViewProj);
-
-    return vout;
-}
-#endif
 
 //==============================================================================
 // 点光源阴影 VS — 只传递世界坐标给 GS

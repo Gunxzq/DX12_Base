@@ -1,6 +1,8 @@
 //==============================================================================
 // color.hlsl - PBR 实体渲染着色器（带阴影采样）
+// 统一实例化模式：所有物体通过 StructuredBuffer<InstanceData> 传入
 //==============================================================================
+#define DISABLE_ENV_REFLECTION
 
 #include "Common_PBR.hlsl"
 #include "ShadowSampling.hlsl"
@@ -8,9 +10,8 @@
 Texture2D gTexture : register(t0);
 
 // =========================================================================
-// 实例化模式：StructuredBuffer 替代 cbPerObject
+// 实例数据（统一实例化模式，单物体 instanceCount=1）
 // =========================================================================
-#ifdef USE_INSTANCING
 struct InstanceData
 {
     row_major float4x4 World;
@@ -20,7 +21,6 @@ struct InstanceData
 };
 
 StructuredBuffer<InstanceData> gInstanceData : register(t12, space1);
-#endif
 
 struct VertexIn
 {
@@ -37,29 +37,17 @@ struct VertexOut
     float3 WorldNormal : NORMAL;
     float3 WorldTangent : TANGENT;
     float2 TexCoord : TEXCOORD;
-#ifdef USE_INSTANCING
     nointerpolation uint InstanceIndex : INSTANCE_INDEX;
-#endif
 };
 
-VertexOut VS(VertexIn vin
-#ifdef USE_INSTANCING
-             ,
-             uint instanceID : SV_InstanceID
-#endif
-)
+VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
 {
     VertexOut vout;
 
-#ifdef USE_INSTANCING
     InstanceData inst = gInstanceData[instanceID];
     float4x4 world = inst.World;
     float4x4 worldInvTrans = inst.WorldInvTranspose;
     vout.InstanceIndex = instanceID;
-#else
-    float4x4 world = gWorld;
-    float4x4 worldInvTrans = gWorldInvTrans;
-#endif
 
     float4 worldPos = mul(float4(vin.PosL, 1.0f), world);
     vout.WorldPos = worldPos.xyz;
@@ -72,13 +60,8 @@ VertexOut VS(VertexIn vin
 
 float4 PS(VertexOut pin) : SV_Target
 {
-#ifdef USE_INSTANCING
     uint matIndex = gInstanceData[pin.InstanceIndex].MaterialIndex;
     uint receiveShadow = gInstanceData[pin.InstanceIndex].ReceiveShadow;
-#else
-    uint matIndex = gMaterialIndex;
-    uint receiveShadow = gReceiveShadow;
-#endif
 
     MaterialData matData = gMaterialData[matIndex];
 
@@ -125,8 +108,7 @@ float4 PS(VertexOut pin) : SV_Target
         directLight += ComputeSpotLight(gLights[k], mat, pin.WorldPos, N, V);
 
     // 环境反射
-    float3 R = reflect(-V, N);
-    float3 reflection = ComputeEnvironmentReflection(R, albedo, metallic, roughness, N, V);
+    float3 reflection = 0.0f;
 
     float3 litColor = ambient + directLight + reflection + emissive;
 
