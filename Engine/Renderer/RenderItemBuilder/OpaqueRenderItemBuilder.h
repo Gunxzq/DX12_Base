@@ -28,10 +28,6 @@ public:
 
     void BuildTyped(ECS::Registry &registry, TRenderQueue<OpaqueRenderItem> &outQueue) override;
 
-    // 双队列构建：Standard 和 Instanced 分别输出，避免渲染时 PSO 切换
-    void BuildDualQueue(ECS::Registry &registry, TRenderQueue<OpaqueRenderItem> &outStandard,
-                        TRenderQueue<OpaqueRenderItem> &outInstanced);
-
 private:
     FrameResourceManager *m_frameResourceManager;
     Resource::MaterialManager *m_materialManager;
