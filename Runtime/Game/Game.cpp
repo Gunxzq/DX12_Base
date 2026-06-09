@@ -7,6 +7,7 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
+#include "Renderer/Scene/Struct/Frustum.h"
 #include "Resource/AssetLoader/AssetLoader.h"
 #include "Resource/AssetLoader/Loader/DDSLoader.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
@@ -51,9 +52,11 @@ bool Game::Initialize() {
     m_opaqueRenderer->Initialize();
 
     // 4. 初始化相机
+    // 场景物体在 y=30 平面，x∈[-100,100], z∈[-100,100]
+    // 相机放在场景前方偏高位置，看向场景中心
     if (m_context->CameraMgr) {
         auto &mainCamera = m_context->CameraMgr->GetMainCamera();
-        mainCamera.Position = DirectX::XMFLOAT3(0.0f, 0.0f, -10.0f);
+        mainCamera.Position = DirectX::XMFLOAT3(0.0f, 50.0f, -110.0f);
         mainCamera.Rotation = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f);
         m_context->CameraMgr->UpdateMainCamera();
     }
@@ -178,8 +181,21 @@ void Game::RegisterEngineSystems() {
     SystemRegistry::Register({.name = "CullingLODPipeline",
                               .func =
                                   [this](Registry &reg, const MessageContext &ctx) {
-                                      // PreCulling 阶段：剔除 + LOD 计算
+                                      // PreCulling 阶段：构建视锥体 → 剔除 → LOD 计算
+
+                                      // 1. 从主相机构建视锥体
+                                      auto &camMgr = CameraManager::GetInstance();
+                                      Camera &camera = camMgr.GetMainCamera();
+
+                                      Frustum frustum;
+                                      frustum.BuildFromCamera(camera.Position, camera.Forward, camera.Up, camera.FOV,
+                                                              camera.AspectRatio, camera.NearPlane, camera.FarPlane);
+
+                                      // 2. 设置视锥体并执行剔除
+                                      m_context->CullingSystem->SetFrustum(&frustum);
                                       m_context->CullingSystem->Execute(reg, m_context->cullingResult);
+
+                                      // 3. LOD 计算
                                       m_context->LODSystem->Execute(reg, m_context->lodResult);
                                   },
                               .phase = TaskPhase::PreCulling,

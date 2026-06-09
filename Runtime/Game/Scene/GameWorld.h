@@ -66,6 +66,9 @@ public:
     void CreateSkybox();
     void CreateWater();
 
+    // 压力测试：大量动态物体（不附加 StaticComponent）
+    void CreateStressTestScene();
+
     // 公告牌（Billboard）系统
     void LoadBillboardTextures();
     void CreateBillboardTrees();
@@ -90,6 +93,7 @@ public:
 
 private:
     void RegisterRotationSystem();
+    void RegisterClearSystem();
     void RegisterCubeRenderSystem();
     void RegisterSkyboxSystem();
     void RegisterWaterRenderSystem();
@@ -123,10 +127,9 @@ private:
     std::unique_ptr<DX12Engine::Renderer::ShadowRenderer> m_shadowRenderer;   // 阴影渲染器
     std::unique_ptr<DX12Engine::Renderer::TerrainRenderer> m_terrainRenderer; // 地形渲染器
 
-    // 构建器和双队列（Standard 和 Instanced 分离，避免 PSO 切换）
+    // 构建器和渲染队列（统一实例化模式）
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderItemBuilder> m_opaqueBuilder;
-    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::OpaqueRenderItem> m_opaqueQueueStandard;
-    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::OpaqueRenderItem> m_opaqueQueueInstanced;
+    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::OpaqueRenderItem> m_opaqueQueue;
 
     std::unique_ptr<DX12Engine::Renderer::TransparentRenderItemBuilder> m_transparentBuilder;
     DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::TransparentRenderItem> m_transparentQueue;
@@ -139,6 +142,9 @@ private:
     DX12Engine::Resource::GpuResourceHandle m_materialBufferHandle; // 材质数组 GPU Buffer 句柄
     DX12Engine::ECS::Entity m_cubeEntity;
     std::vector<DX12Engine::ECS::Entity> m_cubeEntities; // 多个立方体实体
+
+    // 压力测试实体
+    std::vector<DX12Engine::ECS::Entity> m_stressEntities;
 
     // 地面平面
     DX12Engine::ECS::Entity m_groundPlaneEntity;

@@ -106,12 +106,32 @@ struct BillboardComponent {
     bool IsValid() const { return textureHandle.IsValid(); }
 };
 
-// 标记组件：附加到需要持久化缓存的实体上
+// ============================================================================
+// TODO(StaticComponent): 静态实体持久化优化 — 暂未启用
+// ============================================================================
+// 设计目标：
+//   对永不移动的实体（地形、建筑等），缓存 World 矩阵和实例数据到持久化
+//   GPU 缓冲区，避免每帧重新上传，降低 CPU 开销。
+//
+// 当前问题（已禁用）：
+//   1. OBJECT_DELETED_WHILE_STILL_IN_USE — GPU 还在使用时缓冲区被释放
+//   2. 批次大小变化（实例数增加）时，旧持久化缓冲区太小导致越界
+//   3. 多线程下 worldDirty 标志无同步，存在数据竞争
+//   4. LOD / 剔除系统复用 cachedDistanceToCamera，相机移动时距离不更新
+//
+// 重新启用前需要：
+//   - 用 GPU 围栏（Fence）确保持久化缓冲区安全释放
+//   - 检测批次大小变化，自动重新分配更大的持久化缓冲区
+//   - 为 worldDirty / cachedDistanceToCamera 加原子或锁保护
+//   - 或改为完全在 RenderThread 更新，避免跨线程访问
+// ============================================================================
 struct StaticComponent {
     D3D12_GPU_VIRTUAL_ADDRESS persistentCBAddress = 0;       // 持久化常量缓冲区地址
     D3D12_GPU_VIRTUAL_ADDRESS persistentInstanceAddress = 0; // 持久化实例数据地址
+    uint32_t persistentInstanceSize = 0;                      // 持久化实例缓冲区大小（字节）
     uint32_t batchInstanceIndex = UINT32_MAX;
 
+    // TODO: 需要线程安全保护
     bool worldDirty = true;
 
     DirectX::XMFLOAT4X4 cachedWorld;             // 缓存的 World 矩阵
