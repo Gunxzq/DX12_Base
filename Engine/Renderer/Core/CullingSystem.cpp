@@ -144,9 +144,17 @@ bool CullingSystem::Intersects(const Frustum &frustum, const Math::BoundingAABB 
     // 如果最远点仍在平面外侧（dot < 0），则完全不可见
     const auto &planes = frustum.GetPlanes();
 
-    // AABB 的 8 个角点在平面法线方向上的符号：正分量取 max，负分量取 min
-    DirectX::XMVECTOR aabbMin = DirectX::XMLoadFloat3(&bounds.min);
-    DirectX::XMVECTOR aabbMax = DirectX::XMLoadFloat3(&bounds.max);
+    // 扩展 AABB 15% 作为保护带，避免因浮点精度或包围盒不够精确
+    // 导致视锥体边缘的物体被错误剔除
+    DirectX::XMFLOAT3 centerF3 = bounds.GetCenter();
+    DirectX::XMFLOAT3 extentsF3 = bounds.GetExtents();
+    DirectX::XMVECTOR center = DirectX::XMLoadFloat3(&centerF3);
+    DirectX::XMVECTOR extents = DirectX::XMLoadFloat3(&extentsF3);
+    DirectX::XMVECTOR expand = DirectX::XMVectorReplicate(1.15f);
+    extents = DirectX::XMVectorMultiply(extents, expand);
+
+    DirectX::XMVECTOR aabbMin = DirectX::XMVectorSubtract(center, extents);
+    DirectX::XMVECTOR aabbMax = DirectX::XMVectorAdd(center, extents);
 
     for (int i = 0; i < 6; ++i) {
         DirectX::XMVECTOR plane = planes[i];
@@ -176,6 +184,9 @@ bool CullingSystem::Intersects(const Frustum &frustum, const Math::BoundingSpher
     // 如果距离 < -半径，则不可见
     const auto &planes = frustum.GetPlanes();
 
+    // 扩展球体半径 15% 作为保护带
+    float expandedRadius = bounds.radius * 1.15f;
+
     DirectX::XMVECTOR sphereCenter = DirectX::XMLoadFloat3(&bounds.center);
 
     for (int i = 0; i < 6; ++i) {
@@ -183,7 +194,7 @@ bool CullingSystem::Intersects(const Frustum &frustum, const Math::BoundingSpher
         DirectX::XMVECTOR center4 = DirectX::XMVectorSetW(sphereCenter, 1.0f);
         float distance = DirectX::XMVectorGetX(DirectX::XMPlaneDotCoord(plane, center4));
 
-        if (distance < -bounds.radius) {
+        if (distance < -expandedRadius) {
             return false; // 球体完全在平面外侧
         }
     }

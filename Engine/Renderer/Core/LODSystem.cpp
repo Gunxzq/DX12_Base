@@ -68,18 +68,10 @@ void LODSystem::Execute(ECS::Registry &registry, LODResult &outResult) {
             continue;
         }
 
-        // 2. 计算距离（静态物体复用缓存，跳过 sqrt）
-        float distance;
-        auto *staticComp = registry.TryGetComponent<ECS::StaticComponent>(entity);
-        if (staticComp && !staticComp->worldDirty) {
-            distance = staticComp->cachedDistanceToCamera;
-        } else {
-            distance = CalculateDistance(transform.position, cameraPos);
-            // 多线程安全性，无法保障
-            if (staticComp) {
-                staticComp->cachedDistanceToCamera = distance;
-            }
-        }
+        // TODO(StaticComponent): 静态优化暂未启用，每帧重新计算距离
+        //  静态物体原本可复用 cachedDistanceToCamera 避免 sqrt，
+        //  但目前 StaticComponent 有线程安全问题，暂禁用。
+        float distance = CalculateDistance(transform.position, cameraPos);
 
         // 3. 获取 LOD 索引（配置请求）
         uint32_t requestedIndex = m_lodConfig.GetLODIndex(distance);
@@ -108,17 +100,7 @@ void LODSystem::Execute(ECS::Registry &registry, LODResult &outResult) {
         if (!lodMesh || !lodMesh->IsValid())
             continue;
 
-        float distance;
-        auto *staticComp = registry.TryGetComponent<ECS::StaticComponent>(entity);
-        if (staticComp && !staticComp->worldDirty) {
-            distance = staticComp->cachedDistanceToCamera;
-        } else {
-            distance = CalculateDistance(transform.position, cameraPos);
-            // 多线程安全性，无法保障
-            if (staticComp) {
-                staticComp->cachedDistanceToCamera = distance;
-            }
-        }
+        float distance = CalculateDistance(transform.position, cameraPos);
         uint32_t requestedIndex = m_lodConfig.GetLODIndex(distance);
         Resource::GeometryHandle geometryHandle = ResolveGeometryHandle(*lodMesh, requestedIndex);
         if (!geometryHandle.IsValid()) {

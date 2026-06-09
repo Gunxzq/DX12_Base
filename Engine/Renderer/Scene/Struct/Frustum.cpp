@@ -24,8 +24,6 @@ constexpr int CORNER_FAR_TR = 7;  // 远平面右上
 
 void Frustum::BuildFromCamera(const DirectX::XMFLOAT3 &position, const DirectX::XMFLOAT3 &forward,
                               const DirectX::XMFLOAT3 &up, float fovY, float aspectRatio, float nearZ, float farZ) {
-    // 存储参数
-
 #ifdef _DEBUG
     m_params.position = position;
     m_params.forward = forward;
@@ -38,10 +36,12 @@ void Frustum::BuildFromCamera(const DirectX::XMFLOAT3 &position, const DirectX::
 #endif
 
     // 计算相机坐标系轴
+    // 在左手系中，右向量 = up × forward（+Y × +Z = +X）
     DirectX::XMVECTOR pos = DirectX::XMLoadFloat3(&position);
     DirectX::XMVECTOR fwd = DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&forward));
     DirectX::XMVECTOR upVec = DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&up));
-    DirectX::XMVECTOR right = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(fwd, upVec));
+    DirectX::XMVECTOR right = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(upVec, fwd));
+    // 重新正交化 up：right × forward = up
     upVec = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(right, fwd));
 
     // 计算视野参数
@@ -90,13 +90,26 @@ void Frustum::BuildFromCamera(const DirectX::XMFLOAT3 &position, const DirectX::
     DirectX::XMStoreFloat3(&m_corners[CORNER_FAR_TL], farTL);
     DirectX::XMStoreFloat3(&m_corners[CORNER_FAR_TR], farTR);
 
-    // 从角点计算平面
+    // 从角点直接构建平面，使用左手系叉积确保法线方向正确
     ComputePlanesFromCorners();
 }
 
 void Frustum::BuildFromMatrix(const DirectX::XMMATRIX &viewProj) {
     // Gribb/Hartmann 方法从 View-Projection 矩阵提取平面
-    // 注意：此方法假设 DX 风格的投影矩阵（Z 范围 [0,1]）
+    //
+    // 标准 Gribb/Hartmann 公式为 OpenGL 右手系设计：
+    //   左 = row3+row0, 右 = row3-row0, 下 = row3+row1, 上 = row3-row1,
+    //   近 = row3+row2, 远 = row3-row2
+    //
+    // 对于 DX 左手系 XMMatrixPerspectiveFovLH：
+    //   - 近平面直接用 row2（因为 DX 映射 Z 到 [0,1]）
+    //   - 左平面符号需要取反：-(row3+row0)
+    //   - 其他平面保持与标准公式一致
+    //
+    // 验证方法：使用 DX 内置 BoundingFrustum::CreateFromMatrix 进行交叉验证。
+    //
+    // 参考：https://www8.cs.umu.se/kurser/5DV051/HT12/lab/plane_extraction.pdf
+    //       Lengyel, "Oblique View Frustums for Shadow Maps and Other Tricks"
 
     // 提取矩阵行
     DirectX::XMVECTOR row0 = viewProj.r[0];
@@ -104,15 +117,15 @@ void Frustum::BuildFromMatrix(const DirectX::XMMATRIX &viewProj) {
     DirectX::XMVECTOR row2 = viewProj.r[2];
     DirectX::XMVECTOR row3 = viewProj.r[3];
 
-    // 左平面: row3 + row0
-    m_planes[PLANE_LEFT] = DirectX::XMVectorAdd(row3, row0);
+    // 左平面: -(row3 + row0) — DX 左手系修正
+    m_planes[PLANE_LEFT] = DirectX::XMVectorNegate(DirectX::XMVectorAdd(row3, row0));
     // 右平面: row3 - row0
     m_planes[PLANE_RIGHT] = DirectX::XMVectorSubtract(row3, row0);
     // 下平面: row3 + row1
     m_planes[PLANE_BOTTOM] = DirectX::XMVectorAdd(row3, row1);
     // 上平面: row3 - row1
     m_planes[PLANE_TOP] = DirectX::XMVectorSubtract(row3, row1);
-    // 近平面: row2 (因为 DX 投影映射 Z 到 [0,1])
+    // 近平面: row2 (DX 投影映射 Z 到 [0,1])
     m_planes[PLANE_NEAR] = row2;
     // 远平面: row3 - row2
     m_planes[PLANE_FAR] = DirectX::XMVectorSubtract(row3, row2);
@@ -128,41 +141,68 @@ void Frustum::BuildFromMatrix(const DirectX::XMMATRIX &viewProj) {
 void Frustum::ComputePlanesFromCorners() {
     using namespace DirectX;
 
-    // 左平面: 由 nearBL, farBL, nearTL 确定（法线指向视锥体外）
-    XMVECTOR normalLeft =
-        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_NEAR_BL]), XMLoadFloat3(&m_corners[CORNER_FAR_BL]),
-                          XMLoadFloat3(&m_corners[CORNER_NEAR_TL]));
-    m_planes[PLANE_LEFT] = normalLeft;
+    // 从角点构建平面，法线方向指向视锥体内部。
+    //
+    // 使用 XMVector3Cross 计算法线，然后自动校正方向：
+    // 取视锥体中心点（near/far 中心的均值），若法线指向远离中心点则取反。
+    //
+    // 平面方程: N·P + d = 0，正半空间（N·P + d > 0）为内部。
 
-    // 右平面: nearBR, nearTR, farBR
-    XMVECTOR normalRight =
-        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_NEAR_BR]), XMLoadFloat3(&m_corners[CORNER_NEAR_TR]),
-                          XMLoadFloat3(&m_corners[CORNER_FAR_BR]));
-    m_planes[PLANE_RIGHT] = normalRight;
+    auto load = [](const XMFLOAT3& f) { return XMLoadFloat3(&f); };
 
-    // 下平面: nearBL, nearBR, farBL
-    XMVECTOR normalBottom =
-        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_NEAR_BL]), XMLoadFloat3(&m_corners[CORNER_NEAR_BR]),
-                          XMLoadFloat3(&m_corners[CORNER_FAR_BL]));
-    m_planes[PLANE_BOTTOM] = normalBottom;
+    // 视锥体中心点（用于判断法线方向）
+    XMVECTOR nearC = load(m_nearCenter);
+    XMVECTOR farC = load(m_farCenter);
+    XMVECTOR frustumCenter = XMVectorScale(XMVectorAdd(nearC, farC), 0.5f);
 
-    // 上平面: nearTL, farTL, nearTR
-    XMVECTOR normalTop =
-        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_NEAR_TL]), XMLoadFloat3(&m_corners[CORNER_FAR_TL]),
-                          XMLoadFloat3(&m_corners[CORNER_NEAR_TR]));
-    m_planes[PLANE_TOP] = normalTop;
+    auto buildPlane = [&](XMVECTOR A, XMVECTOR B, XMVECTOR C) -> XMVECTOR {
+        XMVECTOR edge1 = XMVectorSubtract(B, A);
+        XMVECTOR edge2 = XMVectorSubtract(C, A);
+        XMVECTOR normal = XMVector3Cross(edge1, edge2);
+        // 确保法线指向视锥体内部：从 A 指向 frustumCenter 应与法线同向
+        XMVECTOR toCenter = XMVectorSubtract(frustumCenter, A);
+        XMVECTOR dotVal = XMVector3Dot(normal, toCenter);
+        if (XMVectorGetX(dotVal) < 0.0f) {
+            normal = XMVectorNegate(normal);
+        }
+        return XMPlaneFromPointNormal(A, normal);
+    };
 
-    // 近平面: nearTR, nearBL, nearTL（法线指向 +Z，视锥体内部）
-    XMVECTOR normalNear =
-        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_NEAR_TR]), XMLoadFloat3(&m_corners[CORNER_NEAR_BL]),
-                          XMLoadFloat3(&m_corners[CORNER_NEAR_TL]));
-    m_planes[PLANE_NEAR] = normalNear;
+    // 左平面
+    m_planes[PLANE_LEFT] = buildPlane(
+        load(m_corners[CORNER_NEAR_BL]),
+        load(m_corners[CORNER_FAR_BL]),
+        load(m_corners[CORNER_NEAR_TL]));
 
-    // 远平面: farTL, farBR, farTR（法线指向 -Z，视锥体内部）
-    XMVECTOR normalFar =
-        XMPlaneFromPoints(XMLoadFloat3(&m_corners[CORNER_FAR_TL]), XMLoadFloat3(&m_corners[CORNER_FAR_BR]),
-                          XMLoadFloat3(&m_corners[CORNER_FAR_TR]));
-    m_planes[PLANE_FAR] = normalFar;
+    // 右平面
+    m_planes[PLANE_RIGHT] = buildPlane(
+        load(m_corners[CORNER_NEAR_BR]),
+        load(m_corners[CORNER_NEAR_TR]),
+        load(m_corners[CORNER_FAR_BR]));
+
+    // 下平面
+    m_planes[PLANE_BOTTOM] = buildPlane(
+        load(m_corners[CORNER_NEAR_BL]),
+        load(m_corners[CORNER_NEAR_BR]),
+        load(m_corners[CORNER_FAR_BL]));
+
+    // 上平面
+    m_planes[PLANE_TOP] = buildPlane(
+        load(m_corners[CORNER_NEAR_TL]),
+        load(m_corners[CORNER_FAR_TL]),
+        load(m_corners[CORNER_NEAR_TR]));
+
+    // 近平面
+    m_planes[PLANE_NEAR] = buildPlane(
+        load(m_corners[CORNER_NEAR_BL]),
+        load(m_corners[CORNER_NEAR_BR]),
+        load(m_corners[CORNER_NEAR_TL]));
+
+    // 远平面
+    m_planes[PLANE_FAR] = buildPlane(
+        load(m_corners[CORNER_FAR_BL]),
+        load(m_corners[CORNER_FAR_TL]),
+        load(m_corners[CORNER_FAR_BR]));
 
     NormalizePlanes();
 }
