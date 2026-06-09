@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <d3d12.h>
 
+#pragma pack(push, 16)
+
 namespace DX12Engine::Renderer {
 
 // ============================================================================
@@ -41,6 +43,9 @@ struct TerrainConstants {
     float pad[5];
 };
 
+static_assert(sizeof(TerrainConstants) % 16 == 0,
+              "TerrainConstants alignment error: size must be multiple of 16 bytes for HLSL cbuffer compatibility");
+
 // ============================================================================
 // 地形块运行时数据
 // ============================================================================
@@ -55,3 +60,5 @@ struct TerrainBlockRuntime {
 };
 
 } // namespace DX12Engine::Renderer
+
+#pragma pack(pop)

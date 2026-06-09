@@ -2,7 +2,11 @@
 #include <DirectXMath.h>
 #include <cstdint>
 
-namespace DX12Engine::Renderer {
+#pragma pack(push, 16)
+
+namespace DX12Engine {
+
+namespace Renderer {
 
 // ============================================================================
 // 1. Pass Constants（每帧全局参数）
@@ -28,6 +32,9 @@ struct PassConstants {
     float Pad[3];
 };
 
+static_assert(sizeof(PassConstants) % 16 == 0,
+              "PassConstants alignment error: size must be multiple of 16 bytes for HLSL cbuffer compatibility");
+
 // ============================================================================
 // 2. Object Constants（物体变换）处理独立/特殊物体
 // ============================================================================
@@ -40,6 +47,9 @@ struct ObjectConstants {
     uint32_t ReceiveShadow;                // 是否接收阴影
     float ObjPad[2];
 };
+
+static_assert(sizeof(ObjectConstants) % 16 == 0,
+              "ObjectConstants alignment error: size must be multiple of 16 bytes for HLSL cbuffer compatibility");
 
 // ============================================================================
 // 3. Skinning Constants（骨骼动画）
@@ -71,6 +81,10 @@ struct MaterialConstants {
     uint32_t OcclusionTextureIndex;         // 遮挡纹理索引
     float MatPad[2];                        // 填充
 };
+
+static_assert(
+    sizeof(MaterialConstants) % 16 == 0,
+    "MaterialConstants alignment error: size must be multiple of 16 bytes for HLSL StructuredBuffer compatibility");
 
 // ============================================================================
 // 7. Fog / Atmosphere Constants
@@ -105,6 +119,9 @@ struct WaterConstants {
     uint32_t NormalTextureIndex;     // 法线纹理索引
     float Pad;                       // 填充
 };
+
+static_assert(sizeof(WaterConstants) % 16 == 0,
+              "WaterConstants alignment error: size must be multiple of 16 bytes for HLSL cbuffer compatibility");
 
 // ============================================================================
 // 9. Post Process Constants
@@ -141,18 +158,25 @@ struct Particle {
     float Pad[3];
 };
 
+static_assert(sizeof(Particle) % 16 == 0,
+              "Particle alignment error: size must be multiple of 16 bytes for HLSL StructuredBuffer compatibility");
+
 // ============================================================================
 // 11. Instance Data（GPU 实例化）处理批量/重复物体
 // ============================================================================
 
 struct InstanceData {
-    DirectX::XMFLOAT4X4 World;             // 物体变换矩阵
-    DirectX::XMFLOAT4X4 WorldInvTranspose; // 物体逆变换矩阵的转置
+    DirectX::XMFLOAT4X4 World;             // 物体变换矩阵 (offset: 0)
+    DirectX::XMFLOAT4X4 WorldInvTranspose; // 物体逆变换矩阵的转置 (offset: 64)
     uint32_t MaterialIndex;                // 材质索引-后续可改进为材质模板
     // uint32_t TextureArrayIndex;            // 关键！指向纹理数组的索引，而非具体纹理
     uint32_t ReceiveShadow; // 是否接收阴影
     float pad[2];
 };
+
+static_assert(
+    sizeof(InstanceData) % 16 == 0,
+    "InstanceData alignment error: size must be multiple of 16 bytes for HLSL StructuredBuffer compatibility");
 
 // ============================================================================
 // 12. Decal Constants
@@ -171,4 +195,12 @@ struct DecalConstants {
     float Opacity;                         // 透明度
 };
 
-} // namespace DX12Engine::Renderer
+static_assert(sizeof(DecalConstants) % 16 == 0,
+              "DecalConstants alignment error: size must be multiple of 16 bytes for HLSL cbuffer compatibility");
+
+} // namespace Renderer
+
+} // namespace DX12Engine
+
+// 恢复默认打包设置
+#pragma pack(pop)

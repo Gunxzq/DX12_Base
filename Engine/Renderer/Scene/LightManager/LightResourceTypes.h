@@ -2,6 +2,8 @@
 #include <DirectXMath.h>
 #include <cstdint>
 
+#pragma pack(push, 16)
+
 namespace DX12Engine::Renderer {
 
 // 光源 (必须与 LightingUtil.hlsl 中 Light 结构体严格对齐)
@@ -19,6 +21,8 @@ struct Light {
     float Pad;                   // offset 76
 };
 
+static_assert(sizeof(Light) % 16 == 0, "Light size mismatch");
+
 struct LightConstants {
     Light Lights[256];
     DirectX::XMFLOAT4 AmbientLight;
@@ -28,12 +32,16 @@ struct LightConstants {
     float Pad[5];
 };
 
+static_assert(sizeof(LightConstants) % 16 == 0, "LightConstants size mismatch");
+
 // -------------------------------------------------------------------
 
 // 阴影对象常量
 struct ShadowObjectConstants {
     DirectX::XMFLOAT4X4 World; // 被投射阴影的物体世界矩阵
 };
+
+static_assert(sizeof(ShadowObjectConstants) % 16 == 0, "ShadowObjectConstants size mismatch");
 
 // 方向光阴影常量
 struct DirLightShadowConstants {
@@ -46,10 +54,12 @@ struct DirLightShadowConstants {
     float Pad[3];
 };
 
+static_assert(sizeof(DirLightShadowConstants) % 16 == 0, "DirLightShadowConstants size mismatch");
+
 // 点光源阴影常量（立方体阴影）
 struct PointLightShadowConstants {
     DirectX::XMFLOAT4X4 LightViewProj[6]; // 6 个面的 VP 矩阵
-    DirectX::XMFLOAT3 LightPosition;
+    DirectX::XMFLOAT4 LightPosition;
     float ShadowMapSize;
     float Bias;
     float NormalBias;
@@ -58,6 +68,8 @@ struct PointLightShadowConstants {
     uint32_t ShadowMapIndex; // 立方体贴图索引
     float Pad[2];
 };
+
+static_assert(sizeof(PointLightShadowConstants) % 16 == 0, "PointLightShadowConstants size mismatch");
 
 // 聚光源阴影常量
 struct SpotLightShadowConstants {
@@ -70,4 +82,8 @@ struct SpotLightShadowConstants {
     uint32_t ShadowMapIndex;
     float Pad[2];
 };
+
+static_assert(sizeof(SpotLightShadowConstants) % 16 == 0, "SpotLightShadowConstants size mismatch");
 } // namespace DX12Engine::Renderer
+
+#pragma pack(pop)
