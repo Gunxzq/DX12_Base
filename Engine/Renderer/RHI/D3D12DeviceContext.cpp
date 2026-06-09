@@ -35,7 +35,7 @@ bool D3D12DeviceContext::Initialize(const InitParams &params) {
 
     // 创建并初始化功能检测器
     m_featureChecker = std::make_unique<D3D12FeatureChecker>();
-    m_featureChecker->Initialize(params.enableDebugLayer);
+    m_featureChecker->Initialize(params.enableDebugLayer, params.enableGPUBasedValidation);
 
     // 创建设备
     if (!m_featureChecker->CreateDevice(params.adapterIndex, params.minFeatureLevel)) {

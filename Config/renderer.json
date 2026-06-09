@@ -3,6 +3,7 @@
     "device": {
       "minFeatureLevel": 11.0,
       "enableDebugLayer": true,
+      "enableGPUBasedValidation": false,
       "warpFallback": true
     },
     "swapChain": {

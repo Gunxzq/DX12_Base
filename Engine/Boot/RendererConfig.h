@@ -48,11 +48,13 @@ inline D3D_FEATURE_LEVEL FloatToFeatureLevel(float level) {
 struct DeviceConfig {
     float minFeatureLevel = 11.0f;
     bool enableDebugLayer = true;
+    bool enableGPUBasedValidation = false;  // 控制 GBV 调试层，会显著影响性能
     bool warpFallback = true;
 
     D3D_FEATURE_LEVEL FeatureLevelEnum = D3D_FEATURE_LEVEL_11_0;
 
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(DeviceConfig, minFeatureLevel, enableDebugLayer, warpFallback)
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(DeviceConfig, minFeatureLevel, enableDebugLayer, 
+                                   enableGPUBasedValidation, warpFallback)
 
     void PostLoad() { FeatureLevelEnum = FloatToFeatureLevel(minFeatureLevel); }
 };

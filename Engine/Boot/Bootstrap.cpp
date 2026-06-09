@@ -157,6 +157,7 @@ bool Bootstrap::InitializeD3DDeviceContext() {
     params.depthStencilFormat = rendererConfig.formats.DepthStencilFormatEnum;
 
     params.enableDebugLayer = rendererConfig.device.enableDebugLayer;
+    params.enableGPUBasedValidation = rendererConfig.device.enableGPUBasedValidation;
 
     // MSAA 处理
     params.enable4xMsaa = rendererConfig.msaa.enabled && rendererConfig.msaa.sampleCount >= 4;

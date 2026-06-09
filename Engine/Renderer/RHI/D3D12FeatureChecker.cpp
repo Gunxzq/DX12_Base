@@ -1,13 +1,28 @@
 #include "D3D12FeatureChecker.h"
 #include "Common/ThrowHelper.h"
 #include "Common/d3dx12.h"
-#include <codecvt>
-#include <locale>
+#include <Windows.h>
 
 using namespace Microsoft::WRL;
 using namespace DX12Engine::Renderer;
 
-void D3D12FeatureChecker::Initialize(bool enableDebugLayer) {
+// ============================================================================
+// 工具函数：将宽字符串转换为 std::string（替代已弃用的 std::wstring_convert）
+// ============================================================================
+static std::string WideStringToString(const wchar_t* wideStr) {
+    if (!wideStr || wideStr[0] == L'\0')
+        return {};
+
+    int bufSize = WideCharToMultiByte(CP_UTF8, 0, wideStr, -1, nullptr, 0, nullptr, nullptr);
+    if (bufSize <= 1)  // bufSize 包含 null 终止符，<=1 表示空字符串
+        return {};
+
+    std::string result(bufSize - 1, '\0'); // 不含 null 终止符
+    WideCharToMultiByte(CP_UTF8, 0, wideStr, -1, &result[0], bufSize, nullptr, nullptr);
+    return result;
+}
+
+void D3D12FeatureChecker::Initialize(bool enableDebugLayer, bool enableGPUBasedValidation) {
     UINT dxgiFactoryFlags = 0;
 
 #if defined(DEBUG) || defined(_DEBUG)
@@ -15,6 +30,20 @@ void D3D12FeatureChecker::Initialize(bool enableDebugLayer) {
         ComPtr<ID3D12Debug> debugController;
         if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
             debugController->EnableDebugLayer();
+            OutputDebugStringA("[D3D12] Debug Layer enabled\n");
+
+            // 只有明确启用时才开启 GBV（GPU-Based Validation）
+            if (enableGPUBasedValidation) {
+                ComPtr<ID3D12Debug1> debugController1;
+                if (SUCCEEDED(debugController->QueryInterface(IID_PPV_ARGS(&debugController1)))) {
+                    debugController1->SetEnableGPUBasedValidation(TRUE);
+                    debugController1->SetEnableSynchronizedCommandQueueValidation(TRUE);
+                    OutputDebugStringA("[D3D12] GPU-Based Validation (GBV) enabled\n");
+                }
+            } else {
+                OutputDebugStringA("[D3D12] GPU-Based Validation (GBV) disabled\n");
+            }
+
             dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
         }
     }
@@ -62,7 +91,7 @@ void D3D12FeatureChecker::EnumerateAdapters() {
         info.desc.SharedSystemMemory = desc.SharedSystemMemory;
         // DXGI_ADAPTER_DESC 没有 Luid 和 Flags，所以忽略它们
 
-        info.description = std::wstring_convert<std::codecvt_utf8<wchar_t>>().to_bytes(desc.Description);
+        info.description = WideStringToString(desc.Description);
         info.isHardware = true;
 
         // 探测最高支持的功能级别

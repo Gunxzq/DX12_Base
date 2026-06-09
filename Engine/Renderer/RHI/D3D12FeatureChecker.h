@@ -54,9 +54,11 @@ public:
 
     /**
      * @brief 初始化并枚举所有适配器
-     * @param enableDebugLayer 是否启用调试层以获取更多信息
+     * @param enableDebugLayer 是否启用调试层
+     * @param enableGPUBasedValidation 是否启用 GPU-Based Validation (GBV)
+     * @note GBV 会显著降低性能（30-50% GPU 开销），建议仅在调试特定问题时启用
      */
-    void Initialize(bool enableDebugLayer = false);
+    void Initialize(bool enableDebugLayer = false, bool enableGPUBasedValidation = false);
 
     /**
      * @brief 获取所有可用适配器列表

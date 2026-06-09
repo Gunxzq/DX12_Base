@@ -22,9 +22,7 @@ struct BatchKey {
 };
 
 struct BatchKeyHash {
-    size_t operator()(const BatchKey &key) const {
-        return ((size_t)key.geometry.index << 32) ^ (key.materialIdx << 1);
-    }
+    size_t operator()(const BatchKey &key) const { return ((size_t)key.geometry.index << 32) ^ (key.materialIdx << 1); }
 };
 
 OpaqueRenderItemBuilder::OpaqueRenderItemBuilder(FrameResourceManager *frameResources, MaterialManager *materialManager,
@@ -72,7 +70,7 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         instData.ReceiveShadow = meshComp->receivesShadow ? 1 : 0;
 
         // TODO(StaticComponent): 静态优化暂未启用，isStatic 固定为 false
-        BatchKey key{geoHandle, materialIdx, false};
+        BatchKey key{geoHandle, materialIdx};
         auto &entry = batches[key];
         entry.instances.push_back(instData);
         entry.textureHandle = meshComp->textureHandle;
@@ -83,9 +81,8 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         auto &instances = entry.instances;
 
         // TODO(StaticComponent): 静态优化暂未启用，全部走动态路径
-        D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer =
-            m_frameResourceManager->AllocateInstance(
-                instances.data(), static_cast<uint32_t>(instances.size() * sizeof(InstanceData)));
+        D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer = m_frameResourceManager->AllocateInstance(
+            instances.data(), static_cast<uint32_t>(instances.size() * sizeof(InstanceData)));
 
         OpaqueRenderItem item = OpaqueRenderItem::Create(key.geometry, key.materialIdx, textureSRV, instanceBuffer,
                                                          (uint32_t)instances.size());

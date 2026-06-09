@@ -38,6 +38,7 @@ public:
         DXGI_FORMAT backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         DXGI_FORMAT depthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
         bool enableDebugLayer = false;                              // 是否启用调试层
+        bool enableGPUBasedValidation = false;                      // 是否启用 GBV 调试层（会显著影响性能）
         bool enable4xMsaa = false;                                  // 是否启用 4x MSAA
         D3D_FEATURE_LEVEL minFeatureLevel = D3D_FEATURE_LEVEL_11_0; // 最低功能级别
         int adapterIndex = -1;             // 适配器索引，-1 表示自动选择最佳适配器
