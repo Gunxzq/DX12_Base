@@ -48,8 +48,9 @@ void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQu
         if (!materialHandle.IsValid() || !textureHandle.IsValid())
             continue;
 
-        auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
-        bool isStatic = (staticComp != nullptr);
+        // TODO(StaticComponent): 静态优化暂未启用，全部走动态路径
+        // auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
+        // bool isStatic = (staticComp != nullptr);
 
         // 计算到相机的距离（用于远到近排序）
         float depth = CalculateDepth(transform->position, cameraPos);
@@ -58,47 +59,18 @@ void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQu
         ObjectConstants objCB;
         XMMATRIX world;
 
-        if (isStatic && !staticComp->worldDirty) {
-            // 静态物体：直接复用缓存的矩阵，跳过 XMMatrixInverse
-            objCB.World = staticComp->cachedWorld;
-            objCB.WorldInvTranspose = staticComp->cachedWorldInvTranspose;
-            world = XMLoadFloat4x4(&staticComp->cachedWorld);
-        } else {
-            world = transform->GetMatrix();
-            XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
-            XMStoreFloat4x4(&objCB.World, world);
-            XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
+        // 每帧重新计算 World 矩阵（静态优化禁用后统一路径）
+        world = transform->GetMatrix();
+        XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+        XMStoreFloat4x4(&objCB.World, world);
+        XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
 
-            // 静态物体首次计算：缓存结果
-            if (isStatic) {
-                staticComp->cachedWorld = objCB.World;
-                staticComp->cachedWorldInvTranspose = objCB.WorldInvTranspose;
-            }
-        }
         objCB.MaterialIndex = m_materialManager->GetGPUIndex(materialHandle);
         objCB.ReceiveShadow = 0; // 透明物体通常不接收阴影
 
-        // 分配常量缓冲：静态/动态分离
-        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress;
-        if (isStatic) {
-            if (staticComp->persistentCBAddress == 0) {
-                // 首次分配持久化 CB
-                objectCBAddress = m_frameResourceManager->AllocatePersistentObjectCB(
-                    &objCB, sizeof(ObjectConstants));
-                staticComp->persistentCBAddress = objectCBAddress;
-                staticComp->worldDirty = false;
-            } else {
-                // 检查脏标记
-                if (staticComp->worldDirty) {
-                    m_frameResourceManager->UpdatePersistentBuffer(
-                        staticComp->persistentCBAddress, &objCB, sizeof(ObjectConstants));
-                    staticComp->worldDirty = false;
-                }
-                objectCBAddress = staticComp->persistentCBAddress;
-            }
-        } else {
-            objectCBAddress = m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
-        }
+        // TODO(StaticComponent): 静态优化暂未启用，全部走动态路径
+        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
+            m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
 
         // 构建渲染项
         TransparentRenderItem item;
