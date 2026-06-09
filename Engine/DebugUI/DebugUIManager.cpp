@@ -470,6 +470,7 @@ void DebugUIManager::AutoRegisterToFrameDriver(Boot::GameContext *context) {
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Main,
+         .renderPhase = RenderPhase::UI,
          .alwaysRun = true});
 
     m_registered = true;

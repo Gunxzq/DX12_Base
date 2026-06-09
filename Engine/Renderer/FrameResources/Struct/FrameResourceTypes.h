@@ -151,6 +151,7 @@ struct InstanceData {
     uint32_t MaterialIndex;                // 材质索引-后续可改进为材质模板
     // uint32_t TextureArrayIndex;            // 关键！指向纹理数组的索引，而非具体纹理
     uint32_t ReceiveShadow; // 是否接收阴影
+    float pad[2];
 };
 
 // ============================================================================

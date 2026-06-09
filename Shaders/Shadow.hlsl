@@ -73,6 +73,7 @@ struct InstanceData
     row_major float4x4 WorldInvTranspose; // 64 bytes
     uint MaterialIndex;                   // 4 bytes
     uint ReceiveShadow;                   // 4 bytes
+    float pad[2];                         // 84 bytes
 };
 
 StructuredBuffer<InstanceData> gInstanceData : register(t12, space1);

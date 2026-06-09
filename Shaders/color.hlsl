@@ -18,6 +18,7 @@ struct InstanceData
     row_major float4x4 WorldInvTranspose;
     uint MaterialIndex;
     uint ReceiveShadow;
+    float pad[2];
 };
 
 StructuredBuffer<InstanceData> gInstanceData : register(t12, space1);
