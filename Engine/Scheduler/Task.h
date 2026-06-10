@@ -20,6 +20,7 @@ enum class TaskPhase : uint8_t {
     Update,      // 主逻辑更新：Gameplay、Physics
     LateUpdate,  // 后处理：动画、Transform 计算
     PreCulling,  // 剔除准备：视锥剔除 + LOD 计算（拆分自 PreRender）
+    PostCulling, // 剔除后处理：射线检测、遮挡查询等（使用可见集）
     PreRender,   // 渲染准备：构建器并行生成渲染队列
     Render,      // 渲染提交（单线程）
     PostRender,  // 渲染后处理

@@ -196,8 +196,8 @@ bool FrameDriver::Tick() {
     // B. 提交命令列表到 GPU
     // 注意：此时 GPU 开始执行第 N-1 帧的渲染任务
     ExecuteRenderPhase(RenderPhase::PrePass, 0);
-    ExecuteRenderPhase(RenderPhase::Opaque, 0);    // 清除颜色+深度，写入深度
-    ExecuteRenderPhase(RenderPhase::Terrain, 0);   // 复用 Opaque 深度缓冲区
+
+    ExecuteRenderPhase(RenderPhase::Opaque, 0);    // 不透明物体 + 地形（资源状态一致，合并执行）
     ExecuteRenderPhase(RenderPhase::Billboard, 0); // 复用 Opaque 深度，不写深度
     ExecuteRenderPhase(RenderPhase::Transparent, 0);
     ExecuteRenderPhase(RenderPhase::PostProcess, 0);
@@ -216,6 +216,9 @@ bool FrameDriver::Tick() {
     // PreCulling：剔除 + LOD 计算（CullingSystem + LODSystem）
     ExecutePhase(TaskPhase::PreCulling);
 
+    // PostCulling：射线检测、遮挡查询（使用 PreCulling 可见集作为候选）
+    ExecutePhase(TaskPhase::PostCulling);
+
     // PreRender：构建器并行生成渲染队列（Opaque/Transparent/Terrain/Billboard）
     ExecutePhase(TaskPhase::PreRender);
 
@@ -229,7 +232,6 @@ bool FrameDriver::Tick() {
     // 帧结束：调用 DeviceContext 进行 Present 和帧推进
     // ========================================================================
     if (m_deviceContext) {
-
         m_deviceContext->EndFrame();
     }
 
