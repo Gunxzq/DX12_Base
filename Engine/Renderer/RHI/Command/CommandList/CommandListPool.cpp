@@ -103,6 +103,9 @@ void CommandListPool<Type>::PrepareCommandList(CommandList &cmdList, ID3D12Comma
     // 此时 CommandList 一定是 Closed 状态，可以安全地 Reset
     cmdList.Reset(allocator, nullptr);
 
+    // 清除残留的渲染目标绑定
+    cmdList.Get()->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
+
     // 标记为使用后需要 Close
     entry.needsClose.store(true, std::memory_order_release);
 }

@@ -48,14 +48,17 @@ void TerrainRenderer::EndFrame() {
 
 void TerrainRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV) {
+                                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
+                                 D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV,
+                                 D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
     if (!m_pso || !m_rootSignature) {
         OutputDebugStringW(L"[ERROR] TerrainRenderer::BeginFrame: PSO or RootSignature not initialized\n");
         return;
     }
 
-    // 设置通用资源（Pass、Lights、材质）
-    BindCommonResources(cmdList, passConstantsAddress, lightCBAddress, materialBufferSRV);
+    // 设置通用资源（Pass、Lights、材质、阴影）
+    BindCommonResources(cmdList, passConstantsAddress, lightCBAddress,
+                        materialBufferSRV, shadowDataSRV, shadowMapSRV);
 }
 
 void TerrainRenderer::DrawTerrain(CommandList &cmdList, const TerrainRenderItem &item) {
@@ -302,13 +305,23 @@ void TerrainRenderer::CreatePSO() {
 
 void TerrainRenderer::BindCommonResources(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                           D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                                          D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV) {
+                                          D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
+                                          D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV,
+                                          D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
     cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
     cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
     cmdList.Get()->SetGraphicsRootConstantBufferView(2, lightCBAddress);
 
     if (materialBufferSRV.ptr != 0) {
         cmdList.Get()->SetGraphicsRootDescriptorTable(3, materialBufferSRV);
+    }
+
+    // 阴影数据绑定 (slot 6: t11,space1, slot 7: t14,space1)
+    if (shadowDataSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(6, shadowDataSRV);
+    }
+    if (shadowMapSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(7, shadowMapSRV);
     }
 }
 

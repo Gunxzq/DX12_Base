@@ -165,38 +165,38 @@ private:
         logger->Info("[TerrainLoadTask] Worker thread started (request={})", requestId);
 
         try {
-        // Step 1: CPU 端 — 加载高度图并生成网格数据
-        Resource::TerrainMeshData meshData;
-        if (!Resource::AssetLoader::GetInstance().LoadTerrainFromFile(heightmapPath, width, depth, maxHeight, segments,
-                                                                      meshData)) {
-            logger->Error("[TerrainLoadTask] Failed to load heightmap from file (request={})", requestId);
-            PostLoadFailed(requestId);
-            return;
-        }
+            // Step 1: CPU 端 — 加载高度图并生成网格数据
+            Resource::TerrainMeshData meshData;
+            if (!Resource::AssetLoader::GetInstance().LoadTerrainFromFile(heightmapPath, width, depth, maxHeight,
+                                                                          segments, meshData)) {
+                logger->Error("[TerrainLoadTask] Failed to load heightmap from file (request={})", requestId);
+                PostLoadFailed(requestId);
+                return;
+            }
 
-        logger->Info("[TerrainLoadTask] Heightmap loaded: {} vertices, {} indices (request={})",
-                     meshData.vertices.size(), meshData.indices.size(), requestId);
+            logger->Info("[TerrainLoadTask] Heightmap loaded: {} vertices, {} indices (request={})",
+                         meshData.vertices.size(), meshData.indices.size(), requestId);
 
-        data->vertices = std::move(meshData.vertices);
-        data->indices = std::move(meshData.indices);
-        data->width = meshData.width;
-        data->depth = meshData.depth;
-        data->maxHeight = meshData.maxHeight;
-        data->widthSegments = meshData.widthSegments;
-        data->heightSegments = meshData.heightSegments;
+            data->vertices = std::move(meshData.vertices);
+            data->indices = std::move(meshData.indices);
+            data->width = meshData.width;
+            data->depth = meshData.depth;
+            data->maxHeight = meshData.maxHeight;
+            data->widthSegments = meshData.widthSegments;
+            data->heightSegments = meshData.heightSegments;
 
-        readyState->bounds.min = DirectX::XMFLOAT3(-meshData.width * 0.5f, 0.0f, -meshData.depth * 0.5f);
-        readyState->bounds.max = DirectX::XMFLOAT3(meshData.width * 0.5f, meshData.maxHeight, meshData.depth * 0.5f);
-        data->bounds = readyState->bounds;
+            readyState->bounds.min = DirectX::XMFLOAT3(-meshData.width * 0.5f, 0.0f, -meshData.depth * 0.5f);
+            readyState->bounds.max =
+                DirectX::XMFLOAT3(meshData.width * 0.5f, meshData.maxHeight, meshData.depth * 0.5f);
+            data->bounds = readyState->bounds;
 
-        // Step 2: GPU 端 — 创建 VB/IB（UPLOAD 堆）
-        if (!CreateVertexBuffers(requestId, device, data, readyState)) {
-            return;
-        }
+            // Step 2: GPU 端 — 创建 VB/IB（UPLOAD 堆）
+            if (!CreateVertexBuffers(requestId, device, data, readyState)) {
+                return;
+            }
 
-
-        // Step 3: 创建纹理（高度图 + 漫反射）+ 录制 COPY/DIRECT 命令 + 注册到 BackgroundExecutor
-        CreateTexturesAndUpload(requestId, device, cmdMgr, readyState, bgExecutor);
+            // Step 3: 创建纹理（高度图 + 漫反射）+ 录制 COPY/DIRECT 命令 + 注册到 BackgroundExecutor
+            CreateTexturesAndUpload(requestId, device, cmdMgr, readyState, bgExecutor);
         } catch (const std::exception &e) {
             logger->Error("[TerrainLoadTask] Exception in ExecuteWorker: {} (request={})", e.what(), requestId);
             PostLoadFailed(requestId);
@@ -302,172 +302,171 @@ private:
         logger->Info("[TerrainLoadTask] CreateTexturesAndUpload start (request={})", requestId);
 
         try {
-        // ================================================================
-        // Step 1: 创建 GPU 资源（高度图 + 漫反射）
-        // ================================================================
-        auto heightResult = LoadSingleTextureGpu(L"Content/Textures/H_Runtime_heightmap.dds", device);
-        logger->Info("[TerrainLoadTask] Height texture GPU resource created: ok={}", heightResult.ok);
-        if (heightResult.ok) {
-            readyState->heightMapGpuHandle = heightResult.gpuHandle;
-            readyState->heightMapDesc = heightResult.desc;
-        }
-        readyState->heightMapCreated.store(true, std::memory_order_release);
+            // ================================================================
+            // Step 1: 创建 GPU 资源（高度图 + 漫反射）
+            // ================================================================
+            auto heightResult = LoadSingleTextureGpu(L"Content/Textures/H_Runtime_heightmap.dds", device);
+            logger->Info("[TerrainLoadTask] Height texture GPU resource created: ok={}", heightResult.ok);
+            if (heightResult.ok) {
+                readyState->heightMapGpuHandle = heightResult.gpuHandle;
+                readyState->heightMapDesc = heightResult.desc;
+            }
+            readyState->heightMapCreated.store(true, std::memory_order_release);
 
-        auto albedoResult = LoadSingleTextureGpu(L"Content/Textures/D_heightmap.dds", device);
-        logger->Info("[TerrainLoadTask] Albedo texture GPU resource created: ok={}", albedoResult.ok);
-        if (albedoResult.ok) {
-            readyState->albedoGpuHandle = albedoResult.gpuHandle;
-            readyState->albedoDesc = albedoResult.desc;
-        }
-        readyState->albedoCreated.store(true, std::memory_order_release);
+            auto albedoResult = LoadSingleTextureGpu(L"Content/Textures/D_heightmap.dds", device);
+            logger->Info("[TerrainLoadTask] Albedo texture GPU resource created: ok={}", albedoResult.ok);
+            if (albedoResult.ok) {
+                readyState->albedoGpuHandle = albedoResult.gpuHandle;
+                readyState->albedoDesc = albedoResult.desc;
+            }
+            readyState->albedoCreated.store(true, std::memory_order_release);
 
-        if (!heightResult.ok && !albedoResult.ok) {
-            logger->Error("[TerrainLoadTask] Both textures failed to load!");
-            PostLoaded(requestId);
-            return;
-        }
+            if (!heightResult.ok && !albedoResult.ok) {
+                logger->Error("[TerrainLoadTask] Both textures failed to load!");
+                PostLoaded(requestId);
+                return;
+            }
 
-        // ================================================================
-        // Step 2: 创建 upload buffer（合并两纹理所需大小）
-        // 注意：每个纹理的起始偏移必须对齐到 D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT (512)
-        // ================================================================
-        constexpr UINT64 TEXTURE_DATA_ALIGNMENT = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
-        auto AlignUp = [](UINT64 size, UINT64 alignment) -> UINT64 {
-            return (size + alignment - 1) & ~(alignment - 1);
-        };
-
-        UINT64 totalUploadSize = 0;
-        if (heightResult.ok) {
-            UINT64 heightSize = GetRequiredIntermediateSize(heightResult.texResource, 0,
-                                                            static_cast<UINT>(heightResult.ddsInfo.subresources.size()));
-            totalUploadSize += AlignUp(heightSize, TEXTURE_DATA_ALIGNMENT);
-        }
-        if (albedoResult.ok) {
-            UINT64 albedoSize = GetRequiredIntermediateSize(albedoResult.texResource, 0,
-                                                            static_cast<UINT>(albedoResult.ddsInfo.subresources.size()));
-            totalUploadSize += AlignUp(albedoSize, TEXTURE_DATA_ALIGNMENT);
-        }
-
-        logger->Info("[TerrainLoadTask] Creating upload buffer: size={} bytes", totalUploadSize);
-
-        Resource::GpuResourceHandle uploadHandle =
-            gpuMgr.CreateBuffer(device, totalUploadSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
-        ID3D12Resource *uploadResource = gpuMgr.GetResource(uploadHandle);
-
-
-        // ================================================================
-        // Step 3: 录制合并 COPY 命令列表（两纹理一起上传）
-        // ================================================================
-        Renderer::CommandListPool<D3D12_COMMAND_LIST_TYPE_COPY>::Handle copyCmdHandle;
-        Renderer::CommandAllocatorPool<D3D12_COMMAND_LIST_TYPE_COPY>::Handle copyAllocHandle;
-        UINT64 accumulatedOffset = 0;
-        {
-            uint64_t copyCompletedFence = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_COPY);
-            logger->Info("[TerrainLoadTask] Acquiring COPY allocator (fence={})", copyCompletedFence);
-            copyAllocHandle = cmdMgr->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_COPY>(copyCompletedFence);
-            logger->Info("[TerrainLoadTask] COPY allocator acquired: valid={}", copyAllocHandle.IsValid());
-            auto *copyAlloc = cmdMgr->GetAllocator<D3D12_COMMAND_LIST_TYPE_COPY>(copyAllocHandle);
-            logger->Info("[TerrainLoadTask] Acquiring COPY command list");
-            copyCmdHandle = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_COPY>(copyAlloc);
-            logger->Info("[TerrainLoadTask] COPY command list acquired: valid={}", copyCmdHandle.IsValid());
-            auto copyCmdList = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_COPY>(copyCmdHandle);
-
-            auto uploadOne = [&](ID3D12Resource *texResource, const Resource::DDSTextureInfo &info,
-                                 UINT64 &offset) {
-                auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                    texResource, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
-                copyCmdList.Get()->ResourceBarrier(1, &barrier);
-
-                UpdateSubresources(copyCmdList.Get(), texResource, uploadResource, offset, 0,
-                                   static_cast<UINT>(info.subresources.size()),
-                                   const_cast<D3D12_SUBRESOURCE_DATA *>(info.subresources.data()));
-
-                auto postBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                    texResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
-                copyCmdList.Get()->ResourceBarrier(1, &postBarrier);
-
-                offset += GetRequiredIntermediateSize(texResource, 0,
-                                                      static_cast<UINT>(info.subresources.size()));
-                // 下一个纹理的起始偏移必须对齐到 D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT (512)
-                offset = AlignUp(offset, TEXTURE_DATA_ALIGNMENT);
+            // ================================================================
+            // Step 2: 创建 upload buffer（合并两纹理所需大小）
+            // 注意：每个纹理的起始偏移必须对齐到 D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT (512)
+            // ================================================================
+            constexpr UINT64 TEXTURE_DATA_ALIGNMENT = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
+            auto AlignUp = [](UINT64 size, UINT64 alignment) -> UINT64 {
+                return (size + alignment - 1) & ~(alignment - 1);
             };
 
+            UINT64 totalUploadSize = 0;
             if (heightResult.ok) {
-                uploadOne(heightResult.texResource, heightResult.ddsInfo, accumulatedOffset);
+                UINT64 heightSize = GetRequiredIntermediateSize(
+                    heightResult.texResource, 0, static_cast<UINT>(heightResult.ddsInfo.subresources.size()));
+                totalUploadSize += AlignUp(heightSize, TEXTURE_DATA_ALIGNMENT);
             }
             if (albedoResult.ok) {
-                uploadOne(albedoResult.texResource, albedoResult.ddsInfo, accumulatedOffset);
+                UINT64 albedoSize = GetRequiredIntermediateSize(
+                    albedoResult.texResource, 0, static_cast<UINT>(albedoResult.ddsInfo.subresources.size()));
+                totalUploadSize += AlignUp(albedoSize, TEXTURE_DATA_ALIGNMENT);
             }
 
-            copyCmdList.Close();
-            logger->Info("[TerrainLoadTask] Merged COPY recorded: {} textures, {} bytes upload",
-                         (heightResult.ok ? 1 : 0) + (albedoResult.ok ? 1 : 0), totalUploadSize);
-        }
+            logger->Info("[TerrainLoadTask] Creating upload buffer: size={} bytes", totalUploadSize);
 
-        // ================================================================
-        // Step 4: 录制 DIRECT 命令列表 — ResourceTransition
-        // ================================================================
-        logger->Info("[TerrainLoadTask] Step 4: Acquiring DIRECT command list");
-        Renderer::CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle directCmdHandle;
-        Renderer::CommandAllocatorPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle directAllocHandle;
-        {
-            uint64_t directCompletedFence = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-            directAllocHandle = cmdMgr->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(directCompletedFence);
-            auto *directAlloc = cmdMgr->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(directAllocHandle);
-            directCmdHandle = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(directAlloc);
-            auto directCmdList = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(directCmdHandle);
+            Resource::GpuResourceHandle uploadHandle =
+                gpuMgr.CreateBuffer(device, totalUploadSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+            ID3D12Resource *uploadResource = gpuMgr.GetResource(uploadHandle);
 
-            D3D12_RESOURCE_BARRIER barriers[2];
-            uint32_t barrierCount = 0;
+            // ================================================================
+            // Step 3: 录制合并 COPY 命令列表（两纹理一起上传）
+            // ================================================================
+            Renderer::CommandListPool<D3D12_COMMAND_LIST_TYPE_COPY>::Handle copyCmdHandle;
+            Renderer::CommandAllocatorPool<D3D12_COMMAND_LIST_TYPE_COPY>::Handle copyAllocHandle;
+            UINT64 accumulatedOffset = 0;
+            {
+                uint64_t copyCompletedFence = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_COPY);
+                logger->Info("[TerrainLoadTask] Acquiring COPY allocator (fence={})", copyCompletedFence);
+                copyAllocHandle = cmdMgr->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_COPY>(copyCompletedFence);
+                logger->Info("[TerrainLoadTask] COPY allocator acquired: valid={}", copyAllocHandle.IsValid());
+                auto *copyAlloc = cmdMgr->GetAllocator<D3D12_COMMAND_LIST_TYPE_COPY>(copyAllocHandle);
+                logger->Info("[TerrainLoadTask] Acquiring COPY command list");
+                copyCmdHandle = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_COPY>(copyAlloc);
+                logger->Info("[TerrainLoadTask] COPY command list acquired: valid={}", copyCmdHandle.IsValid());
+                auto copyCmdList = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_COPY>(copyCmdHandle);
 
-            if (heightResult.ok) {
-                barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
-                    heightResult.texResource, D3D12_RESOURCE_STATE_COMMON,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                auto uploadOne = [&](ID3D12Resource *texResource, const Resource::DDSTextureInfo &info,
+                                     UINT64 &offset) {
+                    auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(texResource, D3D12_RESOURCE_STATE_COMMON,
+                                                                        D3D12_RESOURCE_STATE_COPY_DEST);
+                    copyCmdList.Get()->ResourceBarrier(1, &barrier);
+
+                    UpdateSubresources(copyCmdList.Get(), texResource, uploadResource, offset, 0,
+                                       static_cast<UINT>(info.subresources.size()),
+                                       const_cast<D3D12_SUBRESOURCE_DATA *>(info.subresources.data()));
+
+                    auto postBarrier = CD3DX12_RESOURCE_BARRIER::Transition(texResource, D3D12_RESOURCE_STATE_COPY_DEST,
+                                                                            D3D12_RESOURCE_STATE_COMMON);
+                    copyCmdList.Get()->ResourceBarrier(1, &postBarrier);
+
+                    offset += GetRequiredIntermediateSize(texResource, 0, static_cast<UINT>(info.subresources.size()));
+                    // 下一个纹理的起始偏移必须对齐到 D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT (512)
+                    offset = AlignUp(offset, TEXTURE_DATA_ALIGNMENT);
+                };
+
+                if (heightResult.ok) {
+                    uploadOne(heightResult.texResource, heightResult.ddsInfo, accumulatedOffset);
+                }
+                if (albedoResult.ok) {
+                    uploadOne(albedoResult.texResource, albedoResult.ddsInfo, accumulatedOffset);
+                }
+
+                copyCmdList.Close();
+                logger->Info("[TerrainLoadTask] Merged COPY recorded: {} textures, {} bytes upload",
+                             (heightResult.ok ? 1 : 0) + (albedoResult.ok ? 1 : 0), totalUploadSize);
             }
-            if (albedoResult.ok) {
-                barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
-                    albedoResult.texResource, D3D12_RESOURCE_STATE_COMMON,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+            // ================================================================
+            // Step 4: 录制 DIRECT 命令列表 — ResourceTransition
+            // ================================================================
+            logger->Info("[TerrainLoadTask] Step 4: Acquiring DIRECT command list");
+            Renderer::CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle directCmdHandle;
+            Renderer::CommandAllocatorPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle directAllocHandle;
+            {
+                uint64_t directCompletedFence = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                directAllocHandle = cmdMgr->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(directCompletedFence);
+                auto *directAlloc = cmdMgr->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(directAllocHandle);
+                directCmdHandle = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(directAlloc);
+                auto directCmdList = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(directCmdHandle);
+
+                D3D12_RESOURCE_BARRIER barriers[2];
+                uint32_t barrierCount = 0;
+
+                if (heightResult.ok) {
+                    barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
+                        heightResult.texResource, D3D12_RESOURCE_STATE_COMMON,
+                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                }
+                if (albedoResult.ok) {
+                    barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
+                        albedoResult.texResource, D3D12_RESOURCE_STATE_COMMON,
+                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                }
+
+                if (barrierCount > 0) {
+                    directCmdList.Get()->ResourceBarrier(barrierCount, barriers);
+                }
+
+                directCmdList.Close();
+                logger->Info("[TerrainLoadTask] DIRECT command list recorded for {} textures", barrierCount);
             }
 
-            if (barrierCount > 0) {
-                directCmdList.Get()->ResourceBarrier(barrierCount, barriers);
-            }
+            // ================================================================
+            // Step 5: 注册到 BackgroundExecutor
+            // ================================================================
+            auto gpuWork = std::make_shared<GpuWorkItem>();
+            gpuWork->copyCmdListHandle = copyCmdHandle;
+            gpuWork->copyAllocatorHandle = copyAllocHandle;
+            gpuWork->directCmdListHandle = directCmdHandle;
+            gpuWork->directAllocatorHandle = directAllocHandle;
+            gpuWork->uploadBufferHandle = uploadHandle;
 
-            directCmdList.Close();
-            logger->Info("[TerrainLoadTask] DIRECT command list recorded for {} textures", barrierCount);
-        }
+            gpuWork->onComplete = [requestId, readyState](bool success) {
+                if (success) {
+                    PostLoaded(requestId);
+                } else {
+                    PostLoadFailed(requestId);
+                }
+            };
 
-        // ================================================================
-        // Step 5: 注册到 BackgroundExecutor
-        // ================================================================
-        auto gpuWork = std::make_shared<GpuWorkItem>();
-        gpuWork->copyCmdListHandle = copyCmdHandle;
-        gpuWork->copyAllocatorHandle = copyAllocHandle;
-        gpuWork->directCmdListHandle = directCmdHandle;
-        gpuWork->directAllocatorHandle = directAllocHandle;
-        gpuWork->uploadBufferHandle = uploadHandle;
+            gpuWork->ready.store(true, std::memory_order_release);
 
-        gpuWork->onComplete = [requestId, readyState](bool success) {
-            if (success) {
-                PostLoaded(requestId);
+            if (bgExecutor) {
+                bgExecutor->RegisterGpuWork(gpuWork);
+                logger->Info("[TerrainLoadTask] GpuWorkItem registered to BackgroundExecutor (request={})", requestId);
             } else {
-                PostLoadFailed(requestId);
+                logger->Error("[TerrainLoadTask] BackgroundExecutor is null, cannot register GpuWorkItem!");
+                PostLoaded(requestId);
             }
-        };
-
-        gpuWork->ready.store(true, std::memory_order_release);
-
-        if (bgExecutor) {
-            bgExecutor->RegisterGpuWork(gpuWork);
-            logger->Info("[TerrainLoadTask] GpuWorkItem registered to BackgroundExecutor (request={})", requestId);
-        } else {
-            logger->Error("[TerrainLoadTask] BackgroundExecutor is null, cannot register GpuWorkItem!");
-            PostLoaded(requestId);
-        }
         } catch (const std::exception &e) {
-            logger->Error("[TerrainLoadTask] Exception in CreateTexturesAndUpload: {} (request={})", e.what(), requestId);
+            logger->Error("[TerrainLoadTask] Exception in CreateTexturesAndUpload: {} (request={})", e.what(),
+                          requestId);
             PostLoadFailed(requestId);
         } catch (...) {
             logger->Error("[TerrainLoadTask] Unknown exception in CreateTexturesAndUpload (request={})", requestId);
