@@ -25,6 +25,9 @@ DEFINE_ACTION(Cancel);
 
 DEFINE_ACTION(ResetCamera);
 
+DEFINE_ACTION(Pick);   // 左键拾取/拖拽
+DEFINE_ACTION(Release); // 释放拾取（与 Pick 共用左键）
+
 // ------------------------------------------------------------------
 // 辅助函数：获取动作名称用于调试或 JSON 映射
 // 注意：JSON 中仍然使用字符串 "Jump"，加载时会再次哈希以匹配这些 ID
@@ -52,5 +55,9 @@ inline const char *GetActionName(ActionId id) {
 
     if (id == ActionId_ResetCamera)
         return "ResetCamera";
+    if (id == ActionId_Pick)
+        return "Pick";
+    if (id == ActionId_Release)
+        return "Release";
     return "Unknown";
 }

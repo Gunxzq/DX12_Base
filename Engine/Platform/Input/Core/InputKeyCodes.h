@@ -22,12 +22,23 @@ enum class EKeyCode : uint16_t {
     // ------------------------------------------------------------------
 
     // 常用功能键
-    Key_BackSpace = VK_BACK,   // 8
-    Key_Tab = VK_TAB,          // 9
-    Key_Enter = VK_RETURN,     // 13
-    Key_Shift = VK_SHIFT,      // 16 (通用 Shift)
-    Key_Ctrl = VK_CONTROL,     // 17 (通用 Ctrl)
-    Key_Alt = VK_MENU,         // 18 (通用 Alt)
+    Key_BackSpace = VK_BACK, // 8
+    Key_Tab = VK_TAB,        // 9
+    Key_Enter = VK_RETURN,   // 13
+
+    // 修饰键 — 通用版本（用于游戏逻辑）
+    Key_Shift = VK_SHIFT,  // 16 (通用 Shift)
+    Key_Ctrl = VK_CONTROL, // 17 (通用 Ctrl)
+    Key_Alt = VK_MENU,     // 18 (通用 Alt)
+
+    // 修饰键 — 左右区分版本（用于专业工具、编辑器、宏录制等）
+    Key_LeftShift = VK_LSHIFT,   // 160
+    Key_RightShift = VK_RSHIFT,  // 161
+    Key_LeftCtrl = VK_LCONTROL,  // 162
+    Key_RightCtrl = VK_RCONTROL, // 163
+    Key_LeftAlt = VK_LMENU,      // 164
+    Key_RightAlt = VK_RMENU,     // 165
+
     Key_Pause = VK_PAUSE,      // 19
     Key_CapsLock = VK_CAPITAL, // 20
     Key_Escape = VK_ESCAPE,    // 27
@@ -179,21 +190,29 @@ static inline bool IsAxis(EKeyCode code) {
     return v >= 3000 && v < 4000;
 }
 
-/**
- * @brief 获取用于调试显示的字符串名称
- */
-static inline const char *ToString(EKeyCode code) {
-    // 实际项目中建议实现一个完整的映射表，这里仅做示例
-    if (IsKeyboard(code))
-        return "Keyboard Key";
-    if (IsMouse(code))
-        return "Mouse Button";
-    if (IsGamepadButton(code))
-        return "Gamepad Button";
-    if (IsAxis(code))
-        return "Axis";
-    return "Unknown";
+static inline bool IsModifierKey(EKeyCode code) {
+    uint16_t v = static_cast<uint16_t>(code);
+    return v == VK_SHIFT || v == VK_LSHIFT || v == VK_RSHIFT || v == VK_CONTROL || v == VK_LCONTROL ||
+           v == VK_RCONTROL || v == VK_MENU || v == VK_LMENU || v == VK_RMENU;
 }
+
+static inline EKeyCode Normalize(EKeyCode code) {
+    uint16_t v = static_cast<uint16_t>(code);
+    if (v == VK_LSHIFT || v == VK_RSHIFT)
+        return EKeyCode::Key_Shift;
+    if (v == VK_LCONTROL || v == VK_RCONTROL)
+        return EKeyCode::Key_Ctrl;
+    if (v == VK_LMENU || v == VK_RMENU)
+        return EKeyCode::Key_Alt;
+    return code;
+}
+
+static inline bool ShouldDistinguishModifiers() {
+    // TODO: 后续从配置读取
+    static bool enabled = true; // 默认开启区分
+    return enabled;
+}
+
 } // namespace KeyCodeUtils
 
 } // namespace Input

@@ -65,6 +65,8 @@ inline EKeyCode ParseKeyCode(const std::string &keyName) {
         {"RightShift", EKeyCode::Key_Shift},
         {"LeftCtrl", EKeyCode::Key_Ctrl},
         {"RightCtrl", EKeyCode::Key_Ctrl},
+        {"LeftControl", EKeyCode::Key_Ctrl},
+        {"RightControl", EKeyCode::Key_Ctrl},
         {"LeftAlt", EKeyCode::Key_Alt},
         {"RightAlt", EKeyCode::Key_Alt},
 
@@ -102,6 +104,22 @@ inline EKeyCode ParseKeyCode(const std::string &keyName) {
         if (c >= '0' && c <= '9') {
             return static_cast<EKeyCode>(c); // 对应 InputKeyCodes.h 中的 '0'...'9'
         }
+    }
+
+    // --- 6. 鼠标按键 ---
+    static const std::unordered_map<std::string, EKeyCode> MouseKeyMap = {
+        {"Mouse_Left", EKeyCode::Mouse_Left},
+        {"Mouse_Right", EKeyCode::Mouse_Right},
+        {"Mouse_Middle", EKeyCode::Mouse_Middle},
+        {"Mouse_X1", EKeyCode::Mouse_X1},
+        {"Mouse_X2", EKeyCode::Mouse_X2},
+        {"Mouse_WheelUp", EKeyCode::Mouse_WheelUp},
+        {"Mouse_WheelDown", EKeyCode::Mouse_WheelDown},
+    };
+
+    auto mouseIt = MouseKeyMap.find(keyName);
+    if (mouseIt != MouseKeyMap.end()) {
+        return mouseIt->second;
     }
 
     // 未识别
