@@ -91,38 +91,21 @@ public:
     FrameDriver(FrameDriver &&) = delete;
     FrameDriver &operator=(FrameDriver &&) = delete;
 
-    /// 初始化（设置线程数等）
     void Initialize(uint32_t workerThreadCount = 0); // 0 = 自动
 
-    /// 运行一帧（非阻塞，返回是否继续）
     bool Tick();
-
-    /// 请求停止主循环
     void Stop() { m_running = false; }
-
-    /// 是否正在运行
     bool IsRunning() const { return m_running; }
 
-    /// 获取当前帧统计
     const FrameStats &GetFrameStats() const { return m_stats; }
-
-    /// 设置目标帧率（0 = 不限制）
     void SetTargetFPS(uint32_t fps) { m_targetFPS = fps; }
-
     uint32_t GetTargetFPS() const { return m_targetFPS; }
 
-    /// 设置 D3D12 设备上下文（由 Bootstrap 在初始化时注入）
     void SetDeviceContext(Renderer::D3D12DeviceContext *deviceContext) { m_deviceContext = deviceContext; }
-
     void SetGameContext(Boot::GameContext *context) { m_gameContext = context; }
 
-    /// 获取 GameContext 指针
     Boot::GameContext *GetGameContext() const { return m_gameContext; }
-
-    /// 获取 D3D12 设备上下文
     Renderer::D3D12DeviceContext *GetDeviceContext() const { return m_deviceContext; }
-
-    /// 获取命令管理器（通过 DeviceContext 访问）
     Renderer::CommandManager *GetCommandManager() const;
 
     /// 获取任务执行器（供 L4 层提交任务）
@@ -134,67 +117,20 @@ public:
     // ========================================================================
     // 渲染阶段管理（新增）
     // ========================================================================
-
-    /**
-     * @brief 提交一个已录制的命令列表句柄到指定渲染阶段
-     */
     void SubmitRenderCommand(RenderPhase phase,
                              const typename Renderer::CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle &handle);
 
     // ========================================================================
-    // L4 层回调注册（多缓冲交换钩子）
+    // L4 层回调注册
     // ========================================================================
 
-    /**
-     * @brief 注册帧同步回调
-     *
-     * L4 层通过此接口注册自己的多缓冲交换逻辑。
-     * 回调在逻辑帧结束、渲染帧开始前调用。
-     *
-     * @param callback 回调函数
-     * @param name 回调名称（用于调试）
-     * @return 回调 ID（用于注销）
-     *
-     * 使用示例：
-     * @code
-     * // L4 层定义多缓冲管理器
-     * class TransformBuffer {
-     * public:
-     *     void Swap() { m_frontIsA = !m_frontIsA; }
-     * };
-     *
-     * // 注册到 FrameDriver
-     * TransformBuffer transformBuffer;
-     * driver.RegisterFrameSyncCallback([&]() {
-     *     transformBuffer.Swap();  // 在正确时机交换
-     * }, "TransformBufferSwap");
-     * @endcode
-     */
+    // 帧同步点
     uint32_t RegisterFrameSyncCallback(FrameSyncCallback callback, const std::string &name = "");
-
-    /// 注销帧同步回调
     void UnregisterFrameSyncCallback(uint32_t callbackId);
-
-    /// 获取已注册的回调数量
     size_t GetFrameSyncCallbackCount() const { return m_frameSyncCallbacks.size(); }
 
-    // ========================================================================
-    // 即时执行回调注册（用于零延迟需求，如相机、输入）
-    // ========================================================================
-
-    /**
-     * @brief 注册即时执行回调
-     *
-     * 这些回调会在每帧 Render 阶段之前、主线程上立即执行。
-     * 适用于需要零延迟反馈的逻辑（如相机矩阵更新、UI 交互状态刷新）。
-     *
-     * @param callback 回调函数
-     * @param name 回调名称（用于调试）
-     * @return 回调 ID
-     */
+    // 立即回调
     uint32_t RegisterImmediateCallback(std::function<void()> callback, const std::string &name = "");
-
-    /// 注销即时执行回调
     void UnregisterImmediateCallback(uint32_t callbackId);
 
 private:
@@ -207,7 +143,6 @@ private:
 
     // D3D设备上下文
     Renderer::D3D12DeviceContext *m_deviceContext = nullptr;
-
     Boot::GameContext *m_gameContext = nullptr;
 
     // 渲染阶段命令列表收集器（使用 Handle 避免生命周期问题）
@@ -239,24 +174,11 @@ private:
     void ExecuteImmediate();
     void ExecutePhase(TaskPhase phase);
     void ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence); // 批量执行某阶段的命令
-    // uint64_t SubmitBarrier(RenderPhase phase);                         // 提交资源屏障
-    void FrameSync(); // 调用 L4 回调
+    void FrameSync();                                                  // 调用 L4 回调
     void WaitForTargetFPS();
     void UpdateStats();
 };
 
-// ========================================================================
-// 全局访问点（可选，方便 L4 层访问）
-// ========================================================================
-
-/**
- * @brief 调度器上下文
- *
- * L4 层通过此上下文访问 L3 调度功能。
- * 避免直接使用全局变量，便于测试和替换实现。
- *
- * @note CommandManager 通过 GameContext::DeviceContext->GetCommandManager() 访问
- */
 struct SchedulerContext {
     FrameDriver *frameDriver = nullptr;
     TaskExecutor *executor = nullptr;
@@ -268,11 +190,7 @@ struct SchedulerContext {
 
 /// 获取当前调度器上下文（线程局部）
 SchedulerContext &GetSchedulerContext();
-
-/// 初始化全局调度器上下文
 void InitializeSchedulerContext(ECS::Registry &registry, Renderer::D3D12DeviceContext *deviceContext = nullptr);
-
-/// 关闭调度器上下文
 void ShutdownSchedulerContext();
 
 } // namespace Scheduler

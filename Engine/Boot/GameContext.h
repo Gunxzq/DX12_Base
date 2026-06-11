@@ -5,6 +5,8 @@
 #include "Logger/Logger.h"
 #include "Renderer/Core/CullingSystem.h"
 #include "Renderer/Core/LODSystem.h"
+#include "Renderer/Core/VisibleRaycaster.h"
+#include "Renderer/Scene/CameraManager.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Resource/Texture/TextureManager.h"
 
@@ -20,6 +22,7 @@ class CommandList;
 namespace DX12Engine {
 namespace Renderer {
 class FrameResourceManager;
+struct PredictedCameraData;
 } // namespace Renderer
 
 namespace Resource {
@@ -99,12 +102,16 @@ public:
 
     Input::InputManager *InputMgr = nullptr;
 
-    // PreRender 阶段的临时结果（每帧重置）
-    Renderer::CullingResult cullingResult; // 改为 CullingResult 类型
-    Renderer::LODResult lodResult;         // 改为 LODResult 类型
+    // 临时结构
+    Renderer::CullingResult cullingResult;
+    Renderer::LODResult lodResult;
+    Renderer::RaycastResult raycastResult;
+
+    Renderer::PredictedCameraData predictedCameraData;
 
     Renderer::CullingSystem *CullingSystem = nullptr;
     Renderer::LODSystem *LODSystem = nullptr;
+    Renderer::VisibleRaycaster *VisibleRaycaster = nullptr;
 
     // ── 便捷访问方法 ──
     bool IsValid() const;

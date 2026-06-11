@@ -14,7 +14,9 @@ namespace Scheduler {
 using TaskId = uint32_t;
 inline constexpr TaskId INVALID_TASK_ID = 0;
 
-/// 任务执行阶段（用于确定任务在帧中的执行时机）
+// 任务执行阶段（用于确定任务在帧中的执行时机）
+// 不能更改ECS组件，只能写入临时结构
+// 等待帧驱动器的同步点来进行更新
 enum class TaskPhase : uint8_t {
     EarlyUpdate, // 最先执行：输入处理、网络接收
     Update,      // 主逻辑更新：Gameplay、Physics

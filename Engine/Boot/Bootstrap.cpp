@@ -291,9 +291,6 @@ void Bootstrap::InitializeModules() {
         m_lodSystem.SetCameraManager(&DX12Engine::Renderer::CameraManager::GetInstance());
         m_lodSystem.SetGeometryManager(&m_geometryResourceManager);
 
-        // CullingSystem 也需要相机管理器引用（用于预测视锥体剔除）
-        m_cullingSystem.SetCameraManager(&DX12Engine::Renderer::CameraManager::GetInstance());
-
         InitializeDebugUI();
 
         // 5. MessageDispatcher 单例 (Event 层，调度系统需要)
@@ -370,6 +367,7 @@ GameContext *Bootstrap::CreateContext() {
     m_context->TextureMgr = &m_textureManager;
     m_context->CullingSystem = &m_cullingSystem;
     m_context->LODSystem = &m_lodSystem;
+    m_context->VisibleRaycaster = &m_visibleRaycaster;
 
     if (m_frameDriver) {
         m_frameDriver->SetGameContext(m_context.get());
