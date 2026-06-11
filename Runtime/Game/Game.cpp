@@ -74,9 +74,35 @@ bool Game::Initialize() {
     // 6. 初始化游戏模块（它们会自己注册游戏逻辑系统）
     m_world.Initialize(m_context, m_opaqueRenderer.get());
 
+    // 连接 CullingSystem/VisibleRaycaster 引用，必须在 Initialize 之前完成
+    // 因为 Initialize → RegisterPickingSystems() 需要这些指针非空
+    m_inputHandler.SetVisibleRaycaster(m_context->VisibleRaycaster);
+
     m_inputHandler.Initialize(m_context);
 
-    // 7. 注册相机更新回调（Immediate 路径）
+    // 7. 注册帧同步回调：消费 raycastResult + 应用拖拽到 ECS（PostCulling 后已就绪）
+    if (m_context->FrameDriver) {
+        m_context->FrameDriver->RegisterFrameSyncCallback(
+            [this]() {
+                // ── 缓存拾取结果（DebugUI 等消费）──
+                const auto &result = m_context->raycastResult;
+                if (result.HasAny()) {
+                    const auto &closest = result.GetClosest();
+                    m_pickedEntity = closest.entity;
+                    m_pickedHitPoint = closest.hitPoint;
+                    m_pickedDistance = closest.distance;
+                    m_hasPickedResult = true;
+                } else {
+                    m_hasPickedResult = false;
+                }
+
+                // ── 安全地将拖拽意图写入 ECS 组件 ──
+                m_inputHandler.ApplyDragToECS(*m_world.GetRegistry());
+            },
+            "PickingResultSync");
+    }
+
+    // 8. 注册相机更新回调（Immediate 路径）
     if (m_context->FrameDriver) {
         m_context->FrameDriver->RegisterImmediateCallback(
             [this]() {
@@ -111,7 +137,8 @@ bool Game::Initialize() {
             "CameraUpdate");
     }
 
-    // 8. 注册调试 UI 面板
+    // 9. 注册调试 UI 面板
+    // ── Performance 面板 ──
     DebugUIManager::Get().RegisterPanel(
         {.name = "Performance", .group = "Performance", .drawFunc = [this](float dt, uint32_t frame) {
              static int targetFPS = 60;
@@ -136,6 +163,37 @@ bool Game::Initialize() {
              float rawFPS = 1.0f / m_context->MainTimer->GetRawDeltaTime();
              if (rawFPS > 62.0f && dt * 1000.0f > 15.5f) {
                  ImGui::TextColored(ImVec4(1, 1, 0, 1), "⚠️ Limited by DWM (windowed mode)");
+             }
+         }});
+
+    // ── Picking 面板 ──
+    DebugUIManager::Get().RegisterPanel(
+        {.name = "Picking", .group = "Debug", .drawFunc = [this](float dt, uint32_t frame) {
+             ImGui::Text("Frame: %u", frame);
+             ImGui::Separator();
+
+             if (m_hasPickedResult) {
+                 ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Hit!");
+                 ImGui::Text("  Entity:  %u", static_cast<uint32_t>(m_pickedEntity));
+                 ImGui::Text("  Distance: %.2f", m_pickedDistance);
+                 ImGui::Text("  Hit Point: (%.2f, %.2f, %.2f)", m_pickedHitPoint.x, m_pickedHitPoint.y,
+                             m_pickedHitPoint.z);
+
+                 // 显示本帧所有命中
+                 const auto &allHits = m_context->raycastResult.hits;
+                 if (allHits.size() > 1) {
+                     ImGui::Separator();
+                     ImGui::Text("All hits (%zu):", allHits.size());
+                     for (size_t i = 0; i < allHits.size(); ++i) {
+                         const auto &h = allHits[i];
+                         ImGui::Text("  [%zu] Entity=%u  Dist=%.2f  Pos=(%.1f,%.1f,%.1f)", i,
+                                     static_cast<uint32_t>(h.entity), h.distance, h.hitPoint.x, h.hitPoint.y,
+                                     h.hitPoint.z);
+                     }
+                 }
+             } else {
+                 ImGui::TextDisabled("No hit this frame");
+                 ImGui::TextDisabled("Ctrl+Click to pick entities");
              }
          }});
 
@@ -181,21 +239,17 @@ void Game::RegisterEngineSystems() {
     SystemRegistry::Register({.name = "CullingLODPipeline",
                               .func =
                                   [this](Registry &reg, const MessageContext &ctx) {
-                                      // PreCulling 阶段：构建视锥体 → 剔除 → LOD 计算
-
-                                      // 1. 从主相机构建视锥体
+                                      float dt = m_context->MainTimer->GetDeltaTime();
+                                      float predictionFactor = 0.5f; // 安全系数, 用于调整预测位置的权重
                                       auto &camMgr = CameraManager::GetInstance();
-                                      Camera &camera = camMgr.GetMainCamera();
 
-                                      Frustum frustum;
-                                      frustum.BuildFromCamera(camera.Position, camera.Forward, camera.Up, camera.FOV,
-                                                              camera.AspectRatio, camera.NearPlane, camera.FarPlane);
+                                      // 预测相机
+                                      m_context->predictedCameraData =
+                                          camMgr.GetPredictedCameraData(dt, predictionFactor);
 
-                                      // 2. 设置视锥体并执行剔除
-                                      m_context->CullingSystem->SetFrustum(&frustum);
+                                      m_context->CullingSystem->SetCamera(m_context->predictedCameraData);
                                       m_context->CullingSystem->Execute(reg, m_context->cullingResult);
 
-                                      // 3. LOD 计算
                                       m_context->LODSystem->Execute(reg, m_context->lodResult);
                                   },
                               .phase = TaskPhase::PreCulling,

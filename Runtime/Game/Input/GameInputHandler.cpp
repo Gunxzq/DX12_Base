@@ -4,9 +4,12 @@
 #include "Common/ThrowHelper.h"
 #include "Framework/SystemRegistry.h"
 #include "Math/MathTypes.h"
+#include "Platform/Input/InputContextStack.h"
 #include "Platform/Input/InputManager.h"
 #include "Platform/Input/InputSystem.h"
 #include "Platform/Windows/Window.h"
+#include "Renderer/Core/CullingSystem.h"
+#include "Renderer/Core/VisibleRaycaster.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Scheduler/FrameDriver.h"
 #include <DirectXMath.h>
@@ -29,6 +32,9 @@ void GameInputHandler::Initialize(GameContext *context) {
 
     // 注册输入处理系统
     RegisterInputSystem();
+
+    // 注册拾取系统（PostCulling + EarlyUpdate）
+    RegisterPickingSystems();
 }
 
 void GameInputHandler::RegisterInputSystem() {
@@ -54,6 +60,168 @@ void GameInputHandler::RegisterInputSystem() {
                               .alwaysRun = true});
 }
 
+void GameInputHandler::RegisterPickingSystems() {
+    if (!m_context || !m_visibleRaycaster)
+        return;
+
+    // ========================================================================
+    // PickingProcessSystem — PostCulling 阶段：输入检测 + 射线投射
+    //
+    // ⚠️ 不触碰 ECS 组件（读/写都不行，必须在 FrameSync 进行）
+    //
+    // 职责（游戏层）：
+    //   1. 输入上下文 / 光标捕获检查
+    //   2. Pressed: VisibleRaycaster 射线检测 → 存意图 DragIntent::Start
+    //   3. Held:    纯数学射线-平面求交 → 存意图 DragIntent::Update  + 计算好的新位置
+    //   4. Released: 存意图 DragIntent::End
+    //   5. 将 raycastResult 存入 GameContext 供 DebugUI 消费
+    // ========================================================================
+    SystemRegistry::Register(
+        {.name = "PickingProcessSystem",
+         .func =
+             [this](Registry &, const MessageContext &ctx) {
+                 if (!m_context || !m_visibleRaycaster || !m_context->Window)
+                     return;
+
+                 // -- 输入上下文检查 --
+                 if (m_context->InputMgr) {
+                     std::string topCtx = m_context->InputMgr->GetTopContext();
+                     if (topCtx != "Gameplay")
+                         return;
+                 }
+
+                 auto *inputSys = m_context->InputMgr ? m_context->InputMgr->GetInputSystem() : nullptr;
+                 if (!inputSys)
+                     return;
+
+                 // -- 光标捕获时不拾取（自由视角模式，鼠标用于旋转）--
+                 if (m_context->Window->IsCursorCaptured())
+                     return;
+
+                 // -- 获取屏幕坐标 --
+                 auto &window = *m_context->Window;
+                 float mouseX = static_cast<float>(window.GetMouseX());
+                 float mouseY = static_cast<float>(window.GetMouseY());
+                 uint32_t w = window.GetWidth();
+                 uint32_t h = window.GetHeight();
+
+                 // -- 更新相机数据 → 生成射线 --
+                 m_visibleRaycaster->UpdateCameraData(m_context->predictedCameraData);
+                 FRay ray = m_visibleRaycaster->ScreenToRay(mouseX, mouseY, w, h);
+
+                 // ================================================================
+                 // 状态 1: 按下 —— 射线检测 → 意图 Start
+                 // ================================================================
+                 if (inputSys->IsActionPressed(ActionId_Pick)) {
+                     m_context->raycastResult = m_visibleRaycaster->RaycastAll(ray, m_context->cullingResult);
+                     if (m_context->raycastResult.HasAny()) {
+                         const auto &closest = m_context->raycastResult.GetClosest();
+                         m_pendingHitEntity = closest.entity;
+                         m_pendingHitPoint = closest.hitPoint;
+                         m_pendingDragIntent = DragIntent::Start;
+                     }
+                 }
+
+                 // ================================================================
+                 // 状态 2: 按住 —— 纯数学射线-平面求交 → 意图 Update
+                 // (不读 ECS，偏移在 FrameSync 的 ApplyDragToECS 中添加)
+                 // ================================================================
+                 if (inputSys->IsActionHeld(ActionId_Pick) && m_isDragging) {
+                     const auto &cam = m_context->CameraMgr->GetMainCamera();
+
+                     XMVECTOR fwd = XMLoadFloat3(&cam.Forward);
+                     XMVECTOR cp = XMLoadFloat3(&cam.Position);
+                     XMVECTOR planePoint = XMVectorAdd(cp, XMVectorScale(fwd, m_dragDepth));
+
+                     XMVECTOR ro = XMVectorSet(ray.Origin.X, ray.Origin.Y, ray.Origin.Z, 0.0f);
+                     XMVECTOR rd = XMVectorSet(ray.Direction.X, ray.Direction.Y, ray.Direction.Z, 0.0f);
+
+                     float denom = XMVectorGetX(XMVector3Dot(rd, fwd));
+                     if (std::abs(denom) >= 1e-6f) {
+                         float t = XMVectorGetX(XMVector3Dot(XMVectorSubtract(planePoint, ro), fwd)) / denom;
+                         if (t >= 0.0f) {
+                             XMVECTOR hitPt = XMVectorAdd(ro, XMVectorScale(rd, t));
+                             XMStoreFloat3(&m_pendingDragPosition, hitPt);
+                             m_pendingDragIntent = DragIntent::Update;
+                         }
+                     }
+                 }
+
+                 // ================================================================
+                 // 状态 3: 释放 —— 意图 End
+                 // ================================================================
+                 if (inputSys->IsActionReleased(ActionId_Pick) && m_isDragging) {
+                     m_pendingDragIntent = DragIntent::End;
+                 }
+             },
+         .phase = TaskPhase::PostCulling,
+         .threadType = ThreadType::Main,
+         .priority = TaskPriority::Normal,
+         .alwaysRun = true});
+}
+
+// ============================================================================
+// 拖拽实现（从 FrameSync 回调调用，ECS 访问安全）
+// ============================================================================
+
+void GameInputHandler::ApplyDragToECS(Registry &registry) {
+    switch (m_pendingDragIntent) {
+    // ── Start: 读 TransformComponent → 计算偏移和深度 ──
+    case DragIntent::Start: {
+        auto *transform = registry.TryGetComponent<TransformComponent>(m_pendingHitEntity);
+        if (!transform)
+            break;
+
+        m_dragEntity = m_pendingHitEntity;
+        m_isDragging = true;
+
+        // 记录偏移
+        m_dragOffset =
+            DirectX::XMFLOAT3(transform->position.x - m_pendingHitPoint.x, transform->position.y - m_pendingHitPoint.y,
+                              transform->position.z - m_pendingHitPoint.z);
+
+        // 计算拾取深度
+        const auto &cam = m_context->CameraMgr->GetMainCamera();
+        XMVECTOR cp = XMLoadFloat3(&cam.Position);
+        XMVECTOR fwd = XMLoadFloat3(&cam.Forward);
+        XMVECTOR hp = XMLoadFloat3(&m_pendingHitPoint);
+        XMVECTOR toHit = XMVectorSubtract(hp, cp);
+        m_dragDepth = XMVectorGetX(XMVector3Dot(toHit, fwd));
+        break;
+    }
+
+    // ── Update: 写 TransformComponent::position ──
+    case DragIntent::Update: {
+        auto *transform = registry.TryGetComponent<TransformComponent>(m_dragEntity);
+        if (!transform) {
+            EndDragCleanup();
+            break;
+        }
+        transform->position.x = m_pendingDragPosition.x + m_dragOffset.x;
+        transform->position.y = m_pendingDragPosition.y + m_dragOffset.y;
+        transform->position.z = m_pendingDragPosition.z + m_dragOffset.z;
+        break;
+    }
+
+    // ── End: 清理状态 ──
+    case DragIntent::End:
+        EndDragCleanup();
+        break;
+
+    case DragIntent::None:
+        break;
+    }
+
+    m_pendingDragIntent = DragIntent::None;
+}
+
+void GameInputHandler::EndDragCleanup() {
+    m_isDragging = false;
+    m_dragEntity = INVALID_ENTITY;
+    m_dragDepth = 0.0f;
+    m_dragOffset = {0.0f, 0.0f, 0.0f};
+}
+
 void GameInputHandler::ResetCamera() {
     if (!m_context || !m_context->CameraMgr)
         return;
@@ -64,8 +232,8 @@ void GameInputHandler::ResetCamera() {
     mainCamera.Position = DirectX::XMFLOAT3(0.0f, 2.0f, -15.0f);
 
     // 重置基向量（龙书默认初始值）
-    mainCamera.Right   = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
-    mainCamera.Up      = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f);
+    mainCamera.Right = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
+    mainCamera.Up = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f);
     mainCamera.Forward = DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f);
 
     // 重置旋转角度（保留兼容）

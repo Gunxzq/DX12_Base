@@ -39,6 +39,12 @@ private:
     GameWorld m_world;
     GameInputHandler m_inputHandler;
 
+    // 帧同步回调消费的拾取结果缓存（供 DebugUI 展示）
+    DX12Engine::ECS::Entity m_pickedEntity = DX12Engine::ECS::INVALID_ENTITY;
+    DirectX::XMFLOAT3 m_pickedHitPoint = {0.0f, 0.0f, 0.0f};
+    float m_pickedDistance = 0.0f;
+    bool m_hasPickedResult = false;
+
     bool m_isRunning = false;
     bool m_isInitialized = false;
 };

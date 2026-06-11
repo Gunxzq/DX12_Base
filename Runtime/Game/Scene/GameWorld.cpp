@@ -492,6 +492,11 @@ void GameWorld::CreateTestCube() {
         meshComp.textureHandle = m_testTextureHandle;
         m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
 
+        // 第二个立方体（放大 2 倍）添加拾取组件
+        if (i == 1) {
+            m_registry->AddComponent<PickingComponent>(entity);
+        }
+
         // m_registry->AddComponent<StaticComponent>(entity);
 
         m_cubeEntities.push_back(entity);
@@ -1778,8 +1783,14 @@ void GameWorld::RegisterTerrainRenderSystem() {
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
+                 // 获取阴影资源
+                 auto &lightMgr = LightManager::GetInstance();
+                 D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV = lightMgr.GetShadowDataSRV();
+                 D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = lightMgr.GetShadowMapSRV();
+
                  // 开始地形渲染
-                 m_terrainRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV);
+                 m_terrainRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
+                                               shadowMapSRV);
 
                  // 遍历地形队列
                  static int s_dbgTerrainCount = 0;
@@ -1804,15 +1815,15 @@ void GameWorld::RegisterTerrainRenderSystem() {
                  cmdList.Get()->ResourceBarrier(1, &endBarrier);
 
                  cmdList.Close();
-                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Terrain, cmdListHandle);
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdListHandle);
 
                  uint64_t sequence = m_context->GetNextSequence();
                  m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
              },
          .phase = TaskPhase::Render,
-         .threadType = ThreadType::Main,
+         .threadType = ThreadType::Render,
          .priority = TaskPriority::Normal,
-         .renderPhase = RenderPhase::Terrain,
+         .renderPhase = RenderPhase::Opaque,
          .alwaysRun = true});
 }
 

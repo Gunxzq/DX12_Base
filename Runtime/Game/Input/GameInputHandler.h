@@ -1,12 +1,16 @@
 #pragma once
 
 #include "ECS/Core/Entity.h"
+#include "Math/MathTypes.h"
 #include "Scheduler/Task.h"
 #include <DirectXMath.h>
 
 namespace DX12Engine {
 namespace Boot {
 class GameContext;
+}
+namespace ECS {
+class Registry;
 }
 namespace Platform {
 class Window;
@@ -16,7 +20,11 @@ class InputManager;
 }
 namespace Renderer {
 class CameraManager;
-}
+class VisibleRaycaster;
+struct CullingResult;
+struct RaycastHit;
+struct PredictedCameraData;
+} // namespace Renderer
 } // namespace DX12Engine
 
 /**
@@ -26,6 +34,7 @@ class CameraManager;
  * 1. 处理相机控制输入（WASD 移动、鼠标旋转）- 龙书风格第一人称相机
  * 2. 管理鼠标捕获状态
  * 3. 注册自己的输入处理系统到 ECS 调度器
+ * 4. 拾取系统集成（射线检测 + 拖拽移动）
  */
 class GameInputHandler {
 public:
@@ -51,11 +60,35 @@ public:
      */
     void ResetCamera();
 
+    /**
+     * @brief 设置射线检测器引用
+     */
+    void SetVisibleRaycaster(DX12Engine::Renderer::VisibleRaycaster *raycaster) { m_visibleRaycaster = raycaster; }
+
+    // =========================================================================
+    // 拖拽逻辑
+    // PostCulling: 纯数学计算意图（不碰 ECS）
+    // FrameSync:   ApplyDragToECS() 安全地更新 ECS 组件
+    // =========================================================================
+
+    enum class DragIntent { None, Start, Update, End };
+
+    /// FrameSync 回调中调用：安全地将拖拽意图应用到 ECS 组件
+    void ApplyDragToECS(DX12Engine::ECS::Registry &registry);
+
+    /// 清理拖拽状态
+    void EndDragCleanup();
+
 private:
     /**
      * @brief 注册输入处理系统到 ECS 调度器
      */
     void RegisterInputSystem();
+
+    /**
+     * @brief 注册拾取+拖拽系统到 PostCulling 阶段
+     */
+    void RegisterPickingSystems();
 
     /**
      * @brief 处理相机输入（移动和旋转）
@@ -96,4 +129,22 @@ private:
 
     // 垂直升降速度
     float m_verticalSpeed = 6.0f;
+
+    // 射线检测工具（引擎层，由 Bootstrap 创建）
+    DX12Engine::Renderer::VisibleRaycaster *m_visibleRaycaster = nullptr;
+
+    // ── 拖拽状态 ──
+    bool m_isDragging = false;
+    DX12Engine::ECS::Entity m_dragEntity = DX12Engine::ECS::INVALID_ENTITY;
+    DirectX::XMFLOAT3 m_dragOffset = {0.0f, 0.0f, 0.0f}; // entityPos - hitPoint
+
+    float m_dragDepth = 0.0f; // 拾取深度（沿相机前向到命中点的距离）
+
+    // ── 拖拽意图（PostCulling 计算，FrameSync 应用）──
+    DragIntent m_pendingDragIntent = DragIntent::None;
+
+    DX12Engine::ECS::Entity m_pendingHitEntity = DX12Engine::ECS::INVALID_ENTITY;
+
+    DirectX::XMFLOAT3 m_pendingHitPoint = {};
+    DirectX::XMFLOAT3 m_pendingDragPosition = {};
 };
