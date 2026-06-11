@@ -207,12 +207,6 @@ static inline EKeyCode Normalize(EKeyCode code) {
     return code;
 }
 
-static inline bool ShouldDistinguishModifiers() {
-    // TODO: 后续从配置读取
-    static bool enabled = true; // 默认开启区分
-    return enabled;
-}
-
 } // namespace KeyCodeUtils
 
 } // namespace Input

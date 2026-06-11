@@ -222,7 +222,7 @@ void Bootstrap::InitializeModules() {
         // 假设配置文件路径为 "Config/input_bindings.json" 或在 ConfigManager 中获取
         std::string inputConfigPath = "Config/default_input.json";
 
-        inputMgr.Initialize(inputConfigPath);
+        inputMgr.Initialize(inputConfigPath, false);
 
         // 3. 窗口 (依赖配置)
         if (!CreateMainWindow()) {

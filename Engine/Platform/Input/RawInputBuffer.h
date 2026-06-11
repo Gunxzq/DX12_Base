@@ -17,6 +17,8 @@ namespace Input {
  */
 class RawInputBuffer {
 public:
+    void init(bool isModKeySeparated = false) { m_isModKeySeparated = isModKeySeparated; };
+
     RawInputBuffer() { Reset(); }
 
     // ==========================
@@ -33,9 +35,6 @@ public:
         m_mouseWheelDelta = 0;
     }
 
-    /**
-     * @brief 完全重置所有状态（通常在窗口失焦或初始化时调用）
-     */
     void Reset() {
         m_keyStates.fill(false);
         m_gamepadAxes.fill(0.0f);
@@ -50,15 +49,23 @@ public:
     // 事件注入 (由 WindowProc 或平台层调用)
     // ==========================
 
-    void OnKeyDown(EKeyCode code) {
-        if (code != EKeyCode::None && IsValidKeyCode(code)) {
-            m_keyStates[static_cast<size_t>(code)] = true;
+    void OnKeyDown(EKeyCode rawCode) {
+        EKeyCode norm = rawCode;
+        if (m_isModKeySeparated) {
+            norm = KeyCodeUtils::Normalize(rawCode);
+        }
+        if (norm != EKeyCode::None && IsValidKeyCode(norm)) {
+            m_keyStates[static_cast<size_t>(norm)] = true;
         }
     }
 
-    void OnKeyUp(EKeyCode code) {
-        if (code != EKeyCode::None && IsValidKeyCode(code)) {
-            m_keyStates[static_cast<size_t>(code)] = false;
+    void OnKeyUp(EKeyCode rawCode) {
+        EKeyCode norm = rawCode;
+        if (m_isModKeySeparated) {
+            norm = KeyCodeUtils::Normalize(rawCode);
+        }
+        if (norm != EKeyCode::None && IsValidKeyCode(norm)) {
+            m_keyStates[static_cast<size_t>(norm)] = false;
         }
     }
 
@@ -135,6 +142,9 @@ private:
     int m_mouseX = 0, m_mouseY = 0;
     int m_mouseDeltaX = 0, m_mouseDeltaY = 0;
     int m_mouseWheelDelta = 0;
+
+    // 是否区分修饰键（Shift, Ctrl, Alt）
+    bool m_isModKeySeparated = false;
 };
 
 } // namespace Input

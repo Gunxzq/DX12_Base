@@ -14,9 +14,10 @@ InputManager &InputManager::Get() {
     return instance;
 }
 
-bool InputManager::Initialize(const std::string &configPath) {
+bool InputManager::Initialize(const std::string &configPath, bool isModKeySeparated = false) {
     // 创建子模块
     m_rawBuffer = std::make_unique<RawInputBuffer>();
+
     m_inputSystem = std::make_unique<InputSystem>();
     m_contextStack = std::make_unique<InputContextStack>();
 
@@ -32,6 +33,7 @@ bool InputManager::Initialize(const std::string &configPath) {
     m_inputSystem->SetGlobalBindings(std::move(globalBindings));
     m_contextStack->RegisterContexts(contextConfigs);
     m_contextStack->PushContext("Gameplay");
+    m_rawBuffer->init(isModKeySeparated);
 
     return true;
 }

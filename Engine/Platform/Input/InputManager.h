@@ -16,7 +16,7 @@ class InputManager {
 public:
     static InputManager &Get();
 
-    bool Initialize(const std::string &configPath);
+    bool Initialize(const std::string &configPath, bool isModKeySeparated);
 
     // 上下文管理（组合生命周期）
     void PushContext(const std::string &contextName);

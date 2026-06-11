@@ -253,6 +253,8 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
     case WM_MOUSEMOVE: {
         int x = GET_X_LPARAM(lParam);
         int y = GET_Y_LPARAM(lParam);
+        m_mouseX = x;
+        m_mouseY = y;
         if (m_inputMgr) {
             m_inputMgr->GetRawBuffer()->OnMouseMove(x, y);
         }

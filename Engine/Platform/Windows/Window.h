@@ -37,6 +37,10 @@ public:
     void SetCursorCapture(bool capture);
     bool IsCursorCaptured() const { return m_cursorCaptured; }
 
+    // 鼠标屏幕坐标（客户端区域，左上角原点）
+    int32_t GetMouseX() const { return m_mouseX; }
+    int32_t GetMouseY() const { return m_mouseY; }
+
     // 显示窗口
     void Show();
     void SetFullscreen(bool fullscreen);
@@ -72,6 +76,10 @@ private:
     RECT m_WindowedRect = {0}; // 保存窗口模式时的位置和大小
 
     bool m_cursorCaptured = false;
+
+    // 鼠标屏幕坐标
+    int32_t m_mouseX = 0;
+    int32_t m_mouseY = 0;
 
     // 是否处于模态大小调整状态（用户拖拽调整大小时为 true）
     bool m_InSizeMove = false;
