@@ -14,43 +14,18 @@ using namespace DX12Engine::Math;
 
 namespace DX12Engine::Renderer {
 
-// ============================================================================
-// 构建预测视锥体（相机运动补偿）
-// ============================================================================
+void CullingSystem::SetCamera(const PredictedCameraData &camera) {
+    m_frustum.BuildFromCamera(camera.Position, camera.Forward, camera.Up, camera.FOV, camera.AspectRatio,
+                              camera.NearPlane, camera.FarPlane);
 
-Frustum CullingSystem::BuildPredictedFrustum(float dt) const {
-    if (!m_cameraManager) {
-        // 无相机管理器时回退：直接从主相机构建（无预测）
-        return Frustum{};
-    }
-
-    const Camera &camera = m_cameraManager->GetMainCamera();
-
-    // 计算预测位置：PredictedPos = P + V * dt * K
-    float dtK = dt * m_predictionFactor;
-    DirectX::XMFLOAT3 predictedPos;
-    predictedPos.x = camera.Position.x + camera.Velocity.x * dtK;
-    predictedPos.y = camera.Position.y + camera.Velocity.y * dtK;
-    predictedPos.z = camera.Position.z + camera.Velocity.z * dtK;
-
-    // 可选：扩大 FOV 增加安全余量（变速/转向场景）
-    float predictedFOV = camera.FOV * 1.05f; // 略微扩大 5%
-
-    Frustum frustum;
-    frustum.BuildFromCamera(predictedPos, camera.Forward, camera.Up, predictedFOV, camera.AspectRatio, camera.NearPlane,
-                            camera.FarPlane);
-    return frustum;
+    m_hasFrustum = true;
 }
-
-// ============================================================================
-// 执行
-// ============================================================================
 
 void CullingSystem::Execute(ECS::Registry &registry, CullingResult &outResult) {
     outResult.Clear();
 
     // 如果没有设置视锥体，所有实体可见（回退行为）
-    if (!m_frustum) {
+    if (!m_hasFrustum) {
         auto allView = registry.view<ECS::MeshComponent, ECS::TransformComponent>();
         for (auto entity : allView) {
             outResult.SetVisible(entity);
@@ -74,15 +49,13 @@ void CullingSystem::Execute(ECS::Registry &registry, CullingResult &outResult) {
         return;
     }
 
-    const Frustum &frustum = *m_frustum;
-
     // 不透明网格
     {
         auto view = registry.view<ECS::MeshComponent, ECS::TransformComponent>();
         for (auto entity : view) {
             auto &meshComp = view.get<ECS::MeshComponent>(entity);
             auto &transform = view.get<ECS::TransformComponent>(entity);
-            bool visible = TestVisibility(frustum, meshComp.localBounds, transform.GetMatrix());
+            bool visible = TestVisibility(meshComp.localBounds, transform.GetMatrix());
 
             if (visible)
                 outResult.SetVisible(entity);
@@ -95,7 +68,7 @@ void CullingSystem::Execute(ECS::Registry &registry, CullingResult &outResult) {
         for (auto entity : view) {
             auto &comp = view.get<ECS::TransparentMeshComponent>(entity);
             auto &transform = view.get<ECS::TransformComponent>(entity);
-            bool visible = TestVisibility(frustum, comp.localBounds, transform.GetMatrix());
+            bool visible = TestVisibility(comp.localBounds, transform.GetMatrix());
 
             if (visible)
                 outResult.SetVisible(entity);
@@ -108,7 +81,7 @@ void CullingSystem::Execute(ECS::Registry &registry, CullingResult &outResult) {
         for (auto entity : view) {
             auto &comp = view.get<ECS::TerrainComponent>(entity);
             auto &transform = view.get<ECS::TransformComponent>(entity);
-            bool visible = TestVisibility(frustum, comp.localBounds, transform.GetMatrix());
+            bool visible = TestVisibility(comp.localBounds, transform.GetMatrix());
 
             if (visible)
                 outResult.SetVisible(entity);
@@ -128,7 +101,7 @@ void CullingSystem::Execute(ECS::Registry &registry, CullingResult &outResult) {
             billboardSphere.center = transform.position;
             billboardSphere.radius = maxDim * std::max({transform.scale.x, transform.scale.y, transform.scale.z});
 
-            if (Intersects(frustum, billboardSphere))
+            if (Intersects(billboardSphere))
                 outResult.SetVisible(entity);
         }
     }
@@ -138,11 +111,11 @@ void CullingSystem::Execute(ECS::Registry &registry, CullingResult &outResult) {
 // 辅助方法
 // ============================================================================
 
-bool CullingSystem::Intersects(const Frustum &frustum, const Math::BoundingAABB &bounds) const {
+bool CullingSystem::Intersects(const Math::BoundingAABB &bounds) const {
     // 标准 AABB vs 视锥体测试（6 平面法）
     // 对于每个平面，计算 AABB 在平面法线方向上的最远点（p-vertex）
     // 如果最远点仍在平面外侧（dot < 0），则完全不可见
-    const auto &planes = frustum.GetPlanes();
+    const auto &planes = m_frustum.GetPlanes();
 
     // 扩展 AABB 15% 作为保护带，避免因浮点精度或包围盒不够精确
     // 导致视锥体边缘的物体被错误剔除
@@ -178,11 +151,11 @@ bool CullingSystem::Intersects(const Frustum &frustum, const Math::BoundingAABB 
     return true;
 }
 
-bool CullingSystem::Intersects(const Frustum &frustum, const Math::BoundingSphere &bounds) const {
+bool CullingSystem::Intersects(const Math::BoundingSphere &bounds) const {
     // 球体 vs 视锥体测试
     // 计算球心到每个平面的有符号距离
     // 如果距离 < -半径，则不可见
-    const auto &planes = frustum.GetPlanes();
+    const auto &planes = m_frustum.GetPlanes();
 
     // 扩展球体半径 15% 作为保护带
     float expandedRadius = bounds.radius * 1.15f;
@@ -202,7 +175,7 @@ bool CullingSystem::Intersects(const Frustum &frustum, const Math::BoundingSpher
     return true;
 }
 
-bool CullingSystem::TestVisibility(const Frustum &frustum, const Math::BoundingVolumeVariant &bounds,
+bool CullingSystem::TestVisibility(const Math::BoundingVolumeVariant &bounds,
                                    const DirectX::XMMATRIX &worldMatrix) const {
     // 使用 std::visit 根据包围盒类型分发到对应的相交测试
     return std::visit(
@@ -213,7 +186,7 @@ bool CullingSystem::TestVisibility(const Frustum &frustum, const Math::BoundingV
                 // 将局部 AABB 变换到世界空间后测试
                 Math::BoundingAABB worldBounds = b;
                 worldBounds.Transform(worldMatrix);
-                return Intersects(frustum, worldBounds);
+                return Intersects(worldBounds);
             } else if constexpr (std::is_same_v<T, Math::BoundingSphere>) {
                 // 将球心变换到世界空间（半径受缩放影响）
                 DirectX::XMVECTOR center = DirectX::XMLoadFloat3(&b.center);
@@ -232,13 +205,13 @@ bool CullingSystem::TestVisibility(const Frustum &frustum, const Math::BoundingV
                 Math::BoundingSphere worldSphere;
                 worldSphere.center = worldCenter;
                 worldSphere.radius = b.radius * maxScale;
-                return Intersects(frustum, worldSphere);
+                return Intersects(worldSphere);
             } else if constexpr (std::is_same_v<T, Math::BoundingOBB>) {
                 // OBB → AABB 再测试（保守近似）
                 Math::BoundingOBB worldOBB = b;
                 worldOBB.Transform(worldMatrix);
                 Math::BoundingAABB worldAABB = worldOBB.ToAABB();
-                return Intersects(frustum, worldAABB);
+                return Intersects(worldAABB);
             } else if constexpr (std::is_same_v<T, Math::BoundingCapsule>) {
                 // 胶囊体 → 球体（保守近似）
                 Math::BoundingSphere sphere = b.ToSphere();
@@ -258,7 +231,7 @@ bool CullingSystem::TestVisibility(const Frustum &frustum, const Math::BoundingV
                 Math::BoundingSphere worldSphere;
                 worldSphere.center = worldCenter;
                 worldSphere.radius = sphere.radius * maxScale;
-                return Intersects(frustum, worldSphere);
+                return Intersects(worldSphere);
             } else if constexpr (std::is_same_v<T, Math::BoundingConvexHull>) {
                 // 凸包 → 球体（保守近似）
                 Math::BoundingSphere sphere = b.ToSphere();
@@ -277,12 +250,12 @@ bool CullingSystem::TestVisibility(const Frustum &frustum, const Math::BoundingV
                 Math::BoundingSphere worldSphere;
                 worldSphere.center = worldCenter;
                 worldSphere.radius = sphere.radius * maxScale;
-                return Intersects(frustum, worldSphere);
+                return Intersects(worldSphere);
             } else if constexpr (std::is_same_v<T, Math::BoundingCompound>) {
                 // 复合包围盒：降级为 AABB 测试
                 Math::BoundingAABB worldAABB = b.ToAABB();
                 worldAABB.Transform(worldMatrix);
-                return Intersects(frustum, worldAABB);
+                return Intersects(worldAABB);
             } else {
                 // 未知类型，保守通过
                 return true;

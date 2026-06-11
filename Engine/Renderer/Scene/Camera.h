@@ -34,12 +34,12 @@ struct Camera {
 
     // 相机运动预测（用于剔除延迟补偿）
     XMFLOAT3 Velocity = {0.0f, 0.0f, 0.0f};      // 当前帧速度（米/秒）
-    XMFLOAT3 PrevPosition = {0.0f, 0.0f, -5.0f};  // 上一帧位置
+    XMFLOAT3 PrevPosition = {0.0f, 0.0f, -5.0f}; // 上一帧位置
 
     // 相机基向量（龙书风格，手动维护，避免欧拉角万向节死锁）
     XMFLOAT3 Forward = {0.0f, 0.0f, 1.0f}; // Look direction
-    XMFLOAT3 Up = {0.0f, 1.0f, 0.0f};       // Up direction
-    XMFLOAT3 Right = {1.0f, 0.0f, 0.0f};    // Right direction
+    XMFLOAT3 Up = {0.0f, 1.0f, 0.0f};      // Up direction
+    XMFLOAT3 Right = {1.0f, 0.0f, 0.0f};   // Right direction
 
     XMMATRIX ViewMatrix;
     XMMATRIX ProjMatrix;
@@ -47,7 +47,7 @@ struct Camera {
     XMMATRIX InverseView;
     XMMATRIX InverseProj;
     XMMATRIX InverseViewProj;
-    XMMATRIX PrevViewProjMatrix; // 上一帧的 ViewProj
+    XMMATRIX PrevViewProjMatrix;
 
     struct {
         bool bFollowTarget : 1;   // 是否跟随某个实体（第三人称）

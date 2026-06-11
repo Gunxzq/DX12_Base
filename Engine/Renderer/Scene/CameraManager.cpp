@@ -40,9 +40,28 @@ void CameraManager::Initialize(uint32_t initialWidth, uint32_t initialHeight) {
     m_mainCamera.PrevViewProjMatrix = m_mainCamera.ViewProjMatrix; // 第一帧时与当前帧相同
 }
 
-void CameraManager::Shutdown() {
-    m_auxiliaryCameras.clear();
-    m_deviceContext = nullptr;
+void CameraManager::Shutdown() { m_auxiliaryCameras.clear(); }
+
+// ========================================================================
+// 预测相机
+// ========================================================================
+
+PredictedCameraData CameraManager::GetPredictedCameraData(float dt, float predictionFactor) const {
+    PredictedCameraData result{};
+    result.Forward = m_mainCamera.Forward;
+    result.Up = m_mainCamera.Up;
+    result.FOV = m_mainCamera.FOV * 1.05f; // 略微扩大 5%、后续应基于配置
+    result.AspectRatio = m_mainCamera.AspectRatio;
+    result.NearPlane = m_mainCamera.NearPlane;
+    result.FarPlane = m_mainCamera.FarPlane;
+    result.InverseViewProj = m_mainCamera.InverseViewProj;
+
+    float dtK = dt * predictionFactor;
+    result.Position.x = m_mainCamera.Position.x + m_mainCamera.Velocity.x * dtK;
+    result.Position.y = m_mainCamera.Position.y + m_mainCamera.Velocity.y * dtK;
+    result.Position.z = m_mainCamera.Position.z + m_mainCamera.Velocity.z * dtK;
+
+    return result;
 }
 
 // ========================================================================
