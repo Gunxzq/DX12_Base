@@ -367,6 +367,7 @@ GameContext *Bootstrap::CreateContext() {
     m_context->TextureMgr = &m_textureManager;
     m_context->CullingSystem = &m_cullingSystem;
     m_context->LODSystem = &m_lodSystem;
+    m_visibleRaycaster.Initialize(m_registry.get());
     m_context->VisibleRaycaster = &m_visibleRaycaster;
 
     if (m_frameDriver) {

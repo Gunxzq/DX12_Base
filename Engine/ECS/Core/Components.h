@@ -128,7 +128,7 @@ struct BillboardComponent {
 struct StaticComponent {
     D3D12_GPU_VIRTUAL_ADDRESS persistentCBAddress = 0;       // 持久化常量缓冲区地址
     D3D12_GPU_VIRTUAL_ADDRESS persistentInstanceAddress = 0; // 持久化实例数据地址
-    uint32_t persistentInstanceSize = 0;                      // 持久化实例缓冲区大小（字节）
+    uint32_t persistentInstanceSize = 0;                     // 持久化实例缓冲区大小（字节）
     uint32_t batchInstanceIndex = UINT32_MAX;
 
     // TODO: 需要线程安全保护
@@ -138,5 +138,18 @@ struct StaticComponent {
     DirectX::XMFLOAT4X4 cachedWorldInvTranspose; // 缓存的 WorldInvTranspose
     float cachedDistanceToCamera = 0.0f;         // 缓存的到相机距离（LOD 用）
 };
+// ============================================================================
+// PickingComponent — 标记实体可被拾取 + 拾取状态
+// ============================================================================
+struct PickingComponent {
+    bool isPickable = true;               // 是否可以被拾取（总开关）
+    int32_t priority = 0;                 // 拾取优先级（数值越高，同射线下优先被选中）
+    uint32_t pickableBy = 0;              // 谁可以拾取（位掩码：玩家、AI、编辑器等）
+    bool enableHighlight = true;          // 是否显示高亮效果
+    uint32_t highlightColor = 0xFFFFFFFF; // 高亮颜色（RGBA）
+    bool editableInEditor = true;         // 编辑器中是否可被选中
+    bool showBoundingBox = false;         // 调试：显示包围盒
+};
+
 } // namespace ECS
 } // namespace DX12Engine
