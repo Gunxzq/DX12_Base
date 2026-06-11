@@ -22,6 +22,7 @@ public:
     void PushContext(const std::string &contextName);
     void PopContext();
     void ClearContexts();
+    std::string GetTopContext();
 
     // 窗口失焦时调用
     void ResetAllStates();

@@ -53,6 +53,8 @@ void InputManager::ClearContexts() {
     m_inputSystem->ResetAllStates();
 }
 
+std::string InputManager::GetTopContext() { return m_contextStack->GetTopContext(); }
+
 void InputManager::ResetAllStates() {
     m_rawBuffer->Reset();
     m_inputSystem->ResetAllStates();
