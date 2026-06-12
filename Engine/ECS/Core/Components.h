@@ -82,7 +82,6 @@ struct TerrainComponent {
 };
 
 // 公告牌组件
-
 enum class BillboardMode : uint8_t {
     AxisY,    // 绕 Y 轴旋转（树木、灯柱）
     Full,     // 完全面向相机（粒子、闪光）
@@ -106,9 +105,8 @@ struct BillboardComponent {
     bool IsValid() const { return textureHandle.IsValid(); }
 };
 
-// ============================================================================
 // TODO(StaticComponent): 静态实体持久化优化 — 暂未启用
-// ============================================================================
+
 // 设计目标：
 //   对永不移动的实体（地形、建筑等），缓存 World 矩阵和实例数据到持久化
 //   GPU 缓冲区，避免每帧重新上传，降低 CPU 开销。
@@ -124,7 +122,6 @@ struct BillboardComponent {
 //   - 检测批次大小变化，自动重新分配更大的持久化缓冲区
 //   - 为 worldDirty / cachedDistanceToCamera 加原子或锁保护
 //   - 或改为完全在 RenderThread 更新，避免跨线程访问
-// ============================================================================
 struct StaticComponent {
     D3D12_GPU_VIRTUAL_ADDRESS persistentCBAddress = 0;       // 持久化常量缓冲区地址
     D3D12_GPU_VIRTUAL_ADDRESS persistentInstanceAddress = 0; // 持久化实例数据地址
@@ -138,9 +135,8 @@ struct StaticComponent {
     DirectX::XMFLOAT4X4 cachedWorldInvTranspose; // 缓存的 WorldInvTranspose
     float cachedDistanceToCamera = 0.0f;         // 缓存的到相机距离（LOD 用）
 };
-// ============================================================================
+
 // PickingComponent — 标记实体可被拾取 + 拾取状态
-// ============================================================================
 struct PickingComponent {
     bool isPickable = true;               // 是否可以被拾取（总开关）
     int32_t priority = 0;                 // 拾取优先级（数值越高，同射线下优先被选中）
@@ -149,6 +145,25 @@ struct PickingComponent {
     uint32_t highlightColor = 0xFFFFFFFF; // 高亮颜色（RGBA）
     bool editableInEditor = true;         // 编辑器中是否可被选中
     bool showBoundingBox = false;         // 调试：显示包围盒
+};
+
+// ReflectionComponent — 标记实体需要进行动态反射捕获
+struct ReflectionComponent {
+    // ---- 反射探头属性 ----
+    float captureRange = 50.0f; // 捕获范围（超过此距离的物体不参与反射）
+    uint32_t resolution = 256;  // Cubemap 分辨率（64/128/256/512）
+
+    // ---- 更新策略 ----
+    uint8_t updatePriority = 1; // 0=每帧, 1=每3帧, 2=每10帧, 3=静态（仅一次）
+    uint8_t updateInterval = 1; // 当前更新间隔计数器（运行时使用）
+
+    // ---- 资源句柄（运行时填充） ----
+    Resource::TextureHandle cubemapHandle; // 生成的 Cubemap 纹理句柄
+};
+
+// 点位置组件
+struct PositionComponent {
+    DirectX::XMFLOAT3 position;
 };
 
 } // namespace ECS

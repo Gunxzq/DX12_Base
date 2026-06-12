@@ -162,6 +162,7 @@ void GameInputHandler::RegisterPickingSystems() {
 
 // ============================================================================
 // 拖拽实现（从 FrameSync 回调调用，ECS 访问安全）
+// 主线程调用
 // ============================================================================
 
 void GameInputHandler::ApplyDragToECS(Registry &registry) {
