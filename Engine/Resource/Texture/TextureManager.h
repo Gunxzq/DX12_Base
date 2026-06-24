@@ -36,6 +36,9 @@ public:
     // 获取纹理描述
     bool GetTextureDesc(TextureHandle handle, D3D12_RESOURCE_DESC &outDesc) const;
 
+    // 获取纹理的 GPU 资源句柄
+    GpuResourceHandle GetGpuHandle(TextureHandle handle) const;
+
 private:
     struct TextureEntry {
         GpuResourceHandle gpuHandle; // 引用 GPU 资源管理器中的资源

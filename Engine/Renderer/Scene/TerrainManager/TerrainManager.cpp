@@ -59,54 +59,6 @@ void TerrainManager::Shutdown() {
 }
 
 // ============================================================================
-// 常量缓冲区分配/释放
-// ============================================================================
-
-uint32_t TerrainManager::AllocateConstantBuffer(uint64_t fence) {
-    D3D12_GPU_VIRTUAL_ADDRESS gpuAddr = m_constantBuffer.Allocate(CONSTANT_ALIGNMENT, fence);
-    if (gpuAddr == 0) {
-        return UINT32_MAX; // 分配失败，返回无效标记
-    }
-
-    uint32_t offset = static_cast<uint32_t>(gpuAddr - m_constantBuffer.GetGPUAddress());
-
-    // 记录分配（用于调试/追踪）
-    m_activeAllocations.push_back({offset, fence});
-
-    return offset;
-}
-
-void TerrainManager::UploadConstant(uint32_t offset, const TerrainConstants &constants, uint64_t fence) {
-    if (!m_initialized || offset == UINT32_MAX) {
-        return;
-    }
-
-    // 获取 CPU 地址并写入数据
-    void *cpuAddress = m_constantBuffer.GetCPUAddress(offset);
-    if (cpuAddress) {
-        memcpy(cpuAddress, &constants, sizeof(TerrainConstants));
-    } else {
-        OutputDebugStringW(L"[ERROR] TerrainManager: Failed to get CPU address for constant buffer\n");
-    }
-}
-
-D3D12_GPU_VIRTUAL_ADDRESS TerrainManager::GetConstantGPUAddress(uint32_t offset) const {
-    if (!m_initialized || offset == UINT32_MAX) {
-        return 0;
-    }
-
-    return m_constantBuffer.GetGPUAddress(offset);
-}
-
-void *TerrainManager::GetConstantCPUAddress(uint32_t offset) const {
-    if (!m_initialized || offset == UINT32_MAX) {
-        return nullptr;
-    }
-
-    return m_constantBuffer.GetCPUAddress(offset);
-}
-
-// ============================================================================
 // LightManager 模式：每帧 Immediate 回调中一次性上传所有地形常量
 //
 // 注意：CBV 要求 256 字节对齐，因此每个 TerrainConstants 占用 CONSTANT_ALIGNMENT

@@ -237,6 +237,16 @@ bool TextureManager::GetTextureDesc(TextureHandle handle, D3D12_RESOURCE_DESC &o
     return true;
 }
 
+GpuResourceHandle TextureManager::GetGpuHandle(TextureHandle handle) const {
+
+    if (!handle.IsValid() || handle.index >= m_capacity)
+        return {};
+    const auto &entry = m_entries[handle.index];
+    if (!entry.inUse || entry.generation != handle.generation)
+        return {};
+    return entry.gpuHandle;
+}
+
 TextureHandle TextureManager::RegisterTexture(GpuResourceHandle gpuHandle, uint32_t srvIndex) {
     if (!m_initialized || !gpuHandle.IsValid() || srvIndex == UINT32_MAX) {
         return TextureHandle::Invalid();
