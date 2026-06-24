@@ -147,23 +147,15 @@ struct PickingComponent {
     bool showBoundingBox = false;         // 调试：显示包围盒
 };
 
-// ReflectionComponent — 标记实体需要进行动态反射捕获
-struct ReflectionComponent {
-    // ---- 反射探头属性 ----
-    float captureRange = 50.0f; // 捕获范围（超过此距离的物体不参与反射）
-    uint32_t resolution = 256;  // Cubemap 分辨率（64/128/256/512）
-
-    // ---- 更新策略 ----
-    uint8_t updatePriority = 1; // 0=每帧, 1=每3帧, 2=每10帧, 3=静态（仅一次）
-    uint8_t updateInterval = 1; // 当前更新间隔计数器（运行时使用）
-
-    // ---- 资源句柄（运行时填充） ----
-    Resource::TextureHandle cubemapHandle; // 生成的 Cubemap 纹理句柄
-};
-
 // 点位置组件
 struct PositionComponent {
     DirectX::XMFLOAT3 position;
+};
+
+// 静态绑定反射探针组件
+struct ReflectionConsumerComponent {
+    uint32_t probeIndex = UINT32_MAX; // 静态绑定的探针索引
+    bool useDynamicFallback = true;   // 如果 probeIndex 无效，是否回退到动态查询
 };
 
 } // namespace ECS
