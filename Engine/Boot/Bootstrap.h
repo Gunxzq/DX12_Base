@@ -9,6 +9,7 @@
 #include "Renderer/Core/VisibleRaycaster.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
+#include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Manager/MaterialManager.h"
@@ -88,6 +89,7 @@ private:
     Renderer::CullingSystem m_cullingSystem;
     Renderer::LODSystem m_lodSystem;
     Renderer::VisibleRaycaster m_visibleRaycaster;
+    Renderer::ReflectionProbeManager m_reflectionProbeManager;
 
     // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问
 

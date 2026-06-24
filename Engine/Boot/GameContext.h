@@ -7,6 +7,7 @@
 #include "Renderer/Core/LODSystem.h"
 #include "Renderer/Core/VisibleRaycaster.h"
 #include "Renderer/Scene/CameraManager.h"
+#include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Resource/Texture/TextureManager.h"
 
@@ -112,6 +113,9 @@ public:
     Renderer::CullingSystem *CullingSystem = nullptr;
     Renderer::LODSystem *LODSystem = nullptr;
     Renderer::VisibleRaycaster *VisibleRaycaster = nullptr;
+
+    // 反射探针管理器
+    Renderer::ReflectionProbeManager *ReflectionProbeMgr = nullptr;
 
     // ── 便捷访问方法 ──
     bool IsValid() const;

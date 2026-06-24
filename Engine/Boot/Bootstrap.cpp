@@ -358,6 +358,10 @@ GameContext *Bootstrap::CreateContext() {
     uint32_t height = m_window ? m_window->GetHeight() : 720;
     m_context->CameraMgr->Initialize(width, height);
 
+    // 初始化反射探针管理器
+    m_reflectionProbeManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps, &m_textureManager);
+    m_context->ReflectionProbeMgr = &m_reflectionProbeManager;
+
     m_context->DescriptorHeaps = &m_descriptorHeaps;
     m_context->FrameResourceManager = &m_frameResourceManager;
 
