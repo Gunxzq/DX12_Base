@@ -11,7 +11,6 @@ using namespace DX12Engine::ECS;
 namespace DX12Engine::Renderer {
 
 // 分组键：相同 Mesh + 相同 Material 的实体可以合批
-// TODO(StaticComponent): 静态优化暂未启用，isStatic 字段已移除
 struct BatchKey {
     GeometryHandle geometry;
     uint32_t materialIdx;
@@ -36,6 +35,7 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         std::vector<InstanceData> instances;
         std::vector<Entity> entities;
         Resource::TextureHandle textureHandle;
+        uint32_t probeIndex = UINT32_MAX; // 批次探针索引（批次内所有实体应一致）
     };
     std::unordered_map<BatchKey, BatchEntry, BatchKeyHash> batches;
 
@@ -52,40 +52,42 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         if (!transform)
             continue;
 
-        // TODO(StaticComponent): 静态优化暂未启用，全部走动态路径
-        // auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
-        // bool isStatic = (staticComp != nullptr);
-
         uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp->materialHandle);
 
-        InstanceData instData;
-
-        // 每帧重新计算 World 矩阵（静态优化禁用后统一路径）
+        InstanceData instData = {};
         XMMATRIX world = transform->GetMatrix();
         XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
         XMStoreFloat4x4(&instData.World, world);
         XMStoreFloat4x4(&instData.WorldInvTranspose, worldInvTranspose);
-
         instData.MaterialIndex = materialIdx;
         instData.ReceiveShadow = meshComp->receivesShadow ? 1 : 0;
 
-        // TODO(StaticComponent): 静态优化暂未启用，isStatic 固定为 false
+        // 读取 ReflectionConsumerComponent，确定探针索引
+        uint32_t probeIdx = UINT32_MAX;
+        auto *reflectionComp = registry.TryGetComponent<ReflectionConsumerComponent>(entity);
+        if (reflectionComp) {
+            probeIdx = reflectionComp->probeIndex;
+            // TODO: 当 probeIndex == UINT32_MAX && useDynamicFallback == true 时，
+            //       调用 ReflectionProbeManager::FindClosestProbe() 做动态回退
+        }
+        instData.ProbeIndex = probeIdx;
+
         BatchKey key{geoHandle, materialIdx};
         auto &entry = batches[key];
         entry.instances.push_back(instData);
         entry.textureHandle = meshComp->textureHandle;
+        entry.probeIndex = probeIdx; // 批次内所有物体共享同一探针索引
     }
 
     for (auto &[key, entry] : batches) {
         D3D12_GPU_DESCRIPTOR_HANDLE textureSRV = m_textureManager->GetSRV(entry.textureHandle);
         auto &instances = entry.instances;
 
-        // TODO(StaticComponent): 静态优化暂未启用，全部走动态路径
         D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer = m_frameResourceManager->AllocateInstance(
             instances.data(), static_cast<uint32_t>(instances.size() * sizeof(InstanceData)));
 
         OpaqueRenderItem item = OpaqueRenderItem::Create(key.geometry, key.materialIdx, textureSRV, instanceBuffer,
-                                                         (uint32_t)instances.size());
+                                                         (uint32_t)instances.size(), entry.probeIndex);
         outQueue.Add(item);
     }
 }

@@ -63,7 +63,8 @@ void OpaqueRenderer::Update(float deltaTime) {
 
 void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
-                                D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
+                                D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV,
+                                D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV) {
     if (!m_pso || !m_rootSignature)
         return;
 
@@ -85,6 +86,11 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
     // 绑定阴影贴图 SRV (slot 5, t14,space1)
     if (shadowMapSRV.ptr != 0) {
         cmdList.Get()->SetGraphicsRootDescriptorTable(5, shadowMapSRV);
+    }
+
+    // 绑定反射探针 Cubemap Array SRV (slot 7, t10)
+    if (cubemapArraySRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(7, cubemapArraySRV);
     }
 }
 
@@ -188,7 +194,7 @@ void OpaqueRenderer::CreateRootSignature() {
     auto device = m_context->GetDevice();
 
     // ========================================================================
-    // 根参数布局（统一实例化模式，slot 0 不再需要 cbPerObject CBV）:
+    // 根参数布局（统一实例化模式）:
     //   slot 0: b1 cbPass           (CBV)
     //   slot 1: b2 cbLights         (CBV)
     //   slot 2: t0,space1           StructuredBuffer<MaterialData> (SRV 描述符表)
@@ -196,8 +202,9 @@ void OpaqueRenderer::CreateRootSignature() {
     //   slot 4: t11,space1          StructuredBuffer<DirShadowData> (SRV 描述符表)
     //   slot 5: t14,space1          Texture2D 阴影贴图 (SRV 描述符表)
     //   slot 6: t12,space1          StructuredBuffer<InstanceData> (SRV)
+    //   slot 7: t10                 TextureCubeArray 反射探针 Cubemap Array (SRV 描述符表)
     // ========================================================================
-    CD3DX12_ROOT_PARAMETER slotRootParameter[7];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[8];
 
     CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
@@ -211,6 +218,9 @@ void OpaqueRenderer::CreateRootSignature() {
     CD3DX12_DESCRIPTOR_RANGE shadowMapTable;
     shadowMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 14, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
+    CD3DX12_DESCRIPTOR_RANGE cubemapTable;
+    cubemapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+
     slotRootParameter[0].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);                   // b1: cbPass
     slotRootParameter[1].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL);                   // b2: cbLights
     slotRootParameter[2].InitAsDescriptorTable(1, &materialBufferRange, D3D12_SHADER_VISIBILITY_PIXEL); // t0,space1
@@ -219,6 +229,7 @@ void OpaqueRenderer::CreateRootSignature() {
     slotRootParameter[5].InitAsDescriptorTable(1, &shadowMapTable, D3D12_SHADER_VISIBILITY_PIXEL);      // t14,space1
     slotRootParameter[6].InitAsShaderResourceView(
         12, 1, D3D12_SHADER_VISIBILITY_ALL); // t12,space1: InstanceData StructuredBuffer
+    slotRootParameter[7].InitAsDescriptorTable(1, &cubemapTable, D3D12_SHADER_VISIBILITY_PIXEL); // t10: Cubemap Array
 
     // ========================================================================
     // 静态采样器 (对齐 Common_PBR.hlsl: s0~s5 + s11)
@@ -244,7 +255,7 @@ void OpaqueRenderer::CreateRootSignature() {
                            D3D12_COMPARISON_FUNC_LESS_EQUAL, D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK, 0.0f, 0.0f,
                            D3D12_SHADER_VISIBILITY_PIXEL);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(7, slotRootParameter, 7, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(8, slotRootParameter, 7, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;

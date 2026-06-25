@@ -169,9 +169,9 @@ struct InstanceData {
     DirectX::XMFLOAT4X4 World;             // 物体变换矩阵 (offset: 0)
     DirectX::XMFLOAT4X4 WorldInvTranspose; // 物体逆变换矩阵的转置 (offset: 64)
     uint32_t MaterialIndex;                // 材质索引-后续可改进为材质模板
-    // uint32_t TextureArrayIndex;            // 关键！指向纹理数组的索引，而非具体纹理
-    uint32_t ReceiveShadow; // 是否接收阴影
-    float pad[2];
+    uint32_t ReceiveShadow;                // 是否接收阴影
+    uint32_t ProbeIndex;                   // 反射探针索引 (UINT32_MAX = 无反射)
+    float pad;                             // 16字节对齐填充
 };
 
 static_assert(

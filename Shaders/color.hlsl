@@ -1,5 +1,5 @@
 //==============================================================================
-// color.hlsl - PBR 实体渲染着色器（带阴影采样）
+// color.hlsl - PBR 实体渲染着色器（带阴影采样 + 动态反射探针）
 // 统一实例化模式：所有物体通过 StructuredBuffer<InstanceData> 传入
 //==============================================================================
 #define DISABLE_ENV_REFLECTION
@@ -10,6 +10,11 @@
 Texture2D gTexture : register(t0);
 
 // =========================================================================
+// 动态反射探针 Cubemap Array（仅在此着色器中使用）
+// =========================================================================
+TextureCubeArray gReflectionCubemapArray : register(t10);
+
+// =========================================================================
 // 实例数据（统一实例化模式，单物体 instanceCount=1）
 // =========================================================================
 struct InstanceData
@@ -18,7 +23,8 @@ struct InstanceData
     row_major float4x4 WorldInvTranspose;
     uint MaterialIndex;
     uint ReceiveShadow;
-    float pad[2];
+    uint ProbeIndex; // 反射探针索引 (0xFFFFFFFF = 无反射)
+    float pad;
 };
 
 StructuredBuffer<InstanceData> gInstanceData : register(t12, space1);
@@ -59,10 +65,25 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
     return vout;
 }
 
+// 反射探针环境反射（局部版本，使用 TextureCubeArray）
+float3 ComputeProbeReflection(float3 reflectDir, float3 albedo, float metallic, float roughness, float3 N, float3 V, uint probeIndex)
+{
+    if (probeIndex == 0xFFFFFFFF)
+        return float3(0.0f, 0.0f, 0.0f);
+
+    float3 reflection = gReflectionCubemapArray.Sample(gSamplerLinearClamp, float4(reflectDir, probeIndex)).rgb;
+    float3 F0 = lerp(0.04f, albedo, metallic);
+    float NdotV = max(dot(N, V), 0.0f);
+    float3 fresnel = FresnelSchlick(NdotV, F0);
+    float strength = 1.0f - roughness * 0.5f;
+    return reflection * fresnel * strength;
+}
+
 float4 PS(VertexOut pin) : SV_Target
 {
     uint matIndex = gInstanceData[pin.InstanceIndex].MaterialIndex;
     uint receiveShadow = gInstanceData[pin.InstanceIndex].ReceiveShadow;
+    uint probeIndex = gInstanceData[pin.InstanceIndex].ProbeIndex;
 
     MaterialData matData = gMaterialData[matIndex];
 
@@ -108,8 +129,9 @@ float4 PS(VertexOut pin) : SV_Target
     for (uint k = gNumDirLights + gNumPointLights; k < gNumDirLights + gNumPointLights + gNumSpotLights; ++k)
         directLight += ComputeSpotLight(gLights[k], mat, pin.WorldPos, N, V);
 
-    // 环境反射
-    float3 reflection = 0.0f;
+    // 环境反射（动态反射探针）
+    float3 reflectDir = reflect(-V, N);
+    float3 reflection = ComputeProbeReflection(reflectDir, albedo, metallic, roughness, N, V, probeIndex);
 
     float3 litColor = ambient + directLight + reflection + emissive;
 
