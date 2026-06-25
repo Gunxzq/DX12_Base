@@ -219,12 +219,15 @@ bool FrameDriver::Tick() {
     // PostCulling：射线检测、遮挡查询（使用 PreCulling 可见集作为候选）
     ExecutePhase(TaskPhase::PostCulling);
 
+    // SceneDataUpload：所有 Manager 上传 GPU 数据（探针/光源/地形）
+    ExecuteSceneDataUpload();
+
     // PreRender：构建器并行生成渲染队列（Opaque/Transparent/Terrain/Billboard）
     ExecutePhase(TaskPhase::PreRender);
 
     // ========================================================================
     // 4. 帧同步 (FrameSync)
-    // 将 Slot N 的数据“冻结”并标记为“可读”，准备供下一帧 Render 使用
+    // 将 Slot N 的数据"冻结"并标记为"可读"，准备供下一帧 Render 使用
     // ========================================================================
     FrameSync();
 
@@ -336,6 +339,32 @@ void FrameDriver::UnregisterImmediateCallback(uint32_t callbackId) {
 void FrameDriver::ExecuteImmediate() {
     // 在主线程上串行执行所有注册的即时回调
     for (const auto &entry : m_immediateCallbacks) {
+        if (entry.callback) {
+            entry.callback();
+        }
+    }
+}
+
+// ============================================================================
+// SceneDataUpload 回调
+// ============================================================================
+
+uint32_t FrameDriver::RegisterSceneDataCallback(std::function<void()> callback, const std::string &name) {
+    uint32_t id = m_nextSceneDataCallbackId++;
+    m_sceneDataCallbacks.push_back({id, name, std::move(callback)});
+    return id;
+}
+
+void FrameDriver::UnregisterSceneDataCallback(uint32_t callbackId) {
+    auto it = std::remove_if(m_sceneDataCallbacks.begin(), m_sceneDataCallbacks.end(),
+                             [callbackId](const ImmediateCallbackEntry &entry) { return entry.id == callbackId; });
+    m_sceneDataCallbacks.erase(it, m_sceneDataCallbacks.end());
+}
+
+void FrameDriver::ExecuteSceneDataUpload() {
+    // 在主线程上串行执行所有注册的场景数据上传回调
+    // 位置：PostCulling 之后、PreRender 之前
+    for (const auto &entry : m_sceneDataCallbacks) {
         if (entry.callback) {
             entry.callback();
         }

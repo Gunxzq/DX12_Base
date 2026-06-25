@@ -71,7 +71,7 @@ using FrameSyncCallback = std::function<void()>;
  * 2. DAG 构建：BuildFromBuckets 从消息构建本帧任务图
  * 3. Immediate 回调：零延迟路径（相机、UI）
  * 4. Render Phase：渲染提交（录制命令列表）
- * 5. Update Phases：EarlyUpdate → Update → LateUpdate → PreCulling → PreRender
+ * 5. Update Phases：EarlyUpdate → Update → LateUpdate → PreCulling → PostCulling → SceneDataUpload → PreRender
  * 6. Frame Sync：L4 多缓冲交换回调
  * ```
  *
@@ -129,9 +129,13 @@ public:
     void UnregisterFrameSyncCallback(uint32_t callbackId);
     size_t GetFrameSyncCallbackCount() const { return m_frameSyncCallbacks.size(); }
 
-    // 立即回调
+    // 立即回调（零延迟路径：相机、UI）
     uint32_t RegisterImmediateCallback(std::function<void()> callback, const std::string &name = "");
     void UnregisterImmediateCallback(uint32_t callbackId);
+
+    // 场景数据上传回调（PostCulling 之后、PreRender 之前：探针/光源/地形上传）
+    uint32_t RegisterSceneDataCallback(std::function<void()> callback, const std::string &name = "");
+    void UnregisterSceneDataCallback(uint32_t callbackId);
 
 private:
     ECS::Registry &m_registry;
@@ -170,8 +174,13 @@ private:
     std::vector<ImmediateCallbackEntry> m_immediateCallbacks;
     uint32_t m_nextImmediateCallbackId = 1;
 
+    // 场景数据上传回调
+    std::vector<ImmediateCallbackEntry> m_sceneDataCallbacks;
+    uint32_t m_nextSceneDataCallbackId = 1;
+
     // 阶段执行
     void ExecuteImmediate();
+    void ExecuteSceneDataUpload();
     void ExecutePhase(TaskPhase phase);
     void ExecuteRenderPhase(RenderPhase phase, uint64_t waitSequence); // 批量执行某阶段的命令
     void FrameSync();                                                  // 调用 L4 回调
@@ -194,5 +203,4 @@ void InitializeSchedulerContext(ECS::Registry &registry, Renderer::D3D12DeviceCo
 void ShutdownSchedulerContext();
 
 } // namespace Scheduler
-
 } // namespace DX12Engine
