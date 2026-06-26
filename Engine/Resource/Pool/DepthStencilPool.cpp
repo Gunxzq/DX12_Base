@@ -1,7 +1,7 @@
 #include "DepthStencilPool.h"
-#include "DescriptorHeapCollection.h"
-#include "DescriptorSlotAllocator.h"
 #include "Common/ThrowHelper.h"
+#include "Resource/Core/DescriptorHeapCollection.h"
+#include "Resource/Core/DescriptorSlotAllocator.h"
 #include <cassert>
 
 namespace DX12Engine::Resource {

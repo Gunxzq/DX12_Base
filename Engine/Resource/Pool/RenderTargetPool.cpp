@@ -1,6 +1,6 @@
 #include "RenderTargetPool.h"
-#include "DescriptorHeapCollection.h"
-#include "DescriptorSlotAllocator.h"
+#include "Resource/Core/DescriptorHeapCollection.h"
+#include "Resource/Core/DescriptorSlotAllocator.h"
 #include "Common/ThrowHelper.h"
 #include <cassert>
 
