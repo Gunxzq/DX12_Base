@@ -8,6 +8,7 @@
 #include "Event/MessageDispatcher.h"
 #include "GameContext.h"
 #include "Logger/DebugOverlay.h"
+#include "Resource/Pool/DepthStencilPool.h"
 #include "Logger/Logger.h"
 #include "Platform/Input/InputManager.h"
 #include "Platform/Windows/Window.h"
@@ -56,6 +57,13 @@ void Bootstrap::Shutdown() {
 
     // 2. 销毁 GameContext
     m_context.reset();
+
+    // 2.5 关闭深度模板资源池
+    try {
+        DepthStencilPool::GetInstance().Shutdown();
+    } catch (...) {
+        // 忽略
+    }
 
     // 3. 销毁 D3D12 设备上下文
     m_deviceContext.reset();
@@ -259,6 +267,11 @@ void Bootstrap::InitializeModules() {
         m_descriptorHeaps.Initialize(m_deviceContext->GetDevice(), heapConfigs);
         EngineLogger::GetInstance()->Info("[Bootstrap] DescriptorHeapCollection initialized.");
 
+        // 初始化深度模板资源池（单例）
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing DepthStencilPool...");
+        DepthStencilPool::GetInstance().Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
+        EngineLogger::GetInstance()->Info("[Bootstrap] DepthStencilPool initialized.");
+
         // 初始化材质管理器
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing MaterialManager...");
         m_materialManager.Initialize(1024);
@@ -363,6 +376,7 @@ GameContext *Bootstrap::CreateContext() {
     m_context->ReflectionProbeMgr = &m_reflectionProbeManager;
 
     m_context->DescriptorHeaps = &m_descriptorHeaps;
+    m_context->DepthStencilPool = &DepthStencilPool::GetInstance();
     m_context->FrameResourceManager = &m_frameResourceManager;
 
     m_context->InputMgr = &DX12Engine::Input::InputManager::Get();

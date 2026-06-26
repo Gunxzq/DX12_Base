@@ -6,6 +6,17 @@
 
 namespace DX12Engine::Resource {
 
+DepthStencilPool &DepthStencilPool::GetInstance() {
+    static DepthStencilPool s_instance;
+    return s_instance;
+}
+
+/**
+ * @brief 初始化深度模板池池
+ * @param device
+ * @param descriptorHeaps
+ * @date 2026-06-26
+ */
 void DepthStencilPool::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps) {
     if (m_initialized) {
         Shutdown();
@@ -16,6 +27,10 @@ void DepthStencilPool::Initialize(ID3D12Device *device, DescriptorHeapCollection
     m_initialized = true;
 }
 
+/**
+ * @brief 关闭深度模板池池
+ * @date 2026-06-26
+ */
 void DepthStencilPool::Shutdown() {
     if (!m_initialized) {
         return;
@@ -38,12 +53,25 @@ void DepthStencilPool::Shutdown() {
     m_initialized = false;
 }
 
+/**
+ * @brief 检查两个深度模板描述符是否匹配
+ * @param a 第一个描述符
+ * @param b 第二个描述符
+ * @return bool 如果两个描述符匹配则返回 true，否则返回 false
+ * @date 2026-06-26
+ */
 bool DepthStencilPool::IsDescMatch(const DepthStencilDesc &a, const DepthStencilDesc &b) const {
     return a.width == b.width && a.height == b.height && a.format == b.format && a.arraySize == b.arraySize &&
            a.sampleDesc.Count == b.sampleDesc.Count && a.sampleDesc.Quality == b.sampleDesc.Quality &&
            a.flags == b.flags;
 }
 
+/**
+ * @brief 查找匹配的深度模板池条目
+ * @param desc 深度模板描述符
+ * @return uint32_t 匹配的条目索引，如果找到匹配的条目则返回索引，否则返回 UINT32_MAX
+ * @date 2026-06-26
+ */
 uint32_t DepthStencilPool::FindMatchingEntry(const DepthStencilDesc &desc) {
     for (uint32_t i = 0; i < m_pool.size(); ++i) {
         auto &entry = m_pool[i];
@@ -54,7 +82,14 @@ uint32_t DepthStencilPool::FindMatchingEntry(const DepthStencilDesc &desc) {
     return UINT32_MAX;
 }
 
-uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc) {
+/**
+ * @brief 创建新的深度模板池条目
+ * @param desc 深度模板描述符
+ * @param dsvDesc 深度模板视图描述符
+ * @return uint32_t 创建的条目索引，如果创建成功则返回索引，否则返回 UINT32_MAX
+ * @date 2026-06-26
+ */
+uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc) {
     D3D12_RESOURCE_DESC resourceDesc = {};
     resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     resourceDesc.Width = desc.width;
@@ -86,7 +121,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc) {
     }
 
     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, dsvSlot);
-    m_device->CreateDepthStencilView(resource.Get(), nullptr, dsvHandle);
+    m_device->CreateDepthStencilView(resource.Get(), dsvDesc, dsvHandle);
 
     uint32_t srvSlot = UINT32_MAX;
     if (!(desc.flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)) {
@@ -132,14 +167,22 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc) {
     return static_cast<uint32_t>(m_pool.size() - 1);
 }
 
-DepthStencilHandle DepthStencilPool::Allocate(const DepthStencilDesc &desc) {
+/**
+ * @brief 分配深度模板池条目
+ * @param desc 深度模板描述符
+ * @param dsvDesc 深度模板视图描述符
+ * @return DepthStencilHandle 分配的句柄
+ * @date 2026-06-26
+ */
+DepthStencilHandle DepthStencilPool::Allocate(const DepthStencilDesc &desc,
+                                              const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc) {
     if (!m_initialized) {
         return {};
     }
 
     uint32_t poolIndex = FindMatchingEntry(desc);
     if (poolIndex == UINT32_MAX) {
-        poolIndex = CreateNewEntry(desc);
+        poolIndex = CreateNewEntry(desc, dsvDesc);
         if (poolIndex == UINT32_MAX) {
             return {};
         }
@@ -156,6 +199,12 @@ DepthStencilHandle DepthStencilPool::Allocate(const DepthStencilDesc &desc) {
     return handle;
 }
 
+/**
+ * @brief 释放深度模板池条目
+ * @param handle 深度模板句柄
+ * @param fenceValue 同步信号值
+ * @date 2026-06-26
+ */
 void DepthStencilPool::Free(DepthStencilHandle handle, uint64_t fenceValue) {
     if (!m_initialized || !handle.IsValid()) {
         return;
@@ -184,6 +233,12 @@ void DepthStencilPool::Free(DepthStencilHandle handle, uint64_t fenceValue) {
     m_pendingFree.push_back(pending);
 }
 
+/**
+ * @brief 获取深度模板资源
+ * @param handle 深度模板句柄
+ * @return ID3D12Resource* 深度模板资源指针
+ * @date 2026-06-26
+ */
 ID3D12Resource *DepthStencilPool::GetResource(DepthStencilHandle handle) const {
     if (!m_initialized || !handle.IsValid()) {
         return nullptr;
@@ -201,6 +256,12 @@ ID3D12Resource *DepthStencilPool::GetResource(DepthStencilHandle handle) const {
     return entry.resource.Get();
 }
 
+/**
+ * @brief 获取深度模板视图句柄
+ * @param handle 深度模板句柄
+ * @return D3D12_CPU_DESCRIPTOR_HANDLE 深度模板视图句柄
+ * @date 2026-06-26
+ */
 D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilPool::GetDsvHandle(DepthStencilHandle handle) const {
     if (!m_initialized || !handle.IsValid()) {
         return {};
@@ -218,6 +279,12 @@ D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilPool::GetDsvHandle(DepthStencilHandle ha
     return m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, entry.dsvSlot);
 }
 
+/**
+ * @brief 获取深度模板资源视图句柄
+ * @param handle 深度模板句柄
+ * @return D3D12_CPU_DESCRIPTOR_HANDLE 深度模板资源视图句柄
+ * @date 2026-06-26
+ */
 D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilPool::GetSrvHandle(DepthStencilHandle handle) const {
     if (!handle.IsValid() || handle.poolIndex >= m_pool.size()) {
         return {};
@@ -232,6 +299,11 @@ D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilPool::GetSrvHandle(DepthStencilHandle ha
     return m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, entry.srvSlot);
 }
 
+/**
+ * @brief 回收深度模板池条目
+ * @param completedFence 已完成的围栏值
+ * @date 2026-06-26
+ */
 void DepthStencilPool::Reclaim(uint64_t completedFence) {
     auto it = m_pendingFree.begin();
     while (it != m_pendingFree.end()) {
@@ -247,9 +319,13 @@ void DepthStencilPool::Reclaim(uint64_t completedFence) {
     }
 }
 
+/**
+ * @brief 清理未使用的深度模板池条目
+ * @param currentFrame 当前帧索引
+ * @param maxAgeFrames 最大年龄帧数
+ * @date 2026-06-26
+ */
 void DepthStencilPool::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames) {
-    // BugFix: 不再从 m_pool 中 erase 条目，而是递增 generation 使旧句柄失效。
-    // erase 会导致后续条目的索引前移，使得外部持有的 handle 指向错误条目。
     for (auto &entry : m_pool) {
         if (!entry.inUse && currentFrame - entry.lastUsedFrame > maxAgeFrames) {
             if (entry.dsvSlot != UINT32_MAX) {
@@ -261,14 +337,9 @@ void DepthStencilPool::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames)
                 entry.srvSlot = UINT32_MAX;
             }
             entry.resource.Reset();
-            // 递增 generation 使所有指向此条目的旧句柄立即失效
             entry.generation = m_nextGeneration++;
         }
     }
-
-    // 注意：不再 erase 条目，空闲条目留在 m_pool 中等待 FindMatchingEntry 复用。
-    // 被 Purge 的条目 generation 已递增，旧句柄无法通过 generation 验证，
-    // 而新 Allocate 会创建新条目（或复用已有空闲条目并赋予新 generation）。
 }
 
 } // namespace DX12Engine::Resource

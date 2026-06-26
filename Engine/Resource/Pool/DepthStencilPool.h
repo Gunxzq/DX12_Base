@@ -14,8 +14,7 @@ struct DepthStencilHandle;
 
 class DepthStencilPool {
 public:
-    DepthStencilPool() = default;
-    ~DepthStencilPool() = default;
+    static DepthStencilPool &GetInstance();
 
     DepthStencilPool(const DepthStencilPool &) = delete;
     DepthStencilPool &operator=(const DepthStencilPool &) = delete;
@@ -23,7 +22,7 @@ public:
     void Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps);
     void Shutdown();
 
-    DepthStencilHandle Allocate(const DepthStencilDesc &desc);
+    DepthStencilHandle Allocate(const DepthStencilDesc &desc, const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc = nullptr);
     void Free(DepthStencilHandle handle, uint64_t fenceValue);
 
     ID3D12Resource *GetResource(DepthStencilHandle handle) const;
@@ -37,6 +36,9 @@ public:
     uint32_t GetAllocatedCount() const { return m_allocatedCount; }
 
 private:
+    DepthStencilPool() = default;
+    ~DepthStencilPool() = default;
+
     struct DepthStencilEntry {
         Microsoft::WRL::ComPtr<ID3D12Resource> resource;
         DepthStencilDesc desc;
@@ -55,7 +57,7 @@ private:
 
 private:
     uint32_t FindMatchingEntry(const DepthStencilDesc &desc);
-    uint32_t CreateNewEntry(const DepthStencilDesc &desc);
+    uint32_t CreateNewEntry(const DepthStencilDesc &desc, const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc);
     bool IsDescMatch(const DepthStencilDesc &a, const DepthStencilDesc &b) const;
 
     ID3D12Device *m_device = nullptr;
