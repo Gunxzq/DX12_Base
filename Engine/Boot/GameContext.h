@@ -29,6 +29,7 @@ struct PredictedCameraData;
 namespace Resource {
 class DescriptorHeapCollection;
 class DepthStencilPool;
+class RenderTargetPool;
 class GeometryResourceManager;
 class MaterialManager;
 } // namespace Resource
@@ -102,6 +103,7 @@ public:
     Resource::GeometryResourceManager *GeometryResourceManager = nullptr;
     Resource::DescriptorHeapCollection *DescriptorHeaps = nullptr;
     Resource::DepthStencilPool *DepthStencilPool = nullptr;
+    Resource::RenderTargetPool *RenderTargetPool = nullptr;
 
     Input::InputManager *InputMgr = nullptr;
 

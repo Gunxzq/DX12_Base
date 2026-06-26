@@ -5,7 +5,6 @@
 #include <d3d12.h>
 #include <unordered_map>
 #include <vector>
-#include <wrl/client.h>
 
 namespace DX12Engine::Resource {
 
@@ -15,8 +14,7 @@ struct RenderTargetHandle;
 
 class RenderTargetPool {
 public:
-    RenderTargetPool() = default;
-    ~RenderTargetPool() = default;
+    static RenderTargetPool &GetInstance();
 
     RenderTargetPool(const RenderTargetPool &) = delete;
     RenderTargetPool &operator=(const RenderTargetPool &) = delete;
@@ -24,7 +22,7 @@ public:
     void Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps);
     void Shutdown();
 
-    RenderTargetHandle Allocate(const RenderTargetDesc &desc);
+    RenderTargetHandle Allocate(const RenderTargetDesc &desc, const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc = nullptr);
     void Free(RenderTargetHandle handle, uint64_t fenceValue);
 
     ID3D12Resource *GetResource(RenderTargetHandle handle) const;
@@ -38,8 +36,11 @@ public:
     uint32_t GetAllocatedCount() const { return m_allocatedCount; }
 
 private:
+    RenderTargetPool() = default;
+    ~RenderTargetPool() = default;
+
     struct RenderTargetEntry {
-        Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+        ID3D12Resource *resource = nullptr;
         RenderTargetDesc desc;
         uint32_t rtvSlot = UINT32_MAX;
         uint32_t srvSlot = UINT32_MAX;
@@ -56,7 +57,7 @@ private:
 
 private:
     uint32_t FindMatchingEntry(const RenderTargetDesc &desc);
-    uint32_t CreateNewEntry(const RenderTargetDesc &desc);
+    uint32_t CreateNewEntry(const RenderTargetDesc &desc, const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc);
     bool IsDescMatch(const RenderTargetDesc &a, const RenderTargetDesc &b) const;
 
     ID3D12Device *m_device = nullptr;

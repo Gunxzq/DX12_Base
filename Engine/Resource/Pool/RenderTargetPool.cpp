@@ -1,12 +1,17 @@
 #include "RenderTargetPool.h"
+#include "Common/ThrowHelper.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Core/DescriptorSlotAllocator.h"
-#include "Common/ThrowHelper.h"
 #include <cassert>
 
 using namespace DX12Engine::Resource;
 
 namespace DX12Engine::Resource {
+
+RenderTargetPool &RenderTargetPool::GetInstance() {
+    static RenderTargetPool s_instance;
+    return s_instance;
+}
 
 /**
  * @brief 初始化渲染目标池
@@ -34,6 +39,10 @@ void RenderTargetPool::Shutdown() {
     }
 
     for (auto &entry : m_pool) {
+        if (entry.resource) {
+            entry.resource->Release();
+            entry.resource = nullptr;
+        }
         if (entry.rtvSlot != UINT32_MAX) {
             m_descriptorHeaps->Free(DescriptorHeapType::Rtv, entry.rtvSlot, UINT64_MAX);
         }
@@ -86,7 +95,7 @@ uint32_t RenderTargetPool::FindMatchingEntry(const RenderTargetDesc &desc) {
  * @return uint32_t
  * @date 2026-05-24
  */
-uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc) {
+uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc, const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc) {
     D3D12_RESOURCE_DESC resourceDesc = {};
     resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     resourceDesc.Width = desc.width;
@@ -103,7 +112,7 @@ uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc) {
     heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
     heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+    ID3D12Resource *resource = nullptr;
     HRESULT hr = m_device->CreateCommittedResource(
         &heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc, D3D12_RESOURCE_STATE_COMMON,
         desc.clearValue.Format != DXGI_FORMAT_UNKNOWN ? &desc.clearValue : nullptr, IID_PPV_ARGS(&resource));
@@ -118,7 +127,7 @@ uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc) {
     }
 
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Rtv, rtvSlot);
-    m_device->CreateRenderTargetView(resource.Get(), nullptr, rtvHandle);
+    m_device->CreateRenderTargetView(resource, rtvDesc, rtvHandle);
 
     uint32_t srvSlot = UINT32_MAX;
     if ((desc.flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) &&
@@ -132,7 +141,7 @@ uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc) {
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             srvDesc.Texture2D.MipLevels = desc.mipLevels;
-            m_device->CreateShaderResourceView(resource.Get(), &srvDesc, srvHandle);
+            m_device->CreateShaderResourceView(resource, &srvDesc, srvHandle);
         }
     }
 
@@ -155,14 +164,15 @@ uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc) {
  * @return RenderTargetHandle
  * @date 2026-05-24
  */
-RenderTargetHandle RenderTargetPool::Allocate(const RenderTargetDesc &desc) {
+RenderTargetHandle RenderTargetPool::Allocate(const RenderTargetDesc &desc,
+                                              const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc) {
     if (!m_initialized) {
         return {};
     }
 
     uint32_t poolIndex = FindMatchingEntry(desc);
     if (poolIndex == UINT32_MAX) {
-        poolIndex = CreateNewEntry(desc);
+        poolIndex = CreateNewEntry(desc, rtvDesc);
         if (poolIndex == UINT32_MAX) {
             return {};
         }
@@ -233,7 +243,7 @@ ID3D12Resource *RenderTargetPool::GetResource(RenderTargetHandle handle) const {
         return nullptr;
     }
 
-    return entry.resource.Get();
+    return entry.resource;
 }
 
 /**
@@ -298,7 +308,8 @@ void RenderTargetPool::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames)
                 m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, entry.srvSlot, UINT64_MAX);
                 entry.srvSlot = UINT32_MAX;
             }
-            entry.resource.Reset();
+            entry.resource->Release();
+            entry.resource = nullptr;
             // 递增 generation 使所有指向此条目的旧句柄立即失效
             entry.generation = m_nextGeneration++;
         }

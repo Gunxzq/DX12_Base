@@ -8,7 +8,6 @@
 #include "Event/MessageDispatcher.h"
 #include "GameContext.h"
 #include "Logger/DebugOverlay.h"
-#include "Resource/Pool/DepthStencilPool.h"
 #include "Logger/Logger.h"
 #include "Platform/Input/InputManager.h"
 #include "Platform/Windows/Window.h"
@@ -16,6 +15,8 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
+#include "Resource/Pool/DepthStencilPool.h"
+#include "Resource/Pool/RenderTargetPool.h"
 #include "Scheduler/FrameDriver.h"
 #include <steam/isteamnetworkingutils.h>
 #include <steam/steamnetworkingsockets.h>
@@ -61,6 +62,13 @@ void Bootstrap::Shutdown() {
     // 2.5 关闭深度模板资源池
     try {
         DepthStencilPool::GetInstance().Shutdown();
+    } catch (...) {
+        // 忽略
+    }
+
+    // 2.6 关闭渲染目标资源池
+    try {
+        RenderTargetPool::GetInstance().Shutdown();
     } catch (...) {
         // 忽略
     }
@@ -271,6 +279,9 @@ void Bootstrap::InitializeModules() {
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing DepthStencilPool...");
         DepthStencilPool::GetInstance().Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
         EngineLogger::GetInstance()->Info("[Bootstrap] DepthStencilPool initialized.");
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing RenderTargetPool...");
+        RenderTargetPool::GetInstance().Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
+        EngineLogger::GetInstance()->Info("[Bootstrap] RenderTargetPool initialized.");
 
         // 初始化材质管理器
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing MaterialManager...");
@@ -372,11 +383,12 @@ GameContext *Bootstrap::CreateContext() {
     m_context->CameraMgr->Initialize(width, height);
 
     // 初始化反射探针管理器
-    m_reflectionProbeManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps, &m_textureManager);
+    m_reflectionProbeManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
     m_context->ReflectionProbeMgr = &m_reflectionProbeManager;
 
     m_context->DescriptorHeaps = &m_descriptorHeaps;
     m_context->DepthStencilPool = &DepthStencilPool::GetInstance();
+    m_context->RenderTargetPool = &RenderTargetPool::GetInstance();
     m_context->FrameResourceManager = &m_frameResourceManager;
 
     m_context->InputMgr = &DX12Engine::Input::InputManager::Get();
