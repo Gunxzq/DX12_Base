@@ -37,6 +37,10 @@ void DepthStencilPool::Shutdown() {
     }
 
     for (auto &entry : m_pool) {
+        if (entry.resource) {
+            entry.resource->Release();
+            entry.resource = nullptr;
+        }
         if (entry.dsvSlot != UINT32_MAX) {
             m_descriptorHeaps->Free(DescriptorHeapType::Dsv, entry.dsvSlot, UINT64_MAX);
         }
@@ -106,7 +110,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
     heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
     heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+    ID3D12Resource *resource = nullptr;
     HRESULT hr = m_device->CreateCommittedResource(
         &heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE,
         desc.clearValue.Format != DXGI_FORMAT_UNKNOWN ? &desc.clearValue : nullptr, IID_PPV_ARGS(&resource));
@@ -121,7 +125,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
     }
 
     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, dsvSlot);
-    m_device->CreateDepthStencilView(resource.Get(), dsvDesc, dsvHandle);
+    m_device->CreateDepthStencilView(resource, dsvDesc, dsvHandle);
 
     uint32_t srvSlot = UINT32_MAX;
     if (!(desc.flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)) {
@@ -151,7 +155,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             srvDesc.Texture2D.MipLevels = 1;
-            m_device->CreateShaderResourceView(resource.Get(), &srvDesc, srvHandle);
+            m_device->CreateShaderResourceView(resource, &srvDesc, srvHandle);
         }
     }
 
@@ -253,7 +257,7 @@ ID3D12Resource *DepthStencilPool::GetResource(DepthStencilHandle handle) const {
         return nullptr;
     }
 
-    return entry.resource.Get();
+    return entry.resource;
 }
 
 /**
@@ -336,7 +340,8 @@ void DepthStencilPool::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames)
                 m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, entry.srvSlot, UINT64_MAX);
                 entry.srvSlot = UINT32_MAX;
             }
-            entry.resource.Reset();
+            entry.resource->Release();
+            entry.resource = nullptr;
             entry.generation = m_nextGeneration++;
         }
     }

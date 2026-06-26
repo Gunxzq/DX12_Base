@@ -4,7 +4,6 @@
 #include "Resource/Struct/ResourceHandle.h"
 #include <d3d12.h>
 #include <vector>
-#include <wrl/client.h>
 
 namespace DX12Engine::Resource {
 
@@ -40,7 +39,7 @@ private:
     ~DepthStencilPool() = default;
 
     struct DepthStencilEntry {
-        Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+        ID3D12Resource *resource = nullptr;
         DepthStencilDesc desc;
         uint32_t dsvSlot = UINT32_MAX;
         uint32_t srvSlot = UINT32_MAX;
