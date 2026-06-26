@@ -3,8 +3,10 @@
 #include "Async/TerrainLoadTask.h"
 #include "ECS/Core/Entity.h"
 #include "Math/BoundingVolume.h"
+#include "Renderer/Pipeline/ReflectionProbeRenderer.h"
 #include "Renderer/RenderItemBuilder/BillboardRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/OpaqueRenderItemBuilder.h"
+#include "Renderer/RenderItemBuilder/ProbeBuilder.h"
 #include "Renderer/RenderItemBuilder/TRenderQueue.h"
 #include "Renderer/RenderItemBuilder/TerrainRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/TransparentRenderItemBuilder.h"
@@ -82,8 +84,14 @@ public:
     // 注册地形常量立即回调（LightManager 模式：Immediate 中分配+上传地形常量）
     void RegisterTerrainImmediateCallback();
 
+    // 注册探针场景数据上传回调（SceneDataUpload 阶段：填充 ProbeCaptureInfo + 分配 CB）
+    void RegisterProbeSceneDataCallback();
+
     // 注册阴影渲染系统
     void RegisterShadowRenderSystem();
+
+    // 注册反射探针捕获系统
+    void RegisterProbeCaptureSystem();
 
     // 异步地形加载（使用 TaskGraph）
     void LoadTerrainAsync();
@@ -137,10 +145,21 @@ private:
     std::unique_ptr<DX12Engine::Renderer::TerrainRenderItemBuilder> m_terrainBuilder;
     DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::TerrainRenderItem> m_terrainQueue;
 
-    DX12Engine::Resource::TextureHandle m_testTextureHandle; // 存储纹理句柄
+    // 反射探针捕获
+    std::unique_ptr<DX12Engine::Renderer::ProbeBuilder> m_probeBuilder;
+    std::unique_ptr<DX12Engine::Renderer::ReflectionProbeRenderer> m_probeRenderer;
+    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::OpaqueRenderItem> m_probeQueues[64];
+    DX12Engine::Renderer::ProbeCaptureInfo m_probeCaptureInfo[64]; // PreRender 填充，Render 消费
+    uint32_t m_activeProbeCount = 0;
+
+    DX12Engine::Resource::TextureHandle m_testTextureHandle;
+    DX12Engine::Resource::TextureHandle m_whiteTextureHandle; // 1x1 纯白纹理，用于反射测试立方体
     DX12Engine::Resource::MaterialHandle m_cubeMaterialHandle;
+    DX12Engine::Resource::MaterialHandle m_reflectionTestMaterialHandle; // 金属材质（反射探针测试用）
+
     DX12Engine::Resource::GpuResourceHandle m_materialBufferHandle; // 材质数组 GPU Buffer 句柄
     DX12Engine::ECS::Entity m_cubeEntity;
+    DX12Engine::ECS::Entity m_reflectionCubeEntity;
     std::vector<DX12Engine::ECS::Entity> m_cubeEntities; // 多个立方体实体
 
     // 压力测试实体

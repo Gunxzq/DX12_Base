@@ -11,6 +11,8 @@ Texture2D gTexture : register(t0);
 
 // =========================================================================
 // 动态反射探针 Cubemap Array（仅在此着色器中使用）
+// TextureCubeArray，由 GetProbeCubemapArraySRV 提供
+// probeIndex 作为 array index，最大 64 个探针
 // =========================================================================
 TextureCubeArray gReflectionCubemapArray : register(t10);
 
@@ -65,7 +67,7 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
     return vout;
 }
 
-// 反射探针环境反射（局部版本，使用 TextureCubeArray）
+// 反射探针环境反射（TextureCubeArray，probeIndex 选探针）
 float3 ComputeProbeReflection(float3 reflectDir, float3 albedo, float metallic, float roughness, float3 N, float3 V, uint probeIndex)
 {
     if (probeIndex == 0xFFFFFFFF)

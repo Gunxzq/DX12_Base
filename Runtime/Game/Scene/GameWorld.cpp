@@ -1,4 +1,4 @@
-#include "GameWorld.h"
+﻿#include "GameWorld.h"
 #include "Boot/GameContext.h"
 #include "Common/ThrowHelper.h"
 #include "Common/d3dUtil.h"
@@ -25,6 +25,7 @@
 #include "Renderer/RHI/Command/CommandManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/LightManager/LightManager.h"
+#include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
 #include "Renderer/Utils/GeometryGenerator.h"
 #include "Resource/Asset/LODMesh.h"
 #include "Resource/AssetDataManager.h"
@@ -38,6 +39,7 @@
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Manager/MaterialManager.h"
 #include "Resource/Material/MaterialResource.h"
+#include "Resource/Pool/RenderTargetPool.h"
 #include "Resource/Texture/TextureManager.h"
 #include "Scheduler/FrameDriver.h"
 
@@ -61,6 +63,27 @@ using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;
 using namespace DX12Engine::Scheduler;
 using namespace DX12Engine::Math;
+
+namespace ProbeHelpers {
+void FillCaptureCB(const DirectX::XMFLOAT3 &probePos, D3D12_GPU_VIRTUAL_ADDRESS &outCBAddress,
+                   DX12Engine::Renderer::FrameResourceManager &frameMgr) {
+    DirectX::XMVECTOR pos = DirectX::XMLoadFloat3(&probePos);
+    static const float s_fd[18] = {1, 0, 0, -1, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 1, 0, 0, -1};
+    static const float s_fu[18] = {0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, 1, 0, 1, 0, 0, 1, 0};
+    ProbeCaptureCB captureCB = {};
+    for (uint32_t f = 0; f < 6; ++f) {
+        DirectX::XMVECTOR dir = DirectX::XMVectorSet(s_fd[f * 3], s_fd[f * 3 + 1], s_fd[f * 3 + 2], 0);
+        DirectX::XMVECTOR up = DirectX::XMVectorSet(s_fu[f * 3], s_fu[f * 3 + 1], s_fu[f * 3 + 2], 0);
+        DirectX::XMMATRIX view = DirectX::XMMatrixLookAtLH(pos, pos + dir, up);
+        DirectX::XMMATRIX proj = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV2, 1.0f, 0.1f, 1000.0f);
+        DirectX::XMMATRIX viewProj = view * proj;
+
+        DirectX::XMStoreFloat4x4(&captureCB.faceViewProj[f], viewProj);
+    }
+    captureCB.probePosition = probePos;
+    outCBAddress = frameMgr.AllocateObjectCB(&captureCB, sizeof(ProbeCaptureCB));
+}
+} // namespace ProbeHelpers
 
 GameWorld::GameWorld() = default;
 GameWorld::~GameWorld() = default;
@@ -106,9 +129,93 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
         std::make_unique<TerrainRenderItemBuilder>(m_context->FrameResourceManager, m_context->TextureMgr);
 
     LoadTestTexture();
+
+    m_probeBuilder =
+        std::make_unique<ProbeBuilder>(m_context->FrameResourceManager, m_context->MaterialMgr, m_context->TextureMgr);
+    m_probeRenderer = std::make_unique<ReflectionProbeRenderer>();
+    m_probeRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_probeRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
+    m_probeRenderer->SetMaterialManager(m_context->MaterialMgr);
+    m_probeRenderer->Initialize();
     LoadWaterTexture();
 
     CreateMaterials();
+
+    // 创建 1x1 纯白纹理（用于反射测试立方体，避免木箱纹理干扰反射观察）
+    {
+        auto &gpuMgr = GpuResourceManager::GetInstance();
+        ID3D12Device *device = m_context->DeviceContext->GetDevice();
+
+        D3D12_RESOURCE_DESC whiteDesc = {};
+        whiteDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        whiteDesc.Width = 1;
+        whiteDesc.Height = 1;
+        whiteDesc.DepthOrArraySize = 1;
+        whiteDesc.MipLevels = 1;
+        whiteDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        whiteDesc.SampleDesc.Count = 1;
+        whiteDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        whiteDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        GpuResourceHandle whiteTexHandle = gpuMgr.CreateTexture2D(device, whiteDesc, D3D12_RESOURCE_STATE_COMMON);
+        if (whiteTexHandle.IsValid()) {
+            uint32_t whiteSrvSlot = m_context->DescriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+            if (whiteSrvSlot != UINT32_MAX) {
+                // 创建一个1x1白色纹理 D3D12_SUBRESOURCE_DATA
+                uint32_t whitePixel = 0xFFFFFFFFu; // RGBA: 255,255,255,255
+                D3D12_SUBRESOURCE_DATA subData = {};
+                subData.pData = &whitePixel;
+                subData.RowPitch = 4;
+                subData.SlicePitch = 4;
+
+                // 上传到 GPU
+                uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                auto allocHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
+                auto cmdHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+                auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdHandle);
+
+                UINT64 uploadSize = GetRequiredIntermediateSize(gpuMgr.GetResource(whiteTexHandle), 0, 1);
+                GpuResourceHandle uploadBuf =
+                    gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+                auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                    gpuMgr.GetResource(whiteTexHandle), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+                cmdList.Get()->ResourceBarrier(1, &barrier);
+
+                UpdateSubresources(cmdList.Get(), gpuMgr.GetResource(whiteTexHandle), gpuMgr.GetResource(uploadBuf), 0,
+                                   0, 1, &subData);
+
+                auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(whiteTexHandle),
+                                                                     D3D12_RESOURCE_STATE_COPY_DEST,
+                                                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                cmdList.Get()->ResourceBarrier(1, &barrier2);
+
+                cmdList.Close();
+                m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdList);
+                m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+                uint64_t seq = m_context->GetNextSequence();
+                gpuMgr.Release(uploadBuf, seq);
+                m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdHandle);
+                m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, seq);
+
+                // 创建 SRV
+                D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                srvDesc.Texture2D.MipLevels = 1;
+                srvDesc.Texture2D.MostDetailedMip = 0;
+
+                D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
+                    m_context->DescriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, whiteSrvSlot);
+                device->CreateShaderResourceView(gpuMgr.GetResource(whiteTexHandle), &srvDesc, cpuHandle);
+
+                m_whiteTextureHandle = m_context->TextureMgr->RegisterTexture(whiteTexHandle, whiteSrvSlot);
+            }
+        }
+    }
     CreateSkybox();
     CreateGroundPlane();
     CreateTestCube();
@@ -138,11 +245,16 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     // 注册地形常量立即回调（LightManager 模式：Immediate 中分配+上传地形常量）
     RegisterTerrainImmediateCallback();
 
+    // 注册探针场景数据上传回调（SceneDataUpload 阶段：填充 ProbeCaptureInfo + 分配 CB）
+    RegisterProbeSceneDataCallback();
+
     // 注册清除系统（PrePass 阶段，独立于任何实体渲染）
     RegisterClearSystem();
 
     // 注册阴影渲染系统
     RegisterShadowRenderSystem();
+    // 注册反射探针捕获系统
+    RegisterProbeCaptureSystem();
 
     // 注册地形渲染系统
     RegisterTerrainRenderSystem();
@@ -212,6 +324,18 @@ void GameWorld::RegisterBuilderSystems() {
                 m_transparentBuilder->SetCullingResult(&m_context->cullingResult);
                 m_transparentBuilder->SetLODResult(&m_context->lodResult);
                 m_transparentBuilder->BuildTyped(reg, m_transparentQueue);
+
+                // 5. 反射探头构建器（使用 SceneDataUpload 准备好的 m_probeCaptureInfo）
+                if (m_probeBuilder && m_activeProbeCount > 0) {
+                    uint32_t probeCount = m_context->ReflectionProbeMgr->GetActiveProbeCount();
+                    m_activeProbeCount = probeCount;
+                    if (probeCount > 0) {
+                        ProbeCaptureInfo probeSet[64];
+                        m_probeBuilder->SetLODSystem(m_context->LODSystem);
+
+                        m_probeBuilder->Build(m_probeCaptureInfo, m_activeProbeCount, reg, m_probeQueues);
+                    }
+                }
             },
         .phase = TaskPhase::PreRender,
         .threadType = ThreadType::Worker,
@@ -289,6 +413,39 @@ void GameWorld::RegisterTerrainImmediateCallback() {
             }
         },
         "TerrainImmediate");
+}
+
+void GameWorld::RegisterProbeSceneDataCallback() {
+    if (!m_context || !m_context->FrameDriver || !m_context->ReflectionProbeMgr)
+        return;
+
+    m_context->FrameDriver->RegisterSceneDataCallback([this]() {
+        auto *probeMgr = m_context->ReflectionProbeMgr;
+        uint32_t probeCount = probeMgr->GetActiveProbeCount();
+        m_activeProbeCount = probeCount;
+        if (probeCount == 0)
+            return;
+
+        for (uint32_t i = 0; i < probeCount; ++i) {
+            m_probeCaptureInfo[i].position = probeMgr->GetProbePosition(i);
+            m_probeCaptureInfo[i].captureRange = probeMgr->GetProbeCaptureRange(i);
+            m_probeCaptureInfo[i].probeIndex = i;
+            m_probeCaptureInfo[i].resolution = probeMgr->GetProbeResources(i).resolution;
+            m_probeCaptureInfo[i].dsvSlot = probeMgr->GetProbeDepthSlot(i);
+            {
+                auto &res = probeMgr->GetProbeResources(i);
+                if (res.rtHandle.IsValid()) {
+                    m_probeCaptureInfo[i].rtvBaseSlot = res.rtHandle.rtvSlot;
+                    m_probeCaptureInfo[i].cubemapResource = RenderTargetPool::GetInstance().GetResource(res.rtHandle);
+                } else {
+                    m_probeCaptureInfo[i].rtvBaseSlot = UINT32_MAX;
+                    m_probeCaptureInfo[i].cubemapResource = nullptr;
+                }
+            }
+            ProbeHelpers::FillCaptureCB(m_probeCaptureInfo[i].position, m_probeCaptureInfo[i].captureCBAddress,
+                                        *m_context->FrameResourceManager);
+        }
+    });
 }
 
 void GameWorld::CreateGroundPlane() {
@@ -504,6 +661,28 @@ void GameWorld::CreateTestCube() {
 
     // 保持第一个立方体为 m_cubeEntity（兼容旧代码）
     m_cubeEntity = m_cubeEntities.empty() ? INVALID_ENTITY : m_cubeEntities[0];
+
+    // 反射探针测试立方体 — 位于探针位置 (0, 20, 0)，采样捕获的 Cubemap
+    {
+        m_reflectionCubeEntity = m_registry->CreateEntity();
+        m_registry->AddComponent<TransformComponent>(m_reflectionCubeEntity, XMFLOAT3(10.0f, 32.0f, 3.0f),
+                                                     XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(1.0f, 1.0f, 1.0f));
+
+        LODMesh lodMesh;
+        lodMesh.lodChain = {geoHandle};
+        LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
+
+        MeshComponent meshComp;
+        meshComp.lodMeshHandle = lodHandle;
+        meshComp.localBounds = bounds;
+        meshComp.materialHandle = m_reflectionTestMaterialHandle; // 金属材质
+        meshComp.textureHandle = m_whiteTextureHandle;
+        m_registry->AddComponent<MeshComponent>(m_reflectionCubeEntity, std::move(meshComp));
+
+        // 绑定反射探针索引 0，使该立方体在渲染时采样探针 Cubemap
+        m_registry->AddComponent<ReflectionConsumerComponent>(
+            m_reflectionCubeEntity, ReflectionConsumerComponent{.probeIndex = 0, .useDynamicFallback = false});
+    }
 
     // 注册旋转系统
     // RegisterRotationSystem();
@@ -725,6 +904,18 @@ void GameWorld::CreateMaterials() {
     waterMaterial.alpha = 0.8f; // 半透明
     waterMaterial.rendererTypeHash = TYPE_HASH("TransparentPBR");
     m_waterMaterialHandle = materialMgr->RegisterMaterial(waterMaterial);
+
+    // 反射探针测试立方体材质（高金属度、低粗糙度，用于观察反射效果）
+    MaterialData reflectionTestMaterial;
+    reflectionTestMaterial.materialId = TYPE_HASH("reflection_test_material");
+    reflectionTestMaterial.name = "reflection_test_material";
+    reflectionTestMaterial.baseColor = XMFLOAT4(0.9f, 0.9f, 1.0f, 1.0f); // 浅灰蓝色，与普通立方体区分
+    reflectionTestMaterial.metallic = 1.0f;                              // 全金属，反射最明显
+    reflectionTestMaterial.roughness = 0.2f;                             // 光滑表面，清晰反射
+    reflectionTestMaterial.ambient = 0.1f;
+    reflectionTestMaterial.alpha = 1.0f;
+    reflectionTestMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
+    m_reflectionTestMaterialHandle = materialMgr->RegisterMaterial(reflectionTestMaterial);
 
     // 公告牌材质（非金属、中等粗糙度，适合树木等植被）
     MaterialData billboardMaterial;
@@ -1083,9 +1274,12 @@ void GameWorld::RegisterCubeRenderSystem() {
                  //  一个堆
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
-                 // 开始渲染（传入阴影数据和阴影贴图 SRV）
+                 // 获取反射探针 Cubemap Array SRV
+                 D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV = m_context->ReflectionProbeMgr->GetProbeCubemapArraySRV();
+
+                 // 开始渲染（传入阴影数据和反射探针 Cubemap Array SRV）
                  m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
-                                        shadowMapSRV);
+                                        shadowMapSRV, cubemapArraySRV);
 
                  for (const auto &item : m_opaqueQueue) {
                      if (!item.IsValid())
@@ -1985,6 +2179,68 @@ void GameWorld::RegisterShadowRenderSystem() {
                  cmdList.Close();
                  m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PrePass, cmdListHandle);
 
+                 uint64_t sequence = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Render,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::PrePass,
+         .alwaysRun = true});
+}
+
+void GameWorld::RegisterProbeCaptureSystem() {
+    SystemRegistry::Register(
+        {.name = "ProbeCaptureSystem",
+         .func =
+             [this](Registry &, const MessageContext &) {
+                 if (!m_probeRenderer || m_activeProbeCount == 0)
+                     return;
+
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+                 ID3D12DescriptorHeap *heaps[] = {m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                 cmdList.Get()->SetDescriptorHeaps(1, heaps);
+
+                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
+                 D3D12_GPU_DESCRIPTOR_HANDLE matBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
+
+                 for (uint32_t i = 0; i < m_activeProbeCount; ++i) {
+                     if (m_probeQueues[i].Empty() || m_probeCaptureInfo[i].rtvBaseSlot == UINT32_MAX)
+                         continue;
+                     const auto &info = m_probeCaptureInfo[i];
+                     D3D12_CPU_DESCRIPTOR_HANDLE depthDSV =
+                         m_context->DescriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, info.dsvSlot);
+
+                     XMVECTOR probePos = XMLoadFloat3(&info.position);
+                     const auto &mainPass = m_context->FrameResourceManager->GetPassConstants();
+
+                     { // GS_SINGLE_PASS
+                         D3D12_GPU_VIRTUAL_ADDRESS captureCBAddr = info.captureCBAddress;
+                         if (captureCBAddr == 0)
+                             continue;
+                         D3D12_CPU_DESCRIPTOR_HANDLE cubemapRTV =
+                             m_context->DescriptorHeaps->GetCpuHandle(DescriptorHeapType::Rtv, info.rtvBaseSlot);
+                         m_probeRenderer->BeginCapture(cmdList, info.cubemapResource, cubemapRTV, depthDSV,
+                                                       info.resolution, info.resolution, captureCBAddr, lightCBAddr,
+                                                       matBufferSRV);
+                         // Draw queued geometry for this face
+                         for (const auto &item : m_probeQueues[i]) {
+                             if (!item.IsValid())
+                                 continue;
+                             m_probeRenderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer,
+                                                            item.instanceCount, item.textureSRV);
+                         }
+                         m_probeRenderer->EndCapture(cmdList);
+                     }
+                 }
+
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PrePass, cmdListHandle);
                  uint64_t sequence = m_context->GetNextSequence();
                  m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
              },

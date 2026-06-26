@@ -7,6 +7,7 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
+#include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
 #include "Renderer/Scene/Struct/Frustum.h"
 #include "Resource/AssetLoader/AssetLoader.h"
 #include "Resource/AssetLoader/Loader/DDSLoader.h"
@@ -67,6 +68,15 @@ bool Game::Initialize() {
 
     // // 为主方向光预创建阴影贴图（2048x2048）
     LightManager::GetInstance().CreateShadowMapForDirectionalLight(0, 2048, m_context->GetNextFence());
+
+    // 反射探针管理器 — 已在 Bootstrap::CreateContext 中初始化，直接使用
+    {
+        auto &probeMgr = *m_context->ReflectionProbeMgr;
+
+        // 创建测试探针（256x256, 普通优先级），位置与反射测试立方体重合
+        probeMgr.AddProbe({10.0f, 32.0f, 3.0f}, 50.0f, 256, 1);
+        m_context->Logging->Info("[Probe] Created test probe at (10, 32, 3), 256x256");
+    }
 
     // 5. 注册引擎级系统（窗口大小变化、全屏切换等）
     RegisterEngineSystems();
@@ -164,6 +174,16 @@ bool Game::Initialize() {
              if (rawFPS > 62.0f && dt * 1000.0f > 15.5f) {
                  ImGui::TextColored(ImVec4(1, 1, 0, 1), "⚠️ Limited by DWM (windowed mode)");
              }
+         }});
+
+    // ── Reflection Probe 面板 ──
+    DebugUIManager::Get().RegisterPanel(
+        {.name = "ReflectionProbes", .group = "Debug", .drawFunc = [this](float dt, uint32_t frame) {
+             auto &probeMgr = *m_context->ReflectionProbeMgr;
+             ImGui::Text("Active probes: %u", probeMgr.GetActiveProbeCount());
+             ImGui::Separator();
+             ImGui::Text("Probe array SRV: 0x%llx", probeMgr.GetProbeCubemapArraySRV().ptr);
+             ImGui::Text("(Resource allocation verified at init)");
          }});
 
     // ── Picking 面板 ──
@@ -296,6 +316,9 @@ void Game::Shutdown() {
     }
 
     Resource::GpuResourceManager::GetInstance().Shutdown();
+
+    // 清理反射探针资源
+    m_context->ReflectionProbeMgr->Shutdown();
 
     m_isInitialized = false;
     m_context->Logging->Info("[Game] Game shutdown complete");
