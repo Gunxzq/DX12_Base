@@ -2,8 +2,6 @@
 #include "Common/d3dx12.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
-#include "Resource/GpuResourceManager.h"
-#include "Resource/Texture/TextureManager.h"
 #include <algorithm>
 #include <cmath>
 
@@ -20,17 +18,15 @@ static constexpr uint32_t MAX_PROBES = 64; // 最大反射探针数量
  * @param textureManager 纹理管理器
  * @date 2026-06-23
  */
-void ReflectionProbeManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps,
-                                        TextureManager *textureManager) {
+void ReflectionProbeManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps) {
     if (m_initialized) {
         Shutdown();
     }
 
     m_device = device;
     m_descriptorHeaps = descriptorHeaps;
-    m_textureManager = textureManager;
 
-    if (!m_device || !m_descriptorHeaps || !m_textureManager) {
+    if (!m_device || !m_descriptorHeaps) {
         return;
     }
 
@@ -57,24 +53,14 @@ void ReflectionProbeManager::Shutdown() {
 
     for (auto &entry : m_probeEntries) {
         if (entry.resources.isValid)
-            ReleaseCubemapResource(entry.resources, UINT64_MAX);
+            ReleaseCubemapResource(entry.resources, UINT64_MAX); // 释放Cubemap资源
+        if (entry.depthHandle.IsValid()) {
+            DepthStencilPool::GetInstance().Free(entry.depthHandle, UINT64_MAX);
+            entry.depthHandle = {};
+        }
     }
 
     m_probeEntries.clear();
-
-    // 释放所有驻留深度资源
-    {
-        auto &gpuMgr = GpuResourceManager::GetInstance();
-        for (auto &[res, depthRes] : m_depthPool) {
-            if (depthRes.gpuHandle.IsValid()) {
-                gpuMgr.Release(depthRes.gpuHandle, UINT64_MAX);
-            }
-            if (depthRes.dsvSlot != UINT32_MAX && m_descriptorHeaps) {
-                m_descriptorHeaps->Free(DescriptorHeapType::Dsv, depthRes.dsvSlot, UINT64_MAX);
-            }
-        }
-    }
-    m_depthPool.clear();
 
     if (m_cubemapArrayBaseSlot != UINT32_MAX && m_descriptorHeaps) {
         m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, m_cubemapArrayBaseSlot, UINT64_MAX);
@@ -85,7 +71,6 @@ void ReflectionProbeManager::Shutdown() {
 
     m_device = nullptr;
     m_descriptorHeaps = nullptr;
-    m_textureManager = nullptr;
 
     m_initialized = false;
 }
@@ -123,8 +108,28 @@ uint32_t ReflectionProbeManager::AddProbe(const DirectX::XMFLOAT3 &position, flo
         return UINT32_MAX;
     }
 
-    // 为该分辨率获取/共享驻留深度资源
-    AcquireDepthResource(res);
+    {
+        DepthStencilDesc depthDesc = {};
+        depthDesc.width = res;
+        depthDesc.height = res;
+        depthDesc.format = DXGI_FORMAT_D32_FLOAT;
+        depthDesc.arraySize = 6; // 与 Cubemap RTV 的 6 个面匹配
+        depthDesc.flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+        D3D12_CLEAR_VALUE clearValue = {};
+        clearValue.Format = DXGI_FORMAT_D32_FLOAT;
+        clearValue.DepthStencil.Depth = 1.0f;
+        depthDesc.clearValue = clearValue;
+
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+        dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+        dsvDesc.Texture2DArray.MipSlice = 0;
+        dsvDesc.Texture2DArray.FirstArraySlice = 0;
+        dsvDesc.Texture2DArray.ArraySize = 6;
+
+        entry.depthHandle = DepthStencilPool::GetInstance().Allocate(depthDesc, &dsvDesc);
+    }
 
     uint32_t index = static_cast<uint32_t>(m_probeEntries.size());
     m_probeEntries.push_back(entry);
@@ -142,8 +147,10 @@ void ReflectionProbeManager::RemoveProbe(uint32_t probeIndex) {
 
     auto &entry = m_probeEntries[probeIndex];
 
-    // 释放该探针对分辨率的深度引用
-    ReleaseDepthResource(entry.resolution);
+    if (entry.depthHandle.IsValid()) {
+        DepthStencilPool::GetInstance().Free(entry.depthHandle, UINT64_MAX);
+        entry.depthHandle = {};
+    }
 
     entry.isActive = false; // 标记为无效状态
 
@@ -287,6 +294,20 @@ const ProbeRuntimeResources &ReflectionProbeManager::GetProbeResources(uint32_t 
     return m_probeEntries[probeIndex].resources;
 }
 
+DirectX::XMFLOAT3 ReflectionProbeManager::GetProbePosition(uint32_t probeIndex) const {
+    if (probeIndex >= m_probeEntries.size()) {
+        return {};
+    }
+    return m_probeEntries[probeIndex].position;
+}
+
+float ReflectionProbeManager::GetProbeCaptureRange(uint32_t probeIndex) const {
+    if (probeIndex >= m_probeEntries.size()) {
+        return 0.0f;
+    }
+    return m_probeEntries[probeIndex].captureRange;
+}
+
 ProbeRuntimeResources ReflectionProbeManager::AllocateCubemapResource(uint32_t resolution) {
     ProbeRuntimeResources resources;
     resources.resolution = resolution;
@@ -296,18 +317,15 @@ ProbeRuntimeResources ReflectionProbeManager::AllocateCubemapResource(uint32_t r
         return resources;
     }
 
-    auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto &rtPool = RenderTargetPool::GetInstance();
 
-    D3D12_RESOURCE_DESC desc = {};
-    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    desc.Width = resolution;
-    desc.Height = resolution;
-    desc.DepthOrArraySize = 6;
-    desc.MipLevels = 1;
-    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    desc.SampleDesc.Count = 1;
-    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    RenderTargetDesc rtDesc = {};
+    rtDesc.width = resolution;
+    rtDesc.height = resolution;
+    rtDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    rtDesc.arraySize = 6;
+    rtDesc.mipLevels = 1;
+    rtDesc.flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
     D3D12_CLEAR_VALUE clearValue = {};
     clearValue.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -315,16 +333,32 @@ ProbeRuntimeResources ReflectionProbeManager::AllocateCubemapResource(uint32_t r
     clearValue.Color[1] = 0.2f;
     clearValue.Color[2] = 0.3f;
     clearValue.Color[3] = 1.0f;
+    rtDesc.clearValue = clearValue;
 
-    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(m_device, desc, clearValue, D3D12_RESOURCE_STATE_COMMON);
+    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+    rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+    rtvDesc.Texture2DArray.MipSlice = 0;
+    rtvDesc.Texture2DArray.FirstArraySlice = 0;
+    rtvDesc.Texture2DArray.ArraySize = 6;
 
-    if (!gpuHandle.IsValid()) {
+    resources.rtHandle = rtPool.Allocate(rtDesc, &rtvDesc);
+    if (!resources.rtHandle.IsValid()) {
         return resources;
     }
 
+    ID3D12Resource *resource = rtPool.GetResource(resources.rtHandle);
+    if (!resource) {
+        rtPool.Free(resources.rtHandle, 0);
+        resources.rtHandle = {};
+        return resources;
+    }
+
+    // 分配 SRV 槽位并创建 TEXTURECUBE SRV
     uint32_t srvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
     if (srvSlot == UINT32_MAX) {
-        gpuMgr.Release(gpuHandle, 0);
+        rtPool.Free(resources.rtHandle, 0);
+        resources.rtHandle = {};
         return resources;
     }
 
@@ -336,150 +370,57 @@ ProbeRuntimeResources ReflectionProbeManager::AllocateCubemapResource(uint32_t r
     srvDesc.TextureCube.MipLevels = 1;
     srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
 
-    ID3D12Resource *resource = gpuMgr.GetResource(gpuHandle);
-    if (!resource) {
-        m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, srvSlot, 0);
-        gpuMgr.Release(gpuHandle, 0);
-        return resources;
-    }
-
     D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvSlot);
     m_device->CreateShaderResourceView(resource, &srvDesc, cpuHandle);
 
-    TextureHandle texHandle = m_textureManager->RegisterTexture(gpuHandle, srvSlot);
-    if (!texHandle.IsValid()) {
-        m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, srvSlot, 0);
-        gpuMgr.Release(gpuHandle, 0);
-        return resources;
-    }
-
-    resources.cubemapHandle = texHandle;
     resources.srvSlot = srvSlot;
     resources.isValid = true;
+
+    // 在 Cubemap Array 基槽写入 TextureCubeArray SRV（供着色器 gReflectionCubemapArray 采样）
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC arraySrvDesc = {};
+        arraySrvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        arraySrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+        arraySrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        arraySrvDesc.TextureCubeArray.MostDetailedMip = 0;
+        arraySrvDesc.TextureCubeArray.MipLevels = 1;
+        arraySrvDesc.TextureCubeArray.First2DArrayFace = 0;
+        arraySrvDesc.TextureCubeArray.NumCubes = 1;
+        arraySrvDesc.TextureCubeArray.ResourceMinLODClamp = 0.0f;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE arrayCpuHandle =
+            m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_cubemapArrayBaseSlot);
+        m_device->CreateShaderResourceView(resource, &arraySrvDesc, arrayCpuHandle);
+    }
 
     return resources;
 }
 
-/**
- * @brief 释放反射探针资源
- * @param resources 反射探针资源
- * @param fence
- * @date 2026-06-23
- */
+// ========================================================================
+// 释放 Cubemap 资源
+// ========================================================================
 void ReflectionProbeManager::ReleaseCubemapResource(ProbeRuntimeResources &resources, uint64_t fence) {
     if (!resources.isValid)
         return;
 
-    auto &gpuMgr = GpuResourceManager::GetInstance();
-
-    if (resources.cubemapHandle.IsValid() && m_textureManager) {
-        GpuResourceHandle gpuHandle = m_textureManager->GetGpuHandle(resources.cubemapHandle);
-        if (gpuHandle.IsValid()) {
-            gpuMgr.Release(gpuHandle, fence);
-        }
-        m_textureManager->Release(resources.cubemapHandle, fence);
+    if (resources.rtHandle.IsValid()) {
+        RenderTargetPool::GetInstance().Free(resources.rtHandle, fence);
+        resources.rtHandle = {};
     }
-    if (resources.srvSlot != UINT32_MAX && m_descriptorHeaps)
+
+    if (resources.srvSlot != UINT32_MAX && m_descriptorHeaps) {
         m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, resources.srvSlot, fence);
+        resources.srvSlot = UINT32_MAX;
+    }
 
     resources = {};
-}
-
-// ========================================================================
-// 驻留深度资源管理
-// ========================================================================
-
-uint32_t ReflectionProbeManager::AcquireDepthResource(uint32_t resolution) {
-    if (!m_initialized || !m_device || !m_descriptorHeaps)
-        return UINT32_MAX;
-
-    auto it = m_depthPool.find(resolution);
-    if (it != m_depthPool.end()) {
-        // 已有该分辨率的深度资源，增加引用计数
-        ++it->second.refCount;
-        return it->second.dsvSlot;
-    }
-
-    // 创建新的深度资源（Texture2D, D32_FLOAT）
-    auto &gpuMgr = GpuResourceManager::GetInstance();
-
-    D3D12_RESOURCE_DESC desc = {};
-    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    desc.Width = resolution;
-    desc.Height = resolution;
-    desc.DepthOrArraySize = 1;             // 单 slice，逐面渲染共享
-    desc.MipLevels = 1;
-    desc.Format = DXGI_FORMAT_D32_FLOAT;
-    desc.SampleDesc.Count = 1;
-    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-
-    D3D12_CLEAR_VALUE clearValue = {};
-    clearValue.Format = DXGI_FORMAT_D32_FLOAT;
-    clearValue.DepthStencil.Depth = 1.0f;
-
-    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(m_device, desc, clearValue, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-    if (!gpuHandle.IsValid()) {
-        return UINT32_MAX;
-    }
-
-    // 从 GpuResourceManager 获取 ID3D12Resource 指针用于创建 DSV
-    ID3D12Resource *resource = gpuMgr.GetResource(gpuHandle);
-    if (!resource) {
-        gpuMgr.Release(gpuHandle, 0);
-        return UINT32_MAX;
-    }
-
-    uint32_t dsvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::Dsv);
-    if (dsvSlot == UINT32_MAX) {
-        gpuMgr.Release(gpuHandle, 0);
-        return UINT32_MAX;
-    }
-
-    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, dsvSlot);
-    m_device->CreateDepthStencilView(resource, nullptr, dsvHandle);
-
-    ProbeDepthResource depthRes;
-    depthRes.gpuHandle = gpuHandle;
-    depthRes.dsvSlot = dsvSlot;
-    depthRes.resolution = resolution;
-    depthRes.refCount = 1;
-
-    m_depthPool[resolution] = std::move(depthRes);
-    return dsvSlot;
-}
-
-void ReflectionProbeManager::ReleaseDepthResource(uint32_t resolution) {
-    auto it = m_depthPool.find(resolution);
-    if (it == m_depthPool.end())
-        return;
-
-    if (it->second.refCount > 0) {
-        --it->second.refCount;
-    }
-
-    if (it->second.refCount == 0) {
-        // 没有探针再使用此分辨率，释放资源
-        if (it->second.gpuHandle.IsValid()) {
-            GpuResourceManager::GetInstance().Release(it->second.gpuHandle, UINT64_MAX);
-        }
-        if (it->second.dsvSlot != UINT32_MAX && m_descriptorHeaps) {
-            m_descriptorHeaps->Free(DescriptorHeapType::Dsv, it->second.dsvSlot, UINT64_MAX);
-        }
-        m_depthPool.erase(it);
-    }
 }
 
 uint32_t ReflectionProbeManager::GetProbeDepthSlot(uint32_t probeIndex) const {
     if (probeIndex >= m_probeEntries.size())
         return UINT32_MAX;
 
-    uint32_t res = m_probeEntries[probeIndex].resolution;
-    auto it = m_depthPool.find(res);
-    if (it == m_depthPool.end())
-        return UINT32_MAX;
-
-    return it->second.dsvSlot;
+    return m_probeEntries[probeIndex].depthHandle.dsvSlot;
 }
 
 /**

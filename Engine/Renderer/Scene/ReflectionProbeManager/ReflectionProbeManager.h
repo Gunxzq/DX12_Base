@@ -1,24 +1,23 @@
 #pragma once
 
+#include "Resource/Pool/DepthStencilPool.h"
+#include "Resource/Pool/RenderTargetPool.h"
 #include "Resource/Struct/ResourceHandle.h"
-#include "Resource/Struct/TextureHandle.h"
 #include <DirectXMath.h>
-#include <unordered_map>
 #include <vector>
 
 namespace DX12Engine {
 
 namespace Resource {
 class DescriptorHeapCollection;
-class TextureManager;
 } // namespace Resource
 
 namespace Renderer {
 
 struct ProbeRuntimeResources {
-    Resource::TextureHandle cubemapHandle;
-    uint32_t srvSlot = UINT32_MAX;
-    uint32_t resolution = 0;
+    Resource::RenderTargetHandle rtHandle; // RTV池句柄（包含资源 + RTV槽）
+    uint32_t srvSlot = UINT32_MAX;         // Cubemap SRV 槽位（6 个面）
+    uint32_t resolution = 0;               // 探针分辨率（必须为 2 的幂）
     bool isValid = false;
 };
 
@@ -31,8 +30,7 @@ public:
     ReflectionProbeManager &operator=(const ReflectionProbeManager &) = delete;
 
     // ---- 生命周期 ----
-    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps,
-                    Resource::TextureManager *textureManager);
+    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps);
     void Shutdown();
 
     // ---- 探针管理 ----
@@ -49,10 +47,12 @@ public:
     // ---- 查询（CPU 端绑定使用，线程安全：只读） ----
     uint32_t FindClosestProbe(const DirectX::XMFLOAT3 &position) const;
     const ProbeRuntimeResources &GetProbeResources(uint32_t probeIndex) const;
+    DirectX::XMFLOAT3 GetProbePosition(uint32_t probeIndex) const;
+    float GetProbeCaptureRange(uint32_t probeIndex) const;
     D3D12_GPU_DESCRIPTOR_HANDLE GetProbeCubemapArraySRV() const { return m_cubemapArraySRV; }
     uint32_t GetActiveProbeCount() const { return static_cast<uint32_t>(m_probeEntries.size()); }
 
-    /// 获取指定探针使用的深度缓冲区 DSV 槽位（同尺寸探针共享）
+    /// 获取指定探针使用的深度缓冲区 DSV 槽位
     uint32_t GetProbeDepthSlot(uint32_t probeIndex) const;
 
 private:
@@ -63,39 +63,27 @@ private:
         uint32_t resolution;
         uint8_t updatePriority;
         ProbeRuntimeResources resources;
+        Resource::DepthStencilHandle depthHandle;
         uint8_t updateCounter;
         bool needsCapture;
         bool isActive;
     };
 
-    // ---- 驻留式深度资源（按分辨率共享） ----
-    struct ProbeDepthResource {
-        Resource::GpuResourceHandle gpuHandle;
-        uint32_t dsvSlot = UINT32_MAX;
-        uint32_t resolution = 0;
-        uint32_t refCount = 0;
-    };
-
-    uint32_t AcquireDepthResource(uint32_t resolution);
-    void ReleaseDepthResource(uint32_t resolution);
-
     // ---- 内部辅助 ----
     bool ShouldUpdateProbe(const ProbeEntry &entry, uint32_t frameCounter) const;
+
     ProbeRuntimeResources AllocateCubemapResource(uint32_t resolution);
     void ReleaseCubemapResource(ProbeRuntimeResources &resources, uint64_t fence);
+
     void CaptureProbe(ProbeEntry &entry);
 
 private:
     ID3D12Device *m_device = nullptr;
     Resource::DescriptorHeapCollection *m_descriptorHeaps = nullptr;
-    Resource::TextureManager *m_textureManager = nullptr;
     bool m_initialized = false;
 
     // 探针数据
     std::vector<ProbeEntry> m_probeEntries;
-
-    // 驻留深度资源池（key = resolution）
-    std::unordered_map<uint32_t, ProbeDepthResource> m_depthPool;
 
     // Cubemap 数组 SRV
     D3D12_GPU_DESCRIPTOR_HANDLE m_cubemapArraySRV = {};
