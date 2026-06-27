@@ -55,25 +55,20 @@ public:
     // ========================================================================
 
     /// 开始捕获一个探针（GS 内部渲染所有 6 面到 Cubemap RTV）
-    void BeginCapture(CommandList &cmdList,
-                      ID3D12Resource *cubemapResource,
-                      D3D12_CPU_DESCRIPTOR_HANDLE cubemapRTV,
-                      D3D12_CPU_DESCRIPTOR_HANDLE depthDSV,
-                      uint32_t faceWidth, uint32_t faceHeight,
-                      D3D12_GPU_VIRTUAL_ADDRESS captureCBAddress,
-                      D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                      D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV);
+    void BeginCapture(CommandList &cmdList, ID3D12Resource *cubemapResource, D3D12_CPU_DESCRIPTOR_HANDLE cubemapRTV,
+                      D3D12_CPU_DESCRIPTOR_HANDLE depthDSV, uint32_t faceWidth, uint32_t faceHeight,
+                      D3D12_GPU_VIRTUAL_ADDRESS captureCBAddress, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
+                      D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV, D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart);
 
     /// 结束当前探针的捕获
     void EndCapture(CommandList &cmdList);
 
     // ========================================================================
-    // 统一实例化绘制（单物体 instanceCount=1，与 OpaqueRenderer 签名一致）
+    // 统一实例化绘制（单物体 instanceCount=1）
     // ========================================================================
 
     void DrawInstanced(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
-                       D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount,
-                       D3D12_GPU_DESCRIPTOR_HANDLE textureSRV);
+                       D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount);
 
 private:
     // ========================================================================

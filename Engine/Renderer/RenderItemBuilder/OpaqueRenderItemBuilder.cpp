@@ -34,7 +34,6 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
     struct BatchEntry {
         std::vector<InstanceData> instances;
         std::vector<Entity> entities;
-        Resource::TextureHandle textureHandle;
         uint32_t probeIndex = UINT32_MAX; // 批次探针索引（批次内所有实体应一致）
     };
     std::unordered_map<BatchKey, BatchEntry, BatchKeyHash> batches;
@@ -75,18 +74,16 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         BatchKey key{geoHandle, materialIdx};
         auto &entry = batches[key];
         entry.instances.push_back(instData);
-        entry.textureHandle = meshComp->textureHandle;
         entry.probeIndex = probeIdx; // 批次内所有物体共享同一探针索引
     }
 
     for (auto &[key, entry] : batches) {
-        D3D12_GPU_DESCRIPTOR_HANDLE textureSRV = m_textureManager->GetSRV(entry.textureHandle);
         auto &instances = entry.instances;
 
         D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer = m_frameResourceManager->AllocateInstance(
             instances.data(), static_cast<uint32_t>(instances.size() * sizeof(InstanceData)));
 
-        OpaqueRenderItem item = OpaqueRenderItem::Create(key.geometry, key.materialIdx, textureSRV, instanceBuffer,
+        OpaqueRenderItem item = OpaqueRenderItem::Create(key.geometry, key.materialIdx, instanceBuffer,
                                                          (uint32_t)instances.size(), entry.probeIndex);
         outQueue.Add(item);
     }

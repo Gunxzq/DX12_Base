@@ -53,8 +53,8 @@ void ReflectionProbeRenderer::LoadShaders() {
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
     HRESULT hr;
 
-    hr = D3DCompileFromFile(L"Shaders/probe_capture.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                            "VS", "vs_5_1", compileFlags, 0, &m_vsBlob, &errors);
+    hr = D3DCompileFromFile(L"Shaders/probe_capture.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
+                            compileFlags, 0, &m_vsBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(static_cast<const char *>(errors->GetBufferPointer()));
@@ -63,8 +63,8 @@ void ReflectionProbeRenderer::LoadShaders() {
     }
 
     errors = nullptr;
-    hr = D3DCompileFromFile(L"Shaders/probe_capture.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                            "GS", "gs_5_1", compileFlags, 0, &m_gsBlob, &errors);
+    hr = D3DCompileFromFile(L"Shaders/probe_capture.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "GS", "gs_5_1",
+                            compileFlags, 0, &m_gsBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(static_cast<const char *>(errors->GetBufferPointer()));
@@ -73,8 +73,8 @@ void ReflectionProbeRenderer::LoadShaders() {
     }
 
     errors = nullptr;
-    hr = D3DCompileFromFile(L"Shaders/probe_capture.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                            "PS", "ps_5_1", compileFlags, 0, &m_psBlob, &errors);
+    hr = D3DCompileFromFile(L"Shaders/probe_capture.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1",
+                            compileFlags, 0, &m_psBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(static_cast<const char *>(errors->GetBufferPointer()));
@@ -103,35 +103,50 @@ void ReflectionProbeRenderer::CreateRootSignature() {
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1);
 
     CD3DX12_DESCRIPTOR_RANGE texTable;
-    texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0);
+    texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 2);
 
-    slotRootParameter[0].InitAsConstantBufferView(1, 0);                                // b1: cbPass
-    slotRootParameter[1].InitAsConstantBufferView(2, 0);                                // b2: cbLights
-    slotRootParameter[2].InitAsDescriptorTable(1, &materialBufferRange);                // t0,space1: MaterialData
-    slotRootParameter[3].InitAsDescriptorTable(1, &texTable);                           // t0: 纹理
-    slotRootParameter[4].InitAsShaderResourceView(12, 1);                               // t12,space1: InstanceData
-    slotRootParameter[5].InitAsConstantBufferView(3, 0);                                // b3: cbCapture
+    slotRootParameter[0].InitAsConstantBufferView(1, 0);                 // b1: cbPass
+    slotRootParameter[1].InitAsConstantBufferView(2, 0);                 // b2: cbLights
+    slotRootParameter[2].InitAsDescriptorTable(1, &materialBufferRange); // t0,space1: MaterialData
+    slotRootParameter[3].InitAsDescriptorTable(1, &texTable);            // t0: 纹理
+    slotRootParameter[4].InitAsShaderResourceView(12, 1);                // t12,space1: InstanceData
+    slotRootParameter[5].InitAsConstantBufferView(3, 0);                 // b3: cbCapture
 
-    // 静态采样器
-    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[2];
-    staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT);
-    staticSamplers[1].Init(2, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+    // 静态采样器（对齐 Common_PBR.hlsl）
+    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[8];
+    staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    staticSamplers[1].Init(1, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+    staticSamplers[2].Init(2, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    staticSamplers[3].Init(3, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+    staticSamplers[4].Init(4, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, 0.0f, 8);
+    staticSamplers[5].Init(5, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, 0.0f, 8);
+    staticSamplers[6].Init(10, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+    staticSamplers[7].Init(11, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+                           D3D12_TEXTURE_ADDRESS_MODE_BORDER, D3D12_TEXTURE_ADDRESS_MODE_BORDER, 0.0f, 0,
+                           D3D12_COMPARISON_FUNC_LESS_EQUAL, D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK, 0.0f, 0.0f,
+                           D3D12_SHADER_VISIBILITY_PIXEL);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(6, slotRootParameter, 2, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(6, slotRootParameter, 8, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig;
     Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-    HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
-                                             &serializedRootSig, &errorBlob);
+    HRESULT hr =
+        D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRootSig, &errorBlob);
     if (errorBlob) {
         OutputDebugStringA(static_cast<const char *>(errorBlob->GetBufferPointer()));
     }
     ThrowIfFailed(hr);
 
     ThrowIfFailed(device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(),
-                                              serializedRootSig->GetBufferSize(),
-                                              IID_PPV_ARGS(&m_rootSignature)));
+                                              serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
 }
 
 // ========================================================================
@@ -142,10 +157,10 @@ void ReflectionProbeRenderer::CreatePSO() {
     auto device = m_context->GetDevice();
 
     D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TANGENT",  0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
     };
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -168,8 +183,8 @@ void ReflectionProbeRenderer::CreatePSO() {
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;    // Cubemap format
-    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;             // Shared depth buffer
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM; // Cubemap format
+    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;          // Shared depth buffer
     psoDesc.SampleDesc.Count = 1;
     psoDesc.SampleDesc.Quality = 0;
 
@@ -180,14 +195,13 @@ void ReflectionProbeRenderer::CreatePSO() {
 // 探针捕获接口（GS 方案：一次 BeginCapture，GS 内部处理所有 6 面）
 // ========================================================================
 
-void ReflectionProbeRenderer::BeginCapture(CommandList &cmdList,
-                                           ID3D12Resource *cubemapResource,
-                                           D3D12_CPU_DESCRIPTOR_HANDLE cubemapRTV,
-                                           D3D12_CPU_DESCRIPTOR_HANDLE depthDSV,
+void ReflectionProbeRenderer::BeginCapture(CommandList &cmdList, ID3D12Resource *cubemapResource,
+                                           D3D12_CPU_DESCRIPTOR_HANDLE cubemapRTV, D3D12_CPU_DESCRIPTOR_HANDLE depthDSV,
                                            uint32_t faceWidth, uint32_t faceHeight,
                                            D3D12_GPU_VIRTUAL_ADDRESS captureCBAddress,
                                            D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                                           D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV) {
+                                           D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
+                                           D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart) {
     if (!m_pso || !m_rootSignature) {
         OutputDebugStringW(L"[ERROR] ReflectionProbeRenderer: PSO or RootSignature not initialized\n");
         return;
@@ -225,6 +239,11 @@ void ReflectionProbeRenderer::BeginCapture(CommandList &cmdList,
         cmdList.Get()->SetGraphicsRootConstantBufferView(1, lightCBAddress); // b2: cbLights
     if (materialBufferSRV.ptr)
         cmdList.Get()->SetGraphicsRootDescriptorTable(2, materialBufferSRV); // t0,space1: MaterialData
+
+    // 绑定纹理堆 (slot 3, t0,space0)
+    if (textureHeapStart.ptr)
+        cmdList.Get()->SetGraphicsRootDescriptorTable(3, textureHeapStart);
+
     if (captureCBAddress)
         cmdList.Get()->SetGraphicsRootConstantBufferView(5, captureCBAddress); // b3: cbCapture
 
@@ -254,25 +273,25 @@ void ReflectionProbeRenderer::EndCapture(CommandList &cmdList) {
 // ========================================================================
 
 void ReflectionProbeRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometryHandle,
-                                            D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress,
-                                            uint32_t instanceCount,
-                                            D3D12_GPU_DESCRIPTOR_HANDLE textureSRV) {
-    if (!m_inCapture || !m_geometryManager) return;
+                                            D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount) {
+    if (!m_inCapture || !m_geometryManager)
+        return;
 
     // 绑定实例数据 SRV
     cmdList.Get()->SetGraphicsRootShaderResourceView(4, instanceBufferAddress);
 
-    // 绑定纹理 SRV（描述符表）
-    cmdList.Get()->SetGraphicsRootDescriptorTable(3, textureSRV);
+    // 纹理数组已在 BeginCapture 全局绑定 (slot 3)
 
     // 获取顶点/索引缓冲区并绘制
     auto *mesh = m_geometryManager->GetGeometry<TriangleMesh>(geometryHandle);
-    if (!mesh || !mesh->isGpuReady) return;
+    if (!mesh || !mesh->isGpuReady)
+        return;
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Resource *vbResource = gpuMgr.GetResource(mesh->vertexBufferHandle);
     ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
-    if (!vbResource || !ibResource) return;
+    if (!vbResource || !ibResource)
+        return;
 
     D3D12_VERTEX_BUFFER_VIEW vbView;
     vbView.BufferLocation = vbResource->GetGPUVirtualAddress();

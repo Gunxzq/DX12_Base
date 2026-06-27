@@ -119,13 +119,12 @@ void ProbeBuilder::Build(const ProbeCaptureInfo *probes, uint32_t probeCount, EC
         }
 
         for (auto &[key, entry] : batches) {
-            D3D12_GPU_DESCRIPTOR_HANDLE textureSRV = m_textureManager->GetSRV(entry.textureHandle);
             auto &instances = entry.instances;
 
             D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer = m_frameResourceManager->AllocateInstance(
                 instances.data(), static_cast<uint32_t>(instances.size() * sizeof(InstanceData)));
 
-            OpaqueRenderItem item = OpaqueRenderItem::Create(key.geometry, key.materialIdx, textureSRV, instanceBuffer,
+            OpaqueRenderItem item = OpaqueRenderItem::Create(key.geometry, key.materialIdx, instanceBuffer,
                                                              (uint32_t)instances.size(), probe.probeIndex);
             outQueue.Add(item);
         }
