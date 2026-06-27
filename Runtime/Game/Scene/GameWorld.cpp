@@ -129,6 +129,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
         std::make_unique<TerrainRenderItemBuilder>(m_context->FrameResourceManager, m_context->TextureMgr);
 
     LoadTestTexture();
+    LoadBrickTextures();
 
     m_probeBuilder =
         std::make_unique<ProbeBuilder>(m_context->FrameResourceManager, m_context->MaterialMgr, m_context->TextureMgr);
@@ -139,9 +140,8 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_probeRenderer->Initialize();
     LoadWaterTexture();
 
-    CreateMaterials();
-
     // 创建 1x1 纯白纹理（用于反射测试立方体，避免木箱纹理干扰反射观察）
+    // 该纹理在 CreateMaterials() 之前创建，确保 m_whiteTextureHandle 已被赋值
     {
         auto &gpuMgr = GpuResourceManager::GetInstance();
         ID3D12Device *device = m_context->DeviceContext->GetDevice();
@@ -213,15 +213,18 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
                 device->CreateShaderResourceView(gpuMgr.GetResource(whiteTexHandle), &srvDesc, cpuHandle);
 
                 m_whiteTextureHandle = m_context->TextureMgr->RegisterTexture(whiteTexHandle, whiteSrvSlot);
+                m_whiteTextureSrvSlot = whiteSrvSlot;
             }
         }
     }
+    CreateMaterials();
     CreateSkybox();
     CreateGroundPlane();
     CreateTestCube();
+    CreateTestCylinder();
 
-    // 压力测试：大量动态物体
-    CreateStressTestScene();
+    // 压力测试：大量动态物体（已注释，后续需要时启用）
+    // CreateStressTestScene();
 
     // 初始化公告牌系统
     LoadBillboardTextures();
@@ -285,11 +288,11 @@ void GameWorld::Clear() {
     DestroyEntityWithCleanup(m_groundPlaneEntity);
     m_groundPlaneEntity = INVALID_ENTITY;
 
-    // 移除压力测试实体（现在是静态物体，需清理持久化资源）
-    for (auto entity : m_stressEntities) {
-        DestroyEntityWithCleanup(entity);
-    }
-    m_stressEntities.clear();
+    // 移除压力测试实体（当前已注释，保留清理代码备查）
+    // for (auto entity : m_stressEntities) {
+    //     DestroyEntityWithCleanup(entity);
+    // }
+    // m_stressEntities.clear();
 }
 
 void GameWorld::RegisterBuilderSystems() {
@@ -521,8 +524,8 @@ void GameWorld::CreateGroundPlane() {
     MeshComponent meshComp;
     meshComp.lodMeshHandle = lodHandle;
     meshComp.localBounds = bounds;
-    meshComp.materialHandle = m_cubeMaterialHandle; // 复用立方体材质
-    meshComp.textureHandle = m_testTextureHandle;
+    meshComp.materialHandle = m_brickMaterialHandle; // 砖块材质（含法线贴图）
+    meshComp.textureHandle = m_brickTextureHandle;
     meshComp.receivesShadow = true;
     m_registry->AddComponent<MeshComponent>(m_groundPlaneEntity, std::move(meshComp));
 
@@ -782,6 +785,76 @@ void GameWorld::CreateStressTestScene() {
     }
 }
 
+void GameWorld::CreateTestCylinder() {
+    if (!m_registry || !m_renderer || !m_context)
+        return;
+
+    GeometryGenerator geoGen;
+    auto meshData = geoGen.CreateCylinder(1.0f, 0.5f, 2.0f, 24, 8);
+
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto device = m_context->DeviceContext->GetDevice();
+
+    size_t vbSize = meshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
+    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
+    if (vbResource) {
+        void *vbMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        vbResource->Map(0, &readRange, &vbMapped);
+        memcpy(vbMapped, meshData.Vertices.data(), vbSize);
+        vbResource->Unmap(0, nullptr);
+    }
+
+    size_t ibSize = meshData.Indices32.size() * sizeof(uint32_t);
+    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
+    if (ibResource) {
+        void *ibMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        ibResource->Map(0, &readRange, &ibMapped);
+        memcpy(ibMapped, meshData.Indices32.data(), ibSize);
+        ibResource->Unmap(0, nullptr);
+    }
+
+    TriangleMesh triangleMesh;
+    triangleMesh.vertexBufferHandle = vbHandle;
+    triangleMesh.indexBufferHandle = ibHandle;
+    triangleMesh.vertexCount = static_cast<uint32_t>(meshData.Vertices.size());
+    triangleMesh.indexCount = static_cast<uint32_t>(meshData.Indices32.size());
+    triangleMesh.vertexStride = sizeof(GeometryGenerator::Vertex);
+    triangleMesh.indexFormat = DXGI_FORMAT_R32_UINT;
+    triangleMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    triangleMesh.isGpuReady = true;
+
+    Math::BoundingAABB bounds;
+    bounds.min = XMFLOAT3(-1.0f, -1.0f, -1.0f);
+    bounds.max = XMFLOAT3(1.0f, 1.0f, 1.0f);
+
+    auto &geoMgr = m_context->GeometryResourceManager;
+    GeometryHandle geoHandle = geoMgr->RegisterGeometry<TriangleMesh>(triangleMesh);
+    if (!geoHandle.IsValid()) {
+        m_context->Logging->Error("[GameWorld] RegisterGeometry for cylinder failed!");
+        return;
+    }
+
+    LODMesh lodMesh;
+    lodMesh.lodChain = {geoHandle};
+    LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
+
+    auto entity = m_registry->CreateEntity();
+    m_registry->AddComponent<TransformComponent>(entity, XMFLOAT3(4.0f, 32.0f, -3.0f), XMFLOAT3(0.0f, 0.0f, 0.0f),
+                                                 XMFLOAT3(1.0f, 1.0f, 1.0f));
+    MeshComponent meshComp;
+    meshComp.lodMeshHandle = lodHandle;
+    meshComp.localBounds = bounds;
+    meshComp.materialHandle = m_brickMaterialHandle;
+    meshComp.textureHandle = m_brickTextureHandle;
+    meshComp.receivesShadow = true;
+    m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
+    m_context->Logging->Info("[GameWorld] Test cylinder created with brick material + normal map");
+}
+
 void GameWorld::LoadTestTexture() {
 
     DDSTextureInfo ddsInfo;
@@ -825,6 +898,7 @@ void GameWorld::LoadTestTexture() {
     // 注册到 TextureManager
     TextureManager *texMgr = m_context->TextureMgr;
     m_testTextureHandle = texMgr->RegisterTexture(gpuHandle, srvIndex);
+    m_testTextureSrvSlot = srvIndex;
 
     // 上传纹理数据
     uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
@@ -866,6 +940,136 @@ void GameWorld::LoadTestTexture() {
     m_context->Logging->Info("[GameWorld] Test texture loaded successfully");
 }
 
+void GameWorld::LoadBrickTextures() {
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    ID3D12Device *device = m_context->DeviceContext->GetDevice();
+    auto &descriptorHeaps = m_context->DescriptorHeaps;
+
+    // 加载 bricks2.dds（漫反射）
+    {
+        DDSTextureInfo ddsInfo;
+        if (!AssetLoader::GetInstance().LoadTextureFromFile(L"Content/Textures/bricks2.dds", ddsInfo)) {
+            m_context->Logging->Warn("[GameWorld] Failed to load bricks2.dds, skipping brick material");
+            return;
+        }
+
+        GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+        if (!gpuHandle.IsValid())
+            return;
+
+        uint32_t srvSlot = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+        if (srvSlot == UINT32_MAX) {
+            gpuMgr.Release(gpuHandle, 0);
+            return;
+        }
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = ddsInfo.desc.Format;
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvSlot);
+        device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+
+        m_brickTextureHandle = m_context->TextureMgr->RegisterTexture(gpuHandle, srvSlot);
+        m_brickTextureSrvSlot = srvSlot;
+
+        // 上传
+        uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+        auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+        auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+        auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+        auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+
+        auto subresources = ddsInfo.subresources;
+        UINT64 uploadSize =
+            GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
+        GpuResourceHandle uploadBuf =
+            gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+        auto b1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
+                                                       D3D12_RESOURCE_STATE_COPY_DEST);
+        cmd.Get()->ResourceBarrier(1, &b1);
+        UpdateSubresources(cmd.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadBuf), 0, 0,
+                           static_cast<UINT>(subresources.size()), subresources.data());
+        auto b2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        cmd.Get()->ResourceBarrier(1, &b2);
+        cmd.Close();
+        m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmd);
+        m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+        uint64_t seq = m_context->GetNextSequence();
+        gpuMgr.Release(uploadBuf, seq);
+        m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+        m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
+    }
+
+    // 加载 bricks2_nmap.dds（法线贴图）
+    {
+        DDSTextureInfo ddsInfo;
+        if (!AssetLoader::GetInstance().LoadTextureFromFile(L"Content/Textures/bricks_nmap.dds", ddsInfo)) {
+            m_context->Logging->Warn("[GameWorld] Failed to load bricks2_nmap.dds, skipping normal map");
+            return;
+        }
+
+        GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+        if (!gpuHandle.IsValid())
+            return;
+
+        uint32_t srvSlot = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+        if (srvSlot == UINT32_MAX) {
+            gpuMgr.Release(gpuHandle, 0);
+            return;
+        }
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = ddsInfo.desc.Format;
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvSlot);
+        device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+
+        // 法线贴图只需记录 SRV 槽位，不上传到 TextureManager（仅采样用）
+        m_brickNormalSrvSlot = srvSlot;
+        m_context->Logging->Info("[SlotDBG] Brick normal map SRV slot={}, format={}", srvSlot,
+                                 static_cast<int>(ddsInfo.desc.Format));
+
+        // 上传
+        uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+        auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+        auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+        auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+        auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+
+        auto subresources = ddsInfo.subresources;
+        UINT64 uploadSize =
+            GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
+        GpuResourceHandle uploadBuf =
+            gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+        auto b1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
+                                                       D3D12_RESOURCE_STATE_COPY_DEST);
+        cmd.Get()->ResourceBarrier(1, &b1);
+        UpdateSubresources(cmd.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadBuf), 0, 0,
+                           static_cast<UINT>(subresources.size()), subresources.data());
+        auto b2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        cmd.Get()->ResourceBarrier(1, &b2);
+        cmd.Close();
+        m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmd);
+        m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+        uint64_t seq = m_context->GetNextSequence();
+        gpuMgr.Release(uploadBuf, seq);
+        m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+        m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
+    }
+
+    m_context->Logging->Info("[GameWorld] Brick textures loaded");
+}
+
 void GameWorld::CreateMaterials() {
     auto *materialMgr = m_context->MaterialMgr;
 
@@ -878,8 +1082,23 @@ void GameWorld::CreateMaterials() {
     cubeMaterial.roughness = 0.5f;
     cubeMaterial.ambient = 0.5f;
     cubeMaterial.alpha = 1.0f;
+    cubeMaterial.baseColorTextureId = m_testTextureSrvSlot;
     cubeMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
     m_cubeMaterialHandle = materialMgr->RegisterMaterial(cubeMaterial);
+
+    // 砖块材质（含法线贴图）
+    MaterialData brickMaterial;
+    brickMaterial.materialId = TYPE_HASH("brick_material");
+    brickMaterial.name = "brick_material";
+    brickMaterial.baseColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+    brickMaterial.metallic = 0.0f;
+    brickMaterial.roughness = 0.4f;
+    brickMaterial.ambient = 0.5f;
+    brickMaterial.alpha = 1.0f;
+    brickMaterial.baseColorTextureId = m_brickTextureSrvSlot;
+    brickMaterial.normalTextureId = m_brickNormalSrvSlot;
+    brickMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
+    m_brickMaterialHandle = materialMgr->RegisterMaterial(brickMaterial);
 
     // 地形材质
     MaterialData terrainMaterial;
@@ -914,6 +1133,7 @@ void GameWorld::CreateMaterials() {
     reflectionTestMaterial.roughness = 0.2f;                             // 光滑表面，清晰反射
     reflectionTestMaterial.ambient = 0.1f;
     reflectionTestMaterial.alpha = 1.0f;
+    reflectionTestMaterial.baseColorTextureId = m_whiteTextureSrvSlot;
     reflectionTestMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
     m_reflectionTestMaterialHandle = materialMgr->RegisterMaterial(reflectionTestMaterial);
 
@@ -1277,15 +1497,24 @@ void GameWorld::RegisterCubeRenderSystem() {
                  // 获取反射探针 Cubemap Array SRV
                  D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV = m_context->ReflectionProbeMgr->GetProbeCubemapArraySRV();
 
-                 // 开始渲染（传入阴影数据和反射探针 Cubemap Array SRV）
+                 // 获取纹理数组堆起始 GPU handle（绑定到 slot 3，供 gTextureMaps[] 索引）
+                 D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
+                     m_context->DescriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, 0);
+
+                 // 获取环境贴图 SRV（天空盒）
+                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};
+                 if (m_skyboxTextureHandle.IsValid()) {
+                     envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
+                 }
+
+                 // 开始渲染（传入阴影数据、反射探针Cubemap Array SRV、纹理堆起始、环境贴图）
                  m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
-                                        shadowMapSRV, cubemapArraySRV);
+                                        shadowMapSRV, cubemapArraySRV, textureHeapStart, envMapSRV);
 
                  for (const auto &item : m_opaqueQueue) {
                      if (!item.IsValid())
                          continue;
-                     m_renderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer, item.instanceCount,
-                                               item.textureSRV);
+                     m_renderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer, item.instanceCount);
                  }
 
                  m_renderer->EndFrame();
@@ -2225,15 +2454,17 @@ void GameWorld::RegisterProbeCaptureSystem() {
                              continue;
                          D3D12_CPU_DESCRIPTOR_HANDLE cubemapRTV =
                              m_context->DescriptorHeaps->GetCpuHandle(DescriptorHeapType::Rtv, info.rtvBaseSlot);
+                         D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
+                             m_context->DescriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, 0);
                          m_probeRenderer->BeginCapture(cmdList, info.cubemapResource, cubemapRTV, depthDSV,
                                                        info.resolution, info.resolution, captureCBAddr, lightCBAddr,
-                                                       matBufferSRV);
+                                                       matBufferSRV, textureHeapStart);
                          // Draw queued geometry for this face
                          for (const auto &item : m_probeQueues[i]) {
                              if (!item.IsValid())
                                  continue;
                              m_probeRenderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer,
-                                                            item.instanceCount, item.textureSRV);
+                                                            item.instanceCount);
                          }
                          m_probeRenderer->EndCapture(cmdList);
                      }

@@ -30,10 +30,10 @@ struct MaterialData {
 
     // ── 纹理 ID（逻辑索引，非 GPU 描述符）──
     uint32_t baseColorTextureId = 0;
-    uint32_t normalTextureId = 0;
-    uint32_t metallicRoughnessTextureId = 0;
-    uint32_t emissiveTextureId = 0;
-    uint32_t occlusionTextureId = 0;
+    uint32_t normalTextureId = 0xFFFFFFFF;
+    uint32_t metallicRoughnessTextureId = 0xFFFFFFFF;
+    uint32_t emissiveTextureId = 0xFFFFFFFF;
+    uint32_t occlusionTextureId = 0xFFFFFFFF;
 
     // ── 渲染器标识（绑定到具体的渲染管线）──
     uint64_t rendererTypeHash = 0;

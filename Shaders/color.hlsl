@@ -2,19 +2,18 @@
 // color.hlsl - PBR 实体渲染着色器（带阴影采样 + 动态反射探针）
 // 统一实例化模式：所有物体通过 StructuredBuffer<InstanceData> 传入
 //==============================================================================
-#define DISABLE_ENV_REFLECTION
 
 #include "Common_PBR.hlsl"
 #include "ShadowSampling.hlsl"
 
-Texture2D gTexture : register(t0);
+Texture2D gTextureMaps[] : register(t0, space2);
 
 // =========================================================================
 // 动态反射探针 Cubemap Array（仅在此着色器中使用）
 // TextureCubeArray，由 GetProbeCubemapArraySRV 提供
 // probeIndex 作为 array index，最大 64 个探针
 // =========================================================================
-TextureCubeArray gReflectionCubemapArray : register(t10);
+TextureCubeArray gReflectionCubemapArray : register(t15);
 
 // =========================================================================
 // 实例数据（统一实例化模式，单物体 instanceCount=1）
@@ -81,6 +80,19 @@ float3 ComputeProbeReflection(float3 reflectDir, float3 albedo, float metallic, 
     return reflection * fresnel * strength;
 }
 
+// 法线贴图 TBN 变换
+float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, float3 tangentW)
+{
+    float3 normalT = 2.0f * normalMapSample - 1.0f;
+    // BC5 法线贴图只存 R/G，重建 Z
+    float lenSq = dot(normalT.xy, normalT.xy);
+    normalT.z = sqrt(max(0.0f, 1.0f - lenSq));
+    float3 N = unitNormalW;
+    float3 T = normalize(tangentW - dot(tangentW, N) * N);
+    float3 B = cross(N, T);
+    return mul(normalT, float3x3(T, B, N));
+}
+
 float4 PS(VertexOut pin) : SV_Target
 {
     uint matIndex = gInstanceData[pin.InstanceIndex].MaterialIndex;
@@ -89,7 +101,7 @@ float4 PS(VertexOut pin) : SV_Target
 
     MaterialData matData = gMaterialData[matIndex];
 
-    float4 texColor = gTexture.Sample(gSampler, pin.TexCoord);
+    float4 texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSampler, pin.TexCoord);
     float3 albedo = matData.BaseColor.rgb * texColor.rgb;
     float metallic = matData.Metallic;
     float roughness = matData.Roughness;
@@ -97,7 +109,18 @@ float4 PS(VertexOut pin) : SV_Target
     float3 emissive = matData.Emissive.rgb * matData.Emissive.w;
 
     float3 N = normalize(pin.WorldNormal);
+    float4 normalSample = float4(0.5f, 0.5f, 1.0f, 1.0f);
+    // 法线贴图：如果有有效的 NormalTexIndex，采样并变换到世界空间
+    [flatten] if (matData.NormalTexIndex != 0xFFFFFFFF)
+    {
+        normalSample = gTextureMaps[matData.NormalTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
+        N = NormalSampleToWorldSpace(normalSample.rgb, N, normalize(pin.WorldTangent));
+    }
     float3 V = normalize(gCameraPos - pin.WorldPos);
+
+    // 法线贴图 Alpha 通道调制粗糙度（砖缝更光滑 → 高光更强，增强凹凸感）
+    float roughnessMod = 1.0f - normalSample.a;
+    roughness = saturate(roughness + roughnessMod * 0.3f);
 
     Material mat;
     mat.BaseColor = float4(albedo, matData.BaseColor.a);
@@ -134,6 +157,11 @@ float4 PS(VertexOut pin) : SV_Target
     // 环境反射（动态反射探针）
     float3 reflectDir = reflect(-V, N);
     float3 reflection = ComputeProbeReflection(reflectDir, albedo, metallic, roughness, N, V, probeIndex);
+    // 无动态探针时回退到静态天空盒环境贴图
+    if (probeIndex == 0xFFFFFFFF && reflection.r + reflection.g + reflection.b < 0.001f)
+    {
+        reflection = ComputeEnvironmentReflection(reflectDir, albedo, metallic, roughness, N, V);
+    }
 
     float3 litColor = ambient + directLight + reflection + emissive;
 

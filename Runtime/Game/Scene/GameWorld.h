@@ -60,10 +60,12 @@ public:
 
     void LoadTestTexture();
     void LoadWaterTexture();
+    void LoadBrickTextures();
 
     void CreateMaterials();
 
     void CreateTestCube();
+    void CreateTestCylinder();
     void CreateGroundPlane();
     void CreateSkybox();
     void CreateWater();
@@ -153,7 +155,9 @@ private:
     uint32_t m_activeProbeCount = 0;
 
     DX12Engine::Resource::TextureHandle m_testTextureHandle;
+    uint32_t m_testTextureSrvSlot = UINT32_MAX;               // CBV_SRV_UAV 堆槽位索引
     DX12Engine::Resource::TextureHandle m_whiteTextureHandle; // 1x1 纯白纹理，用于反射测试立方体
+    uint32_t m_whiteTextureSrvSlot = UINT32_MAX;              // CBV_SRV_UAV 堆槽位索引
     DX12Engine::Resource::MaterialHandle m_cubeMaterialHandle;
     DX12Engine::Resource::MaterialHandle m_reflectionTestMaterialHandle; // 金属材质（反射探针测试用）
 
@@ -189,6 +193,13 @@ private:
     // 水
     DX12Engine::Resource::MaterialHandle m_waterMaterialHandle;
     DX12Engine::Resource::TextureHandle m_waterTextureHandle;
+    uint32_t m_waterTextureSrvSlot = UINT32_MAX;
+
+    // 砖块纹理（法线贴图测试）
+    DX12Engine::Resource::TextureHandle m_brickTextureHandle;
+    uint32_t m_brickTextureSrvSlot = UINT32_MAX;
+    uint32_t m_brickNormalSrvSlot = UINT32_MAX;
+    DX12Engine::Resource::MaterialHandle m_brickMaterialHandle;
     DX12Engine::ECS::Entity m_waterEntity;
     D3D12_GPU_VIRTUAL_ADDRESS m_waterCBAddress = 0;
 

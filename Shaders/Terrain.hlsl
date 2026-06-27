@@ -354,7 +354,7 @@ float4 PS(DomainOutput pin) : SV_Target
 
     float3 albedo = texColor.rgb;
     float metallic = 0.0f;
-    float roughness = 0.8f;
+    float roughness = 0.6f;
     float ao = 0.5f;
     float3 emissive = float3(0, 0, 0);
 

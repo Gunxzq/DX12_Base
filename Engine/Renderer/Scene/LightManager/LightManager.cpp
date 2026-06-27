@@ -1,9 +1,9 @@
 #include "LightManager.h"
+#include "Common/ThrowHelper.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Struct/Descriptor.h"
-#include "Common/ThrowHelper.h"
 #include <cstring>
 
 using namespace DX12Engine::Renderer;
@@ -965,7 +965,7 @@ void LightManager::CreateTestLights() {
     // 方向光 0 — 模拟太阳光（从左上方斜照，产生明显阴影）
     // ========================================================================
     Light dirLight = {};
-    dirLight.Strength = DirectX::XMFLOAT4(5.0f, 4.5f, 4.0f, 0.0f);     // 更强的暖色太阳光
+    dirLight.Strength = DirectX::XMFLOAT4(4.5f, 4.0f, 3.5f, 0.0f); // PBR 方向光强度（/π 补偿后等效于龙书 3 方向光合计）
     dirLight.Direction = DirectX::XMFLOAT4(0.4f, -0.85f, 0.35f, 0.0f); // 左上方斜照（约 30° 仰角）
     dirLight.ShadowMapIndex = 0; // 使用 gDirShadows[0]，表示该光源投射阴影
     SetDirectionalLight(dirLight, 0);

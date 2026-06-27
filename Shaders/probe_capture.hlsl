@@ -9,14 +9,14 @@
 //   slot 0: b1 cbPass              (CBV)
 //   slot 1: b2 cbLights             (CBV)
 //   slot 2: t0,space1               StructuredBuffer<MaterialData> (SRV 描述符表)
-//   slot 3: t0                      纹理 SRV (描述符表)
+//   slot 3: t0,space2               Texture2D gTextureMaps[] (纹理堆)
 //   slot 4: t12,space1              StructuredBuffer<InstanceData> (SRV)
 //   slot 5: b3 cbCapture            (CBV) — 6 面 VP + 探针位置
 //==============================================================================
 
 #include "Common_PBR.hlsl"
 
-Texture2D gTexture : register(t0);
+Texture2D gTextureMaps[] : register(t0, space2);
 
 // =========================================================================
 // 实例数据（统一实例化模式）
@@ -27,7 +27,7 @@ struct InstanceData
     row_major float4x4 WorldInvTranspose;
     uint MaterialIndex;
     uint ReceiveShadow;
-    uint ProbeIndex;    // 捕获时忽略，仅保持结构对齐
+    uint ProbeIndex; // 捕获时忽略，仅保持结构对齐
     float pad;
 };
 
@@ -97,14 +97,11 @@ struct GSOutput
     uint RTIndex : SV_RenderTargetArrayIndex;
 };
 
-[maxvertexcount(18)]
-void GS(triangle VertexOut input[3], inout TriangleStream<GSOutput> stream)
+[maxvertexcount(18)] void GS(triangle VertexOut input[3], inout TriangleStream<GSOutput> stream)
 {
-    [unroll]
-    for (uint face = 0; face < 6; ++face)
+    [unroll] for (uint face = 0; face < 6; ++face)
     {
-        [unroll]
-        for (uint v = 0; v < 3; ++v)
+        [unroll] for (uint v = 0; v < 3; ++v)
         {
             GSOutput output;
             output.PosH = mul(float4(input[v].WorldPos, 1.0f), gFaceViewProj[face]);
@@ -123,13 +120,26 @@ void GS(triangle VertexOut input[3], inout TriangleStream<GSOutput> stream)
 // =========================================================================
 // PS — 光照计算（使用探针位置作为相机位置）
 // =========================================================================
+// 法线贴图 TBN 变换
+float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, float3 tangentW)
+{
+    float3 normalT = 2.0f * normalMapSample - 1.0f;
+    // BC5 法线贴图只存 R/G，重建 Z
+    float lenSq = dot(normalT.xy, normalT.xy);
+    normalT.z = sqrt(max(0.0f, 1.0f - lenSq));
+    float3 N = unitNormalW;
+    float3 T = normalize(tangentW - dot(tangentW, N) * N);
+    float3 B = cross(N, T);
+    return mul(normalT, float3x3(T, B, N));
+}
+
 float4 PS(GSOutput pin) : SV_Target
 {
     uint matIndex = gInstanceData[pin.InstanceIndex].MaterialIndex;
 
     MaterialData matData = gMaterialData[matIndex];
 
-    float4 texColor = gTexture.Sample(gSampler, pin.TexCoord);
+    float4 texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSampler, pin.TexCoord);
     float3 albedo = matData.BaseColor.rgb * texColor.rgb;
     float metallic = matData.Metallic;
     float roughness = matData.Roughness;
@@ -137,7 +147,18 @@ float4 PS(GSOutput pin) : SV_Target
     float3 emissive = matData.Emissive.rgb * matData.Emissive.w;
 
     float3 N = normalize(pin.WorldNormal);
+    float4 normalSample = float4(0.5f, 0.5f, 1.0f, 1.0f);
+    // 法线贴图
+    [flatten] if (matData.NormalTexIndex != 0xFFFFFFFF)
+    {
+        normalSample = gTextureMaps[matData.NormalTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
+        N = NormalSampleToWorldSpace(normalSample.rgb, N, normalize(pin.WorldTangent));
+    }
     float3 V = normalize(gProbePosition - pin.WorldPos);
+
+    // 法线贴图 Alpha 通道调制粗糙度
+    float roughnessMod = 1.0f - normalSample.a;
+    roughness = saturate(roughness + roughnessMod * 0.3f);
 
     Material mat;
     mat.BaseColor = float4(albedo, matData.BaseColor.a);
