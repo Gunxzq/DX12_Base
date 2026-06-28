@@ -1,8 +1,6 @@
 #ifndef COMMON_PBR_HLSL
 #define COMMON_PBR_HLSL
 
-#pragma enable_unbounded_descriptor_tables
-
 #include "LightingUtil.hlsl"
 
 // =================================================================================================
@@ -18,13 +16,25 @@ struct MaterialData
     float Alpha;
     float4 Emissive;
     float AlphaCutoff;
+    float NormalStrength;
+
+    // 贴图索引（0xFFFFFFFF = 无效）
     uint BaseColorTexIndex;
     uint NormalTexIndex;
     uint MetallicRoughnessTexIndex;
     uint EmissiveTexIndex;
     uint OcclusionTexIndex;
-    float MatPad[2];
+    uint HeightTexIndex;
+    uint OpacityTexIndex;
+    uint MaskTexIndex;
+    uint SubsurfaceTexIndex;
+    uint ClearCoatTexIndex;
 };
+
+// =================================================================================================
+// 共用纹理堆（所有物体共享的无界纹理数组）
+// =================================================================================================
+Texture2D gTextureMaps[] : register(t0, space2);
 
 // =================================================================================================
 // 常量缓冲
@@ -88,7 +98,6 @@ SamplerState gSamplerLinearClamp : register(s3);
 SamplerState gSamplerAnisotropicWrap : register(s4);
 SamplerState gSamplerAnisotropicClamp : register(s5);
 SamplerComparisonState gShadowSampler : register(s11);
-SamplerState gSampler : register(s2);
 
 // =================================================================================================
 // 环境反射

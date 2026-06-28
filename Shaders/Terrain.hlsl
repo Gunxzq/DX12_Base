@@ -24,12 +24,19 @@ struct MaterialData
     float Alpha;
     float4 Emissive;
     float AlphaCutoff;
+    float NormalStrength;
+
+    // 贴图索引（0xFFFFFFFF = 无效）
     uint BaseColorTexIndex;
     uint NormalTexIndex;
     uint MetallicRoughnessTexIndex;
     uint EmissiveTexIndex;
     uint OcclusionTexIndex;
-    float MatPad[2];
+    uint HeightTexIndex;
+    uint OpacityTexIndex;
+    uint MaskTexIndex;
+    uint SubsurfaceTexIndex;
+    uint ClearCoatTexIndex;
 };
 
 // ============================================================================

@@ -72,7 +72,7 @@ float4 PS(VertexOut pin) : SV_Target
     texCoord.x += gTotalTime * 0.1f;
     texCoord.y += gTotalTime * 0.05f;
 
-    float4 texColor = gTexture.Sample(gSampler, texCoord);
+    float4 texColor = gTexture.Sample(gSamplerLinearWrap, texCoord);
     float3 albedo = matData.BaseColor.rgb * texColor.rgb;
     float metallic = matData.Metallic;
     float roughness = matData.Roughness;

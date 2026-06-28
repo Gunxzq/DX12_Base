@@ -29,6 +29,7 @@ public:
     // ========================================================================
     void BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                     D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
+                    D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart,
                     D3D12_GPU_DESCRIPTOR_HANDLE billboardTextureSRV);
 
     void DrawBillboard(CommandList &cmdList, const BillboardRenderItem &item);

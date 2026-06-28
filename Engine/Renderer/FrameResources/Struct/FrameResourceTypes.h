@@ -68,18 +68,25 @@ struct SkinningConstants {
 
 struct MaterialConstants {
     DirectX::XMFLOAT4 BaseColor;            // 基础颜色
-    float Metallic;                         // 元金属度
+    float Metallic;                         // 金属度
     float Roughness;                        // 粗糙度
-    float Ambient;                          // 环境光遮蔽强度
-    float Alpha;                            // 透明度
+    float Ambient;                          // 环境光遮蔽强度（固定值回退）
+    float Alpha;                            // 透明度（固定值回退）
     DirectX::XMFLOAT4 Emissive;             // 自发光颜色
     float AlphaCutoff;                      // 透明度阈值
-    uint32_t BaseColorTextureIndex;         // 基础颜色纹理索引
-    uint32_t NormalTextureIndex;            // 法线纹理索引
-    uint32_t MetallicRoughnessTextureIndex; // 元金属度和粗糙度纹理索引
-    uint32_t EmissiveTextureIndex;          // 自发光颜色纹理索引
-    uint32_t OcclusionTextureIndex;         // 遮挡纹理索引
-    float MatPad[2];                        // 填充
+    float NormalStrength;                   // 法线强度（1.0 = 默认）
+
+    // ── PBR 贴图索引（0xFFFFFFFF = 无效/不采样）──
+    uint32_t BaseColorTextureIndex;         // 固有色贴图
+    uint32_t NormalTextureIndex;            // 法线贴图
+    uint32_t MetallicRoughnessTextureIndex; // 金属度(R) + 粗糙度(G)
+    uint32_t EmissiveTextureIndex;          // 自发光贴图
+    uint32_t OcclusionTextureIndex;         // AO 贴图
+    uint32_t HeightTextureIndex;            // 高度/位移贴图
+    uint32_t OpacityTextureIndex;           // 透明度贴图（可选）
+    uint32_t MaskTextureIndex;              // 遮罩贴图
+    uint32_t SubsurfaceTextureIndex;        // 次表面散射贴图
+    uint32_t ClearCoatTextureIndex;         // 清漆层贴图
 };
 
 static_assert(

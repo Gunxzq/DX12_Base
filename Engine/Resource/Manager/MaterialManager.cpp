@@ -188,6 +188,7 @@ Renderer::MaterialConstants MaterialManager::ConvertToGPUConstants(const Materia
     gpu.Ambient = data.ambient;
     gpu.Alpha = data.alpha;
     gpu.AlphaCutoff = data.alphaCutoff;
+    gpu.NormalStrength = data.normalIntensity;
 
     // 纹理索引
     gpu.BaseColorTextureIndex = data.baseColorTextureId;
@@ -195,6 +196,11 @@ Renderer::MaterialConstants MaterialManager::ConvertToGPUConstants(const Materia
     gpu.MetallicRoughnessTextureIndex = data.metallicRoughnessTextureId;
     gpu.EmissiveTextureIndex = data.emissiveTextureId;
     gpu.OcclusionTextureIndex = data.occlusionTextureId;
+    gpu.HeightTextureIndex = data.heightTextureId;
+    gpu.OpacityTextureIndex = data.opacityTextureId;
+    gpu.MaskTextureIndex = data.maskTextureId;
+    gpu.SubsurfaceTextureIndex = data.subsurfaceTextureId;
+    gpu.ClearCoatTextureIndex = data.clearCoatTextureId;
 
     return gpu;
 }

@@ -54,6 +54,7 @@ void BillboardRenderer::EndFrame() {
 void BillboardRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                    D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
                                    D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
+                                   D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart,
                                    D3D12_GPU_DESCRIPTOR_HANDLE billboardTextureSRV) {
     if (!m_pso || !m_rootSignature) {
         OutputDebugStringW(L"[ERROR] BillboardRenderer::BeginFrame: PSO or RootSignature not initialized\n");
@@ -68,8 +69,12 @@ void BillboardRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRE
         cmdList.Get()->SetGraphicsRootDescriptorTable(3, materialBufferSRV);
     }
 
+    if (textureHeapStart.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(4, textureHeapStart);
+    }
+
     if (billboardTextureSRV.ptr != 0) {
-        cmdList.Get()->SetGraphicsRootDescriptorTable(4, billboardTextureSRV);
+        cmdList.Get()->SetGraphicsRootDescriptorTable(5, billboardTextureSRV);
     }
 }
 
@@ -151,15 +156,19 @@ void BillboardRenderer::CreateRootSignature() {
     //   slot 1: b1 cbPass           (CBV)
     //   slot 2: b2 cbLights         (CBV)
     //   slot 3: t0,space1           StructuredBuffer<MaterialData> (SRV)
-    //   slot 4: t20                 Texture2DArray SRV（公告牌专用）
-    //   slot 5-7: 未使用（占位对齐）
-    //   slot 8: t12,space1          StructuredBuffer<BillboardInstanceData> (SRV)
+    //   slot 4: t0,space2           Texture2D gTextureMaps[]（无界纹理堆）
+    //   slot 5: t20                 Texture2DArray SRV（公告牌专用）
+    //   slot 6-8: 未使用（占位对齐）
+    //   slot 9: t12,space1          StructuredBuffer<BillboardInstanceData> (SRV)
     // ========================================================================
 
-    CD3DX12_ROOT_PARAMETER slotRootParameter[9];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[10];
 
     CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+
+    CD3DX12_DESCRIPTOR_RANGE textureHeapRange;
+    textureHeapRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 2, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
     CD3DX12_DESCRIPTOR_RANGE billboardTexRange;
     billboardTexRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 20, 0,
@@ -170,20 +179,22 @@ void BillboardRenderer::CreateRootSignature() {
     slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[2].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL);
     slotRootParameter[3].InitAsDescriptorTable(1, &materialBufferRange, D3D12_SHADER_VISIBILITY_PIXEL);
-    slotRootParameter[4].InitAsDescriptorTable(1, &billboardTexRange, D3D12_SHADER_VISIBILITY_PIXEL);
-    // slot 5, 6, 7: 占位对齐（绑定到 shader 中不存在的寄存器，避免冲突）
-    slotRootParameter[5].InitAsConstantBufferView(5, 0, D3D12_SHADER_VISIBILITY_ALL);
-    slotRootParameter[6].InitAsConstantBufferView(6, 0, D3D12_SHADER_VISIBILITY_ALL);
-    slotRootParameter[7].InitAsConstantBufferView(7, 0, D3D12_SHADER_VISIBILITY_ALL);
+    slotRootParameter[4].InitAsDescriptorTable(1, &textureHeapRange, D3D12_SHADER_VISIBILITY_PIXEL);  // t0,space2 gTextureMaps[]
+    slotRootParameter[5].InitAsDescriptorTable(1, &billboardTexRange, D3D12_SHADER_VISIBILITY_PIXEL);
+    // slot 6, 7, 8: 占位对齐（绑定到 shader 中不存在的寄存器，避免冲突）
+    slotRootParameter[6].InitAsConstantBufferView(5, 0, D3D12_SHADER_VISIBILITY_ALL);
+    slotRootParameter[7].InitAsConstantBufferView(6, 0, D3D12_SHADER_VISIBILITY_ALL);
     // slot 8: t12,space1 — VS 和 PS 都需要访问（PS 读取 MaterialIndex）
     slotRootParameter[8].InitAsShaderResourceView(12, 1, D3D12_SHADER_VISIBILITY_ALL);
+    // slot 9: 占位对齐
+    slotRootParameter[9].InitAsConstantBufferView(8, 0, D3D12_SHADER_VISIBILITY_ALL);
 
     // 静态采样器（只需要线性采样器）
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1];
     staticSamplers[0].Init(2, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                            D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(9, slotRootParameter, 1, staticSamplers, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(10, slotRootParameter, 1, staticSamplers, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
     Microsoft::WRL::ComPtr<ID3DBlob> errorBlob = nullptr;

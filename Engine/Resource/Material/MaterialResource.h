@@ -29,11 +29,16 @@ struct MaterialData {
     float alphaCutoff = 0.5f;
 
     // ── 纹理 ID（逻辑索引，非 GPU 描述符）──
-    uint32_t baseColorTextureId = 0;
-    uint32_t normalTextureId = 0xFFFFFFFF;
-    uint32_t metallicRoughnessTextureId = 0xFFFFFFFF;
-    uint32_t emissiveTextureId = 0xFFFFFFFF;
-    uint32_t occlusionTextureId = 0xFFFFFFFF;
+    uint32_t baseColorTextureId = 0;                  // 基础颜色纹理 ID
+    uint32_t normalTextureId = 0xFFFFFFFF;            // 法线纹理 ID
+    uint32_t metallicRoughnessTextureId = 0xFFFFFFFF; // 金属度/粗糙度贴图
+    uint32_t emissiveTextureId = 0xFFFFFFFF;          // 自发光贴图
+    uint32_t occlusionTextureId = 0xFFFFFFFF;         // AO 贴图
+    uint32_t heightTextureId = 0xFFFFFFFF;            // Displacement/Height 贴图
+    uint32_t opacityTextureId = 0xFFFFFFFF;           // 透明度贴图（优先于 BaseColor.a）
+    uint32_t maskTextureId = 0xFFFFFFFF;              // 遮罩贴图
+    uint32_t subsurfaceTextureId = 0xFFFFFFFF;        // 次表面散射贴图
+    uint32_t clearCoatTextureId = 0xFFFFFFFF;         // 清漆层贴图
 
     // ── 渲染器标识（绑定到具体的渲染管线）──
     uint64_t rendererTypeHash = 0;

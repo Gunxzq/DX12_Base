@@ -151,6 +151,18 @@ float4 PS(GSOutput pin) : SV_Target
     float ao = matData.Ambient;
     float3 emissive = matData.Emissive.rgb * matData.Emissive.w;
 
+    // PBR 贴图采样（使用纹理堆 gTextureMaps）
+    [flatten] if (matData.MetallicRoughnessTexIndex != 0xFFFFFFFF)
+    {
+        float2 mr = gTextureMaps[matData.MetallicRoughnessTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord).rg;
+        metallic = mr.r;
+        roughness = mr.g;
+    }
+    [flatten] if (matData.OcclusionTexIndex != 0xFFFFFFFF)
+    {
+        ao = gTextureMaps[matData.OcclusionTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord).r;
+    }
+
     Material mat;
     mat.BaseColor = float4(albedo, matData.BaseColor.a);
     mat.Metallic = metallic;
