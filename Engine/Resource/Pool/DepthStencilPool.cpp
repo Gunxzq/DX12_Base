@@ -42,10 +42,10 @@ void DepthStencilPool::Shutdown() {
             entry.resource = nullptr;
         }
         if (entry.dsvSlot != UINT32_MAX) {
-            m_descriptorHeaps->Free(DescriptorHeapType::Dsv, entry.dsvSlot, UINT64_MAX);
+            m_descriptorHeaps->Free(PartitionType::Dsv, entry.dsvSlot, UINT64_MAX);
         }
         if (entry.srvSlot != UINT32_MAX) {
-            m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, entry.srvSlot, UINT64_MAX);
+            m_descriptorHeaps->Free(PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
         }
     }
 
@@ -119,20 +119,20 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
         return UINT32_MAX;
     }
 
-    uint32_t dsvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::Dsv);
+    uint32_t dsvSlot = m_descriptorHeaps->Allocate(PartitionType::Dsv);
     if (dsvSlot == UINT32_MAX) {
         return UINT32_MAX;
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, dsvSlot);
+    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, dsvSlot);
     m_device->CreateDepthStencilView(resource, dsvDesc, dsvHandle);
 
     uint32_t srvSlot = UINT32_MAX;
     if (!(desc.flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)) {
-        srvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+        srvSlot = m_descriptorHeaps->Allocate(PartitionType::Buffer);
         if (srvSlot != UINT32_MAX) {
             D3D12_CPU_DESCRIPTOR_HANDLE srvHandle =
-                m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvSlot);
+                m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot);
 
             DXGI_FORMAT srvFormat = DXGI_FORMAT_UNKNOWN;
             switch (desc.format) {
@@ -280,7 +280,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilPool::GetDsvHandle(DepthStencilHandle ha
         return {};
     }
 
-    return m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, entry.dsvSlot);
+    return m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, entry.dsvSlot);
 }
 
 /**
@@ -300,7 +300,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilPool::GetSrvHandle(DepthStencilHandle ha
     if (entry.srvSlot == UINT32_MAX) {
         return {};
     }
-    return m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, entry.srvSlot);
+    return m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, entry.srvSlot);
 }
 
 /**
@@ -333,11 +333,11 @@ void DepthStencilPool::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames)
     for (auto &entry : m_pool) {
         if (!entry.inUse && currentFrame - entry.lastUsedFrame > maxAgeFrames) {
             if (entry.dsvSlot != UINT32_MAX) {
-                m_descriptorHeaps->Free(DescriptorHeapType::Dsv, entry.dsvSlot, UINT64_MAX);
+                m_descriptorHeaps->Free(PartitionType::Dsv, entry.dsvSlot, UINT64_MAX);
                 entry.dsvSlot = UINT32_MAX;
             }
             if (entry.srvSlot != UINT32_MAX) {
-                m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, entry.srvSlot, UINT64_MAX);
+                m_descriptorHeaps->Free(PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
                 entry.srvSlot = UINT32_MAX;
             }
             entry.resource->Release();

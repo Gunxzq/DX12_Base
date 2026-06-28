@@ -229,8 +229,7 @@ void GameInputHandler::ResetCamera() {
 
     auto &mainCamera = m_context->CameraMgr->GetMainCamera();
 
-    // 重置位置
-    mainCamera.Position = DirectX::XMFLOAT3(0.0f, 2.0f, -15.0f);
+    mainCamera.Position = DirectX::XMFLOAT3(4.0f, 34.0f, -6.0f);
 
     // 重置基向量（龙书默认初始值）
     mainCamera.Right = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);

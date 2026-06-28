@@ -177,7 +177,7 @@ uint32_t FrameResourceManager::AllocateTemporarySrvSlot() {
         return UINT32_MAX;
     }
 
-    return m_descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    return m_descriptorHeaps->Allocate(PartitionType::Buffer);
 }
 
 void FrameResourceManager::FreeTemporarySrvSlot(uint32_t slot, uint64_t fence) {
@@ -185,7 +185,7 @@ void FrameResourceManager::FreeTemporarySrvSlot(uint32_t slot, uint64_t fence) {
         return;
     }
 
-    m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, slot, fence);
+    m_descriptorHeaps->Free(PartitionType::Buffer, slot, fence);
 }
 
 // ========================================================================

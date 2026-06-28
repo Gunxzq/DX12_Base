@@ -200,6 +200,9 @@ private:
     DX12Engine::Resource::TextureHandle m_brickTextureHandle;
     uint32_t m_brickTextureSrvSlot = UINT32_MAX;
     uint32_t m_brickNormalSrvSlot = UINT32_MAX;
+    uint32_t m_brickOcclusionSrvSlot = UINT32_MAX;         // bricks2_OCC.dds
+    uint32_t m_brickMetallicRoughnessSrvSlot = UINT32_MAX; // bricks2_SPEC.dds
+    uint32_t m_brickHeightSrvSlot = UINT32_MAX;            // bricks2_DISP.dds
     DX12Engine::Resource::MaterialHandle m_brickMaterialHandle;
     DX12Engine::ECS::Entity m_waterEntity;
     D3D12_GPU_VIRTUAL_ADDRESS m_waterCBAddress = 0;

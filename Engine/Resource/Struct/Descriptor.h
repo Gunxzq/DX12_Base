@@ -33,12 +33,9 @@ struct DescriptorSlotAllocatorConfig {
 };
 
 // -----------------------------------------------------------------
-// 描述符堆类型枚举
-enum class DescriptorHeapType { CbvSrvUav, Rtv, Dsv, Sampler };
-
 // 描述符堆配置结构
 struct DescriptorHeapConfig {
-    DescriptorHeapType type;
+    D3D12_DESCRIPTOR_HEAP_TYPE type; // D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV 等
     uint32_t initialSize;
     uint32_t maxSize;
     DescriptorSlotFlags slotFlags;

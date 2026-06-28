@@ -31,13 +31,13 @@ void ReflectionProbeManager::Initialize(ID3D12Device *device, DescriptorHeapColl
     }
 
     // 分配反射探针数组的描述符槽位
-    m_cubemapArrayBaseSlot = m_descriptorHeaps->AllocateConsecutive(DescriptorHeapType::CbvSrvUav, MAX_PROBES);
+    m_cubemapArrayBaseSlot = m_descriptorHeaps->AllocateConsecutive(PartitionType::Buffer, MAX_PROBES);
 
     if (m_cubemapArrayBaseSlot == UINT32_MAX)
         return;
 
     // 反射探针数组的SRV描述符句柄
-    m_cubemapArraySRV = m_descriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, m_cubemapArrayBaseSlot);
+    m_cubemapArraySRV = m_descriptorHeaps->GetGpuHandle(PartitionType::Buffer, m_cubemapArrayBaseSlot);
 
     m_probeEntries.reserve(MAX_PROBES);
     m_initialized = true;
@@ -63,7 +63,7 @@ void ReflectionProbeManager::Shutdown() {
     m_probeEntries.clear();
 
     if (m_cubemapArrayBaseSlot != UINT32_MAX && m_descriptorHeaps) {
-        m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, m_cubemapArrayBaseSlot, UINT64_MAX);
+        m_descriptorHeaps->Free(PartitionType::Buffer, m_cubemapArrayBaseSlot, UINT64_MAX);
         m_cubemapArrayBaseSlot = UINT32_MAX;
     }
 
@@ -355,7 +355,7 @@ ProbeRuntimeResources ReflectionProbeManager::AllocateCubemapResource(uint32_t r
     }
 
     // 分配 SRV 槽位并创建 TEXTURECUBE SRV
-    uint32_t srvSlot = m_descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    uint32_t srvSlot = m_descriptorHeaps->Allocate(PartitionType::Buffer);
     if (srvSlot == UINT32_MAX) {
         rtPool.Free(resources.rtHandle, 0);
         resources.rtHandle = {};
@@ -370,7 +370,7 @@ ProbeRuntimeResources ReflectionProbeManager::AllocateCubemapResource(uint32_t r
     srvDesc.TextureCube.MipLevels = 1;
     srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvSlot);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot);
     m_device->CreateShaderResourceView(resource, &srvDesc, cpuHandle);
 
     resources.srvSlot = srvSlot;
@@ -389,7 +389,7 @@ ProbeRuntimeResources ReflectionProbeManager::AllocateCubemapResource(uint32_t r
         arraySrvDesc.TextureCubeArray.ResourceMinLODClamp = 0.0f;
 
         D3D12_CPU_DESCRIPTOR_HANDLE arrayCpuHandle =
-            m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, m_cubemapArrayBaseSlot);
+            m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, m_cubemapArrayBaseSlot);
         m_device->CreateShaderResourceView(resource, &arraySrvDesc, arrayCpuHandle);
     }
 
@@ -409,7 +409,7 @@ void ReflectionProbeManager::ReleaseCubemapResource(ProbeRuntimeResources &resou
     }
 
     if (resources.srvSlot != UINT32_MAX && m_descriptorHeaps) {
-        m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, resources.srvSlot, fence);
+        m_descriptorHeaps->Free(PartitionType::Buffer, resources.srvSlot, fence);
         resources.srvSlot = UINT32_MAX;
     }
 

@@ -38,7 +38,7 @@ void TextureManager::Shutdown() {
 
     for (auto &entry : m_entries) {
         if (entry.srvIndex != UINT32_MAX && m_descriptorHeaps) {
-            m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, entry.srvIndex, UINT64_MAX);
+            m_descriptorHeaps->Free(PartitionType::Texture, entry.srvIndex, UINT64_MAX);
         }
     }
 
@@ -82,7 +82,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE TextureManager::GetSRV(TextureHandle handle) const {
         return {};
     }
 
-    return m_descriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, entry.srvIndex);
+    return m_descriptorHeaps->GetGpuHandle(PartitionType::Texture, entry.srvIndex);
 }
 
 /**
@@ -192,7 +192,7 @@ void TextureManager::FreeEntry(uint32_t index) {
     TextureEntry &entry = m_entries[index];
 
     if (entry.srvIndex != UINT32_MAX && m_descriptorHeaps) {
-        m_descriptorHeaps->Free(DescriptorHeapType::CbvSrvUav, entry.srvIndex, UINT64_MAX);
+        m_descriptorHeaps->Free(PartitionType::Texture, entry.srvIndex, UINT64_MAX);
     }
 
     entry.srvIndex = UINT32_MAX;

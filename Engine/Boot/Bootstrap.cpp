@@ -257,23 +257,33 @@ void Bootstrap::InitializeModules() {
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing DescriptorHeapCollection...");
 
         std::vector<Resource::DescriptorHeapConfig> heapConfigs = {
-            // CBV_SRV_UAV 堆（大型，GPU 可见）
-            {Resource::DescriptorHeapType::CbvSrvUav, 65536, 0,
+            // CBV_SRV_UAV 堆（大型，GPU 可见；为 TextureSrv 分区预留空间）
+            {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 98304, 0,
              Resource::DescriptorSlotFlags::EnableExpand | Resource::DescriptorSlotFlags::DelayRelease, true},
 
             // RTV 堆（渲染目标，CPU 可见）
-            {Resource::DescriptorHeapType::Rtv, 1024, 0,
+            {D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1024, 0,
              Resource::DescriptorSlotFlags::EnableExpand | Resource::DescriptorSlotFlags::DelayRelease, false},
 
             // DSV 堆（深度模板，CPU 可见）
-            {Resource::DescriptorHeapType::Dsv, 512, 0,
+            {D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 512, 0,
              Resource::DescriptorSlotFlags::EnableExpand | Resource::DescriptorSlotFlags::DelayRelease, false},
 
             // Sampler 堆（固定 2048，GPU 可见）
-            {Resource::DescriptorHeapType::Sampler, 2048, 2048, Resource::DescriptorSlotFlags::LinearAlloc, true}};
+            {D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048, 2048, Resource::DescriptorSlotFlags::LinearAlloc, true}};
 
         m_descriptorHeaps.Initialize(m_deviceContext->GetDevice(), heapConfigs);
         EngineLogger::GetInstance()->Info("[Bootstrap] DescriptorHeapCollection initialized.");
+
+        // 创建 Texture 分区（纹理 SRV，gTextureMaps[] 无界表使用）
+        m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Texture, 0,
+                                       16384);
+        EngineLogger::GetInstance()->Info("[Bootstrap] Texture partition created: base=0, size=16384");
+
+        // 创建 Buffer 分区（MaterialBuffer、InstanceData 等 StructuredBuffer SRV）
+        m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Buffer, 16384,
+                                       81920);
+        EngineLogger::GetInstance()->Info("[Bootstrap] Buffer partition created: base=16384, size=81920");
 
         // 初始化深度模板资源池（单例）
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing DepthStencilPool...");

@@ -159,7 +159,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
 
         GpuResourceHandle whiteTexHandle = gpuMgr.CreateTexture2D(device, whiteDesc, D3D12_RESOURCE_STATE_COMMON);
         if (whiteTexHandle.IsValid()) {
-            uint32_t whiteSrvSlot = m_context->DescriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+            uint32_t whiteSrvSlot = m_context->DescriptorHeaps->Allocate(PartitionType::Texture);
             if (whiteSrvSlot != UINT32_MAX) {
                 // 创建一个1x1白色纹理 D3D12_SUBRESOURCE_DATA
                 uint32_t whitePixel = 0xFFFFFFFFu; // RGBA: 255,255,255,255
@@ -209,7 +209,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
                 srvDesc.Texture2D.MostDetailedMip = 0;
 
                 D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
-                    m_context->DescriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, whiteSrvSlot);
+                    m_context->DescriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, whiteSrvSlot);
                 device->CreateShaderResourceView(gpuMgr.GetResource(whiteTexHandle), &srvDesc, cpuHandle);
 
                 m_whiteTextureHandle = m_context->TextureMgr->RegisterTexture(whiteTexHandle, whiteSrvSlot);
@@ -402,9 +402,9 @@ void GameWorld::RegisterTerrainImmediateCallback() {
                 constants.TessellationFactor = terrainComp->tessellationFactor;
                 constants.TessellationDistanceMin = terrainComp->tessellationDistanceMin;
                 constants.TessellationDistanceMax = terrainComp->tessellationDistanceMax;
-                constants.HeightMapIndex = 0;          // 高度图 — gTerrainTextures[0] (H_Runtime_heightmap)
-                constants.AlbedoMapIndex = 1;          // 漫反射 — gTerrainTextures[1] (D_heightmap)
-                constants.NormalMapIndex = 2;          // 法线贴图 — gTerrainTextures[2] (N_heightmap)
+                constants.HeightMapIndex = 0; // 高度图 — gTerrainTextures[0] (H_Runtime_heightmap)
+                constants.AlbedoMapIndex = 1; // 漫反射 — gTerrainTextures[1] (D_heightmap)
+                constants.NormalMapIndex = 2; // 法线贴图 — gTerrainTextures[2] (N_heightmap)
 
                 pendingConstants.push_back(constants);
             }
@@ -875,7 +875,7 @@ void GameWorld::LoadTestTexture() {
     }
 
     auto &descriptorHeaps = m_context->DescriptorHeaps;
-    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    uint32_t srvIndex = descriptorHeaps->Allocate(PartitionType::Texture);
     m_context->Logging->Info("[SlotDBG] CreateTestTexture Allocate srvIndex={}", srvIndex);
 
     if (srvIndex == UINT32_MAX) {
@@ -892,7 +892,7 @@ void GameWorld::LoadTestTexture() {
     srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
     srvDesc.Texture2D.MostDetailedMip = 0;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvIndex);
     device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
 
     // 注册到 TextureManager
@@ -957,7 +957,7 @@ void GameWorld::LoadBrickTextures() {
         if (!gpuHandle.IsValid())
             return;
 
-        uint32_t srvSlot = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+        uint32_t srvSlot = descriptorHeaps->Allocate(PartitionType::Texture);
         if (srvSlot == UINT32_MAX) {
             gpuMgr.Release(gpuHandle, 0);
             return;
@@ -969,7 +969,7 @@ void GameWorld::LoadBrickTextures() {
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
         srvDesc.Texture2D.MostDetailedMip = 0;
-        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvSlot);
+        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvSlot);
         device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
 
         m_brickTextureHandle = m_context->TextureMgr->RegisterTexture(gpuHandle, srvSlot);
@@ -1005,10 +1005,10 @@ void GameWorld::LoadBrickTextures() {
         m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
     }
 
-    // 加载 bricks2_nmap.dds（法线贴图）
+    // 加载 bricks2_NRM.dds（CrazyBump 生成的法线贴图）
     {
         DDSTextureInfo ddsInfo;
-        if (!AssetLoader::GetInstance().LoadTextureFromFile(L"Content/Textures/bricks_nmap.dds", ddsInfo)) {
+        if (!AssetLoader::GetInstance().LoadTextureFromFile(L"Content/Textures/bricks2_NRM.dds", ddsInfo)) {
             m_context->Logging->Warn("[GameWorld] Failed to load bricks2_nmap.dds, skipping normal map");
             return;
         }
@@ -1017,7 +1017,7 @@ void GameWorld::LoadBrickTextures() {
         if (!gpuHandle.IsValid())
             return;
 
-        uint32_t srvSlot = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+        uint32_t srvSlot = descriptorHeaps->Allocate(PartitionType::Texture);
         if (srvSlot == UINT32_MAX) {
             gpuMgr.Release(gpuHandle, 0);
             return;
@@ -1029,7 +1029,7 @@ void GameWorld::LoadBrickTextures() {
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
         srvDesc.Texture2D.MostDetailedMip = 0;
-        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvSlot);
+        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvSlot);
         device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
 
         // 法线贴图只需记录 SRV 槽位，不上传到 TextureManager（仅采样用）
@@ -1067,6 +1067,174 @@ void GameWorld::LoadBrickTextures() {
         m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
     }
 
+    // ============================================================
+    // 加载 bricks2_OCC.dds（AO 贴图）
+    // ============================================================
+    {
+        DDSTextureInfo ddsInfo;
+        if (!AssetLoader::GetInstance().LoadTextureFromFile(L"Content/Textures/bricks2_OCC.dds", ddsInfo)) {
+            m_context->Logging->Warn("[GameWorld] Failed to load bricks2_OCC.dds, skipping AO map");
+        } else {
+            GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+            if (gpuHandle.IsValid()) {
+                uint32_t srvSlot = descriptorHeaps->Allocate(PartitionType::Texture);
+                if (srvSlot != UINT32_MAX) {
+                    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                    srvDesc.Format = ddsInfo.desc.Format;
+                    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                    srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
+                    srvDesc.Texture2D.MostDetailedMip = 0;
+                    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
+                        descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvSlot);
+                    device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+                    m_brickOcclusionSrvSlot = srvSlot;
+
+                    uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                    auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+                    auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+                    auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+                    auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+                    auto subresources = ddsInfo.subresources;
+                    UINT64 uploadSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
+                                                                    static_cast<UINT>(subresources.size()));
+                    GpuResourceHandle uploadBuf = gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD,
+                                                                      D3D12_RESOURCE_STATE_GENERIC_READ);
+                    auto b1 = CD3DX12_RESOURCE_BARRIER::Transition(
+                        gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+                    cmd.Get()->ResourceBarrier(1, &b1);
+                    UpdateSubresources(cmd.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadBuf), 0, 0,
+                                       static_cast<UINT>(subresources.size()), subresources.data());
+                    auto b2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle),
+                                                                   D3D12_RESOURCE_STATE_COPY_DEST,
+                                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                    cmd.Get()->ResourceBarrier(1, &b2);
+                    cmd.Close();
+                    m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmd);
+                    m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                    uint64_t seq = m_context->GetNextSequence();
+                    gpuMgr.Release(uploadBuf, seq);
+                    m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+                    m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
+                } else {
+                    gpuMgr.Release(gpuHandle, 0);
+                }
+            }
+        }
+    }
+
+    // ============================================================
+    // 加载 bricks2_SPEC.dds（金属度-粗糙度贴图）
+    // ============================================================
+    {
+        DDSTextureInfo ddsInfo;
+        if (!AssetLoader::GetInstance().LoadTextureFromFile(L"Content/Textures/bricks2_SPEC.dds", ddsInfo)) {
+            m_context->Logging->Warn("[GameWorld] Failed to load bricks2_SPEC.dds, skipping metallicRoughness map");
+        } else {
+            GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+            if (gpuHandle.IsValid()) {
+                uint32_t srvSlot = descriptorHeaps->Allocate(PartitionType::Texture);
+                if (srvSlot != UINT32_MAX) {
+                    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                    srvDesc.Format = ddsInfo.desc.Format;
+                    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                    srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
+                    srvDesc.Texture2D.MostDetailedMip = 0;
+                    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
+                        descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvSlot);
+                    device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+                    m_brickMetallicRoughnessSrvSlot = srvSlot;
+
+                    uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                    auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+                    auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+                    auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+                    auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+                    auto subresources = ddsInfo.subresources;
+                    UINT64 uploadSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
+                                                                    static_cast<UINT>(subresources.size()));
+                    GpuResourceHandle uploadBuf = gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD,
+                                                                      D3D12_RESOURCE_STATE_GENERIC_READ);
+                    auto b1 = CD3DX12_RESOURCE_BARRIER::Transition(
+                        gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+                    cmd.Get()->ResourceBarrier(1, &b1);
+                    UpdateSubresources(cmd.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadBuf), 0, 0,
+                                       static_cast<UINT>(subresources.size()), subresources.data());
+                    auto b2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle),
+                                                                   D3D12_RESOURCE_STATE_COPY_DEST,
+                                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                    cmd.Get()->ResourceBarrier(1, &b2);
+                    cmd.Close();
+                    m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmd);
+                    m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                    uint64_t seq = m_context->GetNextSequence();
+                    gpuMgr.Release(uploadBuf, seq);
+                    m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+                    m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
+                } else {
+                    gpuMgr.Release(gpuHandle, 0);
+                }
+            }
+        }
+    }
+
+    // ============================================================
+    // 加载 bricks2_DISP.dds（高度/位移贴图）
+    // ============================================================
+    {
+        DDSTextureInfo ddsInfo;
+        if (!AssetLoader::GetInstance().LoadTextureFromFile(L"Content/Textures/bricks2_DISP.dds", ddsInfo)) {
+            m_context->Logging->Warn("[GameWorld] Failed to load bricks2_DISP.dds, skipping height map");
+        } else {
+            GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+            if (gpuHandle.IsValid()) {
+                uint32_t srvSlot = descriptorHeaps->Allocate(PartitionType::Texture);
+                if (srvSlot != UINT32_MAX) {
+                    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                    srvDesc.Format = ddsInfo.desc.Format;
+                    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                    srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
+                    srvDesc.Texture2D.MostDetailedMip = 0;
+                    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
+                        descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvSlot);
+                    device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+                    m_brickHeightSrvSlot = srvSlot;
+
+                    uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                    auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+                    auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+                    auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+                    auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+                    auto subresources = ddsInfo.subresources;
+                    UINT64 uploadSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
+                                                                    static_cast<UINT>(subresources.size()));
+                    GpuResourceHandle uploadBuf = gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD,
+                                                                      D3D12_RESOURCE_STATE_GENERIC_READ);
+                    auto b1 = CD3DX12_RESOURCE_BARRIER::Transition(
+                        gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+                    cmd.Get()->ResourceBarrier(1, &b1);
+                    UpdateSubresources(cmd.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadBuf), 0, 0,
+                                       static_cast<UINT>(subresources.size()), subresources.data());
+                    auto b2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle),
+                                                                   D3D12_RESOURCE_STATE_COPY_DEST,
+                                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                    cmd.Get()->ResourceBarrier(1, &b2);
+                    cmd.Close();
+                    m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmd);
+                    m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                    uint64_t seq = m_context->GetNextSequence();
+                    gpuMgr.Release(uploadBuf, seq);
+                    m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+                    m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
+                } else {
+                    gpuMgr.Release(gpuHandle, 0);
+                }
+            }
+        }
+    }
+
     m_context->Logging->Info("[GameWorld] Brick textures loaded");
 }
 
@@ -1086,17 +1254,21 @@ void GameWorld::CreateMaterials() {
     cubeMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
     m_cubeMaterialHandle = materialMgr->RegisterMaterial(cubeMaterial);
 
-    // 砖块材质（含法线贴图）
+    // 砖块材质（PBR 贴图驱动）
     MaterialData brickMaterial;
     brickMaterial.materialId = TYPE_HASH("brick_material");
     brickMaterial.name = "brick_material";
     brickMaterial.baseColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-    brickMaterial.metallic = 0.0f;
-    brickMaterial.roughness = 0.4f;
-    brickMaterial.ambient = 0.5f;
+    brickMaterial.metallic = 0.0f;  // 砖块是非金属
+    brickMaterial.roughness = 0.4f; // 固定值回退
+    brickMaterial.ambient = 0.5f;   // 固定值回退
     brickMaterial.alpha = 1.0f;
+    brickMaterial.normalIntensity = 1.0f;
     brickMaterial.baseColorTextureId = m_brickTextureSrvSlot;
     brickMaterial.normalTextureId = m_brickNormalSrvSlot;
+    brickMaterial.metallicRoughnessTextureId = m_brickMetallicRoughnessSrvSlot; // bricks2_SPEC.dds
+    brickMaterial.occlusionTextureId = m_brickOcclusionSrvSlot;                 // bricks2_OCC.dds
+    brickMaterial.heightTextureId = m_brickHeightSrvSlot;                       // bricks2_DISP.dds
     brickMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
     m_brickMaterialHandle = materialMgr->RegisterMaterial(brickMaterial);
 
@@ -1230,7 +1402,7 @@ void GameWorld::CreateMaterials() {
 
     // 分配 SRV 描述符
     auto &descriptorHeaps = m_context->DescriptorHeaps;
-    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    uint32_t srvIndex = descriptorHeaps->Allocate(PartitionType::Buffer); // MaterialBuffer StructuredBuffer
     m_context->Logging->Info("[SlotDBG] CreateMaterials Allocate srvIndex={}", srvIndex);
     if (srvIndex == UINT32_MAX) {
         m_context->Logging->Error("[GameWorld] Failed to allocate SRV for material buffer");
@@ -1248,10 +1420,10 @@ void GameWorld::CreateMaterials() {
     srvDesc.Buffer.StructureByteStride = sizeof(MaterialConstants);
     srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetPartitionCpuHandle(PartitionType::Buffer, srvIndex);
     device->CreateShaderResourceView(gpuMgr.GetResource(bufferHandle), &srvDesc, cpuHandle);
 
-    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = descriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = descriptorHeaps->GetPartitionGpuHandle(PartitionType::Buffer, srvIndex);
     materialMgr->SetMaterialBufferSRV(gpuHandle);
 
     // 存储 bufferHandle 以便后续释放
@@ -1288,7 +1460,7 @@ void GameWorld::CreateSkybox() {
     }
 
     auto &descriptorHeaps = m_context->DescriptorHeaps;
-    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    uint32_t srvIndex = descriptorHeaps->Allocate(PartitionType::Texture);
     m_context->Logging->Info("[SlotDBG] CreateSkybox Allocate srvIndex={}", srvIndex);
 
     if (srvIndex == UINT32_MAX) {
@@ -1306,7 +1478,7 @@ void GameWorld::CreateSkybox() {
     srvDesc.TextureCube.MostDetailedMip = 0;
     srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvIndex);
     device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
 
     // 注册到 TextureManager
@@ -1489,7 +1661,7 @@ void GameWorld::RegisterCubeRenderSystem() {
                  D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = lightMgr.GetShadowMapSRV();
 
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
-                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                     m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
 
                  //  一个堆
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
@@ -1497,9 +1669,9 @@ void GameWorld::RegisterCubeRenderSystem() {
                  // 获取反射探针 Cubemap Array SRV
                  D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV = m_context->ReflectionProbeMgr->GetProbeCubemapArraySRV();
 
-                 // 获取纹理数组堆起始 GPU handle（绑定到 slot 3，供 gTextureMaps[] 索引）
+                 // 获取纹理数组堆起始 GPU handle（TextureSrv 分区起始）
                  D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
-                     m_context->DescriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, 0);
+                     m_context->DescriptorHeaps->GetPartitionGpuHandle(PartitionType::Texture, 0);
 
                  // 获取环境贴图 SRV（天空盒）
                  D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};
@@ -1596,7 +1768,7 @@ void GameWorld::RegisterSkyboxSystem() {
                  // 4. 设置描述符堆
                  // ====================================================================
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
-                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                     m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
                  // ====================================================================
@@ -1746,7 +1918,7 @@ void GameWorld::RegisterWaterRenderSystem() {
 
                  // 设置描述符堆
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
-                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                     m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
                  // 获取 Pass Constant Buffer 地址
@@ -1811,8 +1983,7 @@ void GameWorld::LoadWaterTexture() {
     }
 
     auto &descriptorHeaps = m_context->DescriptorHeaps;
-    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
-    m_context->Logging->Info("[SlotDBG] LoadWaterTexture Allocate srvIndex={}", srvIndex);
+    uint32_t srvIndex = descriptorHeaps->Allocate(PartitionType::Texture);
 
     if (srvIndex == UINT32_MAX) {
         m_context->Logging->Error("[GameWorld] Failed to allocate SRV for water texture");
@@ -1829,7 +2000,7 @@ void GameWorld::LoadWaterTexture() {
     srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
     srvDesc.Texture2D.MostDetailedMip = 0;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvIndex);
     device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
 
     // 注册到 TextureManager
@@ -2026,7 +2197,8 @@ void GameWorld::RegisterTerrainSystems() {
                  // 分配在同一个 CbvSrvUav 堆中，但 shader 通过不同 register space 区分。
                  // 根签名固定为 3 个连续槽位 [0]=高度图 [1]=漫反射 [2]=法线贴图
                  // 必须始终用 AllocateConsecutive(3)，即使某个纹理暂不可用也要占住槽位
-                 if ((!m_terrainTextureHandle.IsValid() || !m_terrainAlbedoHandle.IsValid() || !m_terrainNormalHandle.IsValid()) &&
+                 if ((!m_terrainTextureHandle.IsValid() || !m_terrainAlbedoHandle.IsValid() ||
+                      !m_terrainNormalHandle.IsValid()) &&
                      state.heightMapCreated.load(std::memory_order_acquire) &&
                      state.albedoCreated.load(std::memory_order_acquire) &&
                      state.normalCreated.load(std::memory_order_acquire)) {
@@ -2044,11 +2216,10 @@ void GameWorld::RegisterTerrainSystems() {
                          state.normalCreated.load(std::memory_order_acquire) && state.normalMapGpuHandle.IsValid();
 
                      // 始终分配连续 3 个槽位
-                     uint32_t baseSrvIdx =
-                         descriptorHeaps->AllocateConsecutive(Resource::DescriptorHeapType::CbvSrvUav, 3);
-                     m_context->Logging->Info(
-                         "[SlotDBG] TerrainGPUCreate AllocateConsecutive(3) baseSrvIdx={} (hasHeight={} hasAlbedo={} hasNormal={})",
-                         baseSrvIdx, hasHeight, hasAlbedo, hasNormal);
+                     uint32_t baseSrvIdx = descriptorHeaps->AllocateConsecutive(PartitionType::Texture, 3);
+                     m_context->Logging->Info("[SlotDBG] TerrainGPUCreate AllocateConsecutive(3) baseSrvIdx={} "
+                                              "(hasHeight={} hasAlbedo={} hasNormal={})",
+                                              baseSrvIdx, hasHeight, hasAlbedo, hasNormal);
 
                      if (baseSrvIdx != UINT32_MAX) {
                          // 创建高度图 SRV (slot 0)
@@ -2061,7 +2232,7 @@ void GameWorld::RegisterTerrainSystems() {
                              srvDesc.Texture2D.MipLevels = state.heightMapDesc.MipLevels;
 
                              D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
-                                 descriptorHeaps->GetCpuHandle(Resource::DescriptorHeapType::CbvSrvUav, baseSrvIdx);
+                                 descriptorHeaps->GetCpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, baseSrvIdx);
                              device->CreateShaderResourceView(gpuMgr.GetResource(state.heightMapGpuHandle), &srvDesc,
                                                               cpuHandle);
 
@@ -2078,7 +2249,7 @@ void GameWorld::RegisterTerrainSystems() {
                              srvDesc.Texture2D.MipLevels = state.albedoDesc.MipLevels;
 
                              D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
-                                 descriptorHeaps->GetCpuHandle(Resource::DescriptorHeapType::CbvSrvUav, baseSrvIdx + 1);
+                                 descriptorHeaps->GetCpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, baseSrvIdx + 1);
                              device->CreateShaderResourceView(gpuMgr.GetResource(state.albedoGpuHandle), &srvDesc,
                                                               cpuHandle);
 
@@ -2095,19 +2266,21 @@ void GameWorld::RegisterTerrainSystems() {
                              srvDesc.Texture2D.MipLevels = state.normalMapDesc.MipLevels;
 
                              D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
-                                 descriptorHeaps->GetCpuHandle(Resource::DescriptorHeapType::CbvSrvUav, baseSrvIdx + 2);
+                                 descriptorHeaps->GetCpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, baseSrvIdx + 2);
                              device->CreateShaderResourceView(gpuMgr.GetResource(state.normalMapGpuHandle), &srvDesc,
                                                               cpuHandle);
 
                              m_terrainNormalHandle = texMgr->RegisterTexture(state.normalMapGpuHandle, baseSrvIdx + 2);
                          }
 
-                         m_context->Logging->Info("[TerrainGPUCreate] Registered: heightMap(idx={}) albedo(idx={}) normal(idx={})",
-                                                  m_terrainTextureHandle.index, m_terrainAlbedoHandle.index, m_terrainNormalHandle.index);
+                         m_context->Logging->Info(
+                             "[TerrainGPUCreate] Registered: heightMap(idx={}) albedo(idx={}) normal(idx={})",
+                             m_terrainTextureHandle.index, m_terrainAlbedoHandle.index, m_terrainNormalHandle.index);
                      } else {
                          m_context->Logging->Error("[TerrainGPUCreate] Failed to allocate consecutive SRVs");
                      }
-                 } else if (m_terrainTextureHandle.IsValid() && m_terrainAlbedoHandle.IsValid() && m_terrainNormalHandle.IsValid()) {
+                 } else if (m_terrainTextureHandle.IsValid() && m_terrainAlbedoHandle.IsValid() &&
+                            m_terrainNormalHandle.IsValid()) {
                      m_context->Logging->Info("[TerrainGPUCreate] Terrain textures already loaded, skipping");
                  }
 
@@ -2219,7 +2392,7 @@ void GameWorld::RegisterTerrainRenderSystem() {
 
                  // 设置描述符堆
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
-                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                     m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
                  // 获取通用资源
@@ -2382,7 +2555,7 @@ void GameWorld::RegisterShadowRenderSystem() {
                  }
 
                  D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
-                     m_context->DescriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, shadowRes.dsvSlot);
+                     m_context->DescriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadowRes.dsvSlot);
 
                  // ================================================================
                  // 资源状态转换：SRV -> DEPTH_WRITE
@@ -2453,7 +2626,8 @@ void GameWorld::RegisterProbeCaptureSystem() {
                  auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
                  auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
-                 ID3D12DescriptorHeap *heaps[] = {m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                 ID3D12DescriptorHeap *heaps[] = {
+                     m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
                  cmdList.Get()->SetDescriptorHeaps(1, heaps);
 
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
@@ -2464,7 +2638,7 @@ void GameWorld::RegisterProbeCaptureSystem() {
                          continue;
                      const auto &info = m_probeCaptureInfo[i];
                      D3D12_CPU_DESCRIPTOR_HANDLE depthDSV =
-                         m_context->DescriptorHeaps->GetCpuHandle(DescriptorHeapType::Dsv, info.dsvSlot);
+                         m_context->DescriptorHeaps->GetCpuHandle(PartitionType::Dsv, info.dsvSlot);
 
                      XMVECTOR probePos = XMLoadFloat3(&info.position);
                      const auto &mainPass = m_context->FrameResourceManager->GetPassConstants();
@@ -2474,9 +2648,9 @@ void GameWorld::RegisterProbeCaptureSystem() {
                          if (captureCBAddr == 0)
                              continue;
                          D3D12_CPU_DESCRIPTOR_HANDLE cubemapRTV =
-                             m_context->DescriptorHeaps->GetCpuHandle(DescriptorHeapType::Rtv, info.rtvBaseSlot);
+                             m_context->DescriptorHeaps->GetCpuHandle(PartitionType::Rtv, info.rtvBaseSlot);
                          D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
-                             m_context->DescriptorHeaps->GetGpuHandle(DescriptorHeapType::CbvSrvUav, 0);
+                             m_context->DescriptorHeaps->GetPartitionGpuHandle(PartitionType::Texture, 0);
                          m_probeRenderer->BeginCapture(cmdList, info.cubemapResource, cubemapRTV, depthDSV,
                                                        info.resolution, info.resolution, captureCBAddr, lightCBAddr,
                                                        matBufferSRV, textureHeapStart);
@@ -2541,7 +2715,7 @@ void GameWorld::LoadBillboardTextures() {
     }
 
     // Step 3: 分配 SRV
-    uint32_t srvIndex = descriptorHeaps->Allocate(DescriptorHeapType::CbvSrvUav);
+    uint32_t srvIndex = descriptorHeaps->Allocate(PartitionType::Texture);
     m_context->Logging->Info("[SlotDBG] LoadBillboardTextures Allocate srvIndex={}", srvIndex);
     if (srvIndex == UINT32_MAX) {
         m_context->Logging->Error("[GameWorld] Failed to allocate SRV slot for billboard Texture2DArray");
@@ -2557,7 +2731,7 @@ void GameWorld::LoadBillboardTextures() {
     srvDesc.Texture2DArray.FirstArraySlice = 0;
     srvDesc.Texture2DArray.ArraySize = arraySize;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetCpuHandle(DescriptorHeapType::CbvSrvUav, srvIndex);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvIndex);
     device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
 
     // 注册到 TextureManager
@@ -2722,7 +2896,7 @@ void GameWorld::RegisterBillboardRenderSystem() {
 
                  // 设置描述符堆
                  ID3D12DescriptorHeap *descriptorHeaps[] = {
-                     m_context->DescriptorHeaps->GetHeap(DescriptorHeapType::CbvSrvUav)};
+                     m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
                  // 获取 Pass Constant Buffer 和 Light CB 地址
@@ -2730,12 +2904,17 @@ void GameWorld::RegisterBillboardRenderSystem() {
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
-                 // 获取公告牌 Texture2DArray 的 SRV（slot 4: t20）
+                 // 获取纹理数组堆起始 GPU handle（TextureSrv 分区起始）
+                 D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
+                     m_context->DescriptorHeaps->GetPartitionGpuHandle(PartitionType::Texture, 0);
+
+                 // 获取公告牌 Texture2DArray 的 SRV（slot 5: t20）
                  D3D12_GPU_DESCRIPTOR_HANDLE billboardTexSRV =
                      m_context->TextureMgr->GetSRV(m_billboardTextureHandles[0]);
 
                  // 开始公告牌渲染
-                 m_billboardRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, billboardTexSRV);
+                 m_billboardRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, textureHeapStart,
+                                                 billboardTexSRV);
 
                  // 遍历公告牌队列
                  for (const auto &item : m_billboardQueue.GetItems()) {

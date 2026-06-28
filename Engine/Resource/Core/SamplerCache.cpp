@@ -134,7 +134,7 @@ void SamplerCache::Shutdown() {
 
     for (auto &entry : m_cache) {
         if (entry.slot != UINT32_MAX) {
-            m_descriptorHeaps->Free(DescriptorHeapType::Sampler, entry.slot, UINT64_MAX);
+            m_descriptorHeaps->Free(PartitionType::Sampler, entry.slot, UINT64_MAX);
         }
     }
 
@@ -156,12 +156,12 @@ uint32_t SamplerCache::FindOrCreateSlot(const SamplerDesc &desc) {
         }
     }
 
-    uint32_t slot = m_descriptorHeaps->Allocate(DescriptorHeapType::Sampler);
+    uint32_t slot = m_descriptorHeaps->Allocate(PartitionType::Sampler);
     if (slot == UINT32_MAX) {
         return UINT32_MAX;
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Sampler, slot);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Sampler, slot);
     D3D12_SAMPLER_DESC d3dDesc = {};
     d3dDesc.Filter = desc.filter;
     d3dDesc.AddressU = desc.addressU;
@@ -230,7 +230,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE SamplerCache::GetCpuHandle(SamplerHandle handle) con
     if (entry.generation != handle.generation) {
         return {};
     }
-    return m_descriptorHeaps->GetCpuHandle(DescriptorHeapType::Sampler, handle.slot);
+    return m_descriptorHeaps->GetCpuHandle(PartitionType::Sampler, handle.slot);
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE SamplerCache::GetGpuHandle(SamplerHandle handle) const {
@@ -242,7 +242,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE SamplerCache::GetGpuHandle(SamplerHandle handle) con
     if (entry.generation != handle.generation) {
         return {};
     }
-    return m_descriptorHeaps->GetGpuHandle(DescriptorHeapType::Sampler, handle.slot);
+    return m_descriptorHeaps->GetGpuHandle(PartitionType::Sampler, handle.slot);
 }
 
 void SamplerCache::Reclaim(uint64_t completedFence) {
@@ -267,7 +267,7 @@ void SamplerCache::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames) {
     // erase 会导致后续条目的索引前移，使得外部持有的 handle（如 m_presetIndices）指向错误条目。
     for (auto &entry : m_cache) {
         if (!entry.inUse && currentFrame - entry.lastUsedFrame > maxAgeFrames) {
-            m_descriptorHeaps->Free(DescriptorHeapType::Sampler, entry.slot, UINT64_MAX);
+            m_descriptorHeaps->Free(PartitionType::Sampler, entry.slot, UINT64_MAX);
             entry.slot = UINT32_MAX;
             // 递增 generation 使所有指向此条目的旧句柄立即失效
             entry.generation = m_nextGeneration++;
