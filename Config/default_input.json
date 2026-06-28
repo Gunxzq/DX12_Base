@@ -39,6 +39,9 @@
     "Release": [
       { "key": "Mouse_Left" }
     ],
+    "OrbitCamera": [
+      { "key": "Mouse_Right" }
+    ],
     "Pause": [
       { "key": "Escape" },
       { "key": "Gamepad_Start" }
@@ -55,7 +58,7 @@
   "contexts": {
     "Gameplay": {
       "priority": 10,
-      "enabled_actions": ["Move", "Look", "Jump", "Sprint", "Interact", "Pause","ResetCamera","Pick","Release"]
+      "enabled_actions": ["Move", "Look", "Jump", "Sprint", "Interact", "Pause","ResetCamera","Pick","Release","OrbitCamera"]
     },
     "UI": {
       "priority": 20,

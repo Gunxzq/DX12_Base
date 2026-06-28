@@ -292,9 +292,12 @@ void GameInputHandler::HandleCameraInput(float deltaTime) {
     }
 
     // =========================================================================
-    // 相机旋转 (鼠标) - 龙书风格：Pitch + RotateY，仅当鼠标被捕获时生效
+    // 相机旋转 (鼠标) - 龙书风格：Pitch + RotateY
+    //   捕获模式：自由旋转
+    //   非捕获模式：按住鼠标右键 (OrbitCamera) 拖拽旋转
     // =========================================================================
-    if (window.IsCursorCaptured()) {
+    bool canRotate = window.IsCursorCaptured() || inputSys.IsActionHeld(ActionId_OrbitCamera);
+    if (canRotate) {
         FVector2D lookInput = inputSys.GetActionAxis2D(ActionId_Look);
 
         // 龙书风格：每个像素对应 0.25 度
