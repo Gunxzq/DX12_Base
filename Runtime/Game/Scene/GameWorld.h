@@ -183,6 +183,7 @@ private:
     DX12Engine::Resource::MaterialHandle m_terrainMaterialHandle;
     DX12Engine::Resource::TextureHandle m_terrainTextureHandle = DX12Engine::Resource::TextureHandle::Invalid();
     DX12Engine::Resource::TextureHandle m_terrainAlbedoHandle = DX12Engine::Resource::TextureHandle::Invalid();
+    DX12Engine::Resource::TextureHandle m_terrainNormalHandle = DX12Engine::Resource::TextureHandle::Invalid();
     DX12Engine::ECS::Entity m_terrainEntity;
 
     // 地形异步加载状态（后台线程写入 GPU 资源，主线程读取后注册句柄）

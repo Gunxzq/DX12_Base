@@ -404,7 +404,7 @@ void GameWorld::RegisterTerrainImmediateCallback() {
                 constants.TessellationDistanceMax = terrainComp->tessellationDistanceMax;
                 constants.HeightMapIndex = 0;          // 高度图 — gTerrainTextures[0] (H_Runtime_heightmap)
                 constants.AlbedoMapIndex = 1;          // 漫反射 — gTerrainTextures[1] (D_heightmap)
-                constants.NormalMapIndex = 0xFFFFFFFF; // 暂无独立法线贴图
+                constants.NormalMapIndex = 2;          // 法线贴图 — gTerrainTextures[2] (N_heightmap)
 
                 pendingConstants.push_back(constants);
             }
@@ -790,7 +790,7 @@ void GameWorld::CreateTestCylinder() {
         return;
 
     GeometryGenerator geoGen;
-    auto meshData = geoGen.CreateCylinder(1.0f, 0.5f, 2.0f, 24, 8);
+    auto meshData = geoGen.CreateCylinder(0.5f, 0.5f, 3.0f, 20, 8);
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
     auto device = m_context->DeviceContext->GetDevice();
@@ -2024,11 +2024,12 @@ void GameWorld::RegisterTerrainSystems() {
                  //
                  // 地形纹理绑定到 space2 t0，与实体纹理 (space0 t0) 完全隔离。
                  // 分配在同一个 CbvSrvUav 堆中，但 shader 通过不同 register space 区分。
-                 // 根签名固定为 2 个连续槽位 [0]=高度图 [1]=漫反射
-                 // 必须始终用 AllocateConsecutive(2)，即使某个纹理暂不可用也要占住槽位
-                 if ((!m_terrainTextureHandle.IsValid() || !m_terrainAlbedoHandle.IsValid()) &&
+                 // 根签名固定为 3 个连续槽位 [0]=高度图 [1]=漫反射 [2]=法线贴图
+                 // 必须始终用 AllocateConsecutive(3)，即使某个纹理暂不可用也要占住槽位
+                 if ((!m_terrainTextureHandle.IsValid() || !m_terrainAlbedoHandle.IsValid() || !m_terrainNormalHandle.IsValid()) &&
                      state.heightMapCreated.load(std::memory_order_acquire) &&
-                     state.albedoCreated.load(std::memory_order_acquire)) {
+                     state.albedoCreated.load(std::memory_order_acquire) &&
+                     state.normalCreated.load(std::memory_order_acquire)) {
 
                      auto &descriptorHeaps = m_context->DescriptorHeaps;
                      ID3D12Device *device = m_context->DeviceContext->GetDevice();
@@ -2039,13 +2040,15 @@ void GameWorld::RegisterTerrainSystems() {
                          state.heightMapCreated.load(std::memory_order_acquire) && state.heightMapGpuHandle.IsValid();
                      bool hasAlbedo =
                          state.albedoCreated.load(std::memory_order_acquire) && state.albedoGpuHandle.IsValid();
+                     bool hasNormal =
+                         state.normalCreated.load(std::memory_order_acquire) && state.normalMapGpuHandle.IsValid();
 
-                     // 始终分配连续 2 个槽位
+                     // 始终分配连续 3 个槽位
                      uint32_t baseSrvIdx =
-                         descriptorHeaps->AllocateConsecutive(Resource::DescriptorHeapType::CbvSrvUav, 2);
+                         descriptorHeaps->AllocateConsecutive(Resource::DescriptorHeapType::CbvSrvUav, 3);
                      m_context->Logging->Info(
-                         "[SlotDBG] TerrainGPUCreate AllocateConsecutive(2) baseSrvIdx={} (hasHeight={} hasAlbedo={})",
-                         baseSrvIdx, hasHeight, hasAlbedo);
+                         "[SlotDBG] TerrainGPUCreate AllocateConsecutive(3) baseSrvIdx={} (hasHeight={} hasAlbedo={} hasNormal={})",
+                         baseSrvIdx, hasHeight, hasAlbedo, hasNormal);
 
                      if (baseSrvIdx != UINT32_MAX) {
                          // 创建高度图 SRV (slot 0)
@@ -2082,12 +2085,29 @@ void GameWorld::RegisterTerrainSystems() {
                              m_terrainAlbedoHandle = texMgr->RegisterTexture(state.albedoGpuHandle, baseSrvIdx + 1);
                          }
 
-                         m_context->Logging->Info("[TerrainGPUCreate] Registered: heightMap(idx={}) albedo(idx={})",
-                                                  m_terrainTextureHandle.index, m_terrainAlbedoHandle.index);
+                         // 创建法线贴图 SRV (slot 2)
+                         if (hasNormal && !m_terrainNormalHandle.IsValid()) {
+                             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                             srvDesc.Format = state.normalMapDesc.Format;
+                             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                             srvDesc.Texture2D.MostDetailedMip = 0;
+                             srvDesc.Texture2D.MipLevels = state.normalMapDesc.MipLevels;
+
+                             D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
+                                 descriptorHeaps->GetCpuHandle(Resource::DescriptorHeapType::CbvSrvUav, baseSrvIdx + 2);
+                             device->CreateShaderResourceView(gpuMgr.GetResource(state.normalMapGpuHandle), &srvDesc,
+                                                              cpuHandle);
+
+                             m_terrainNormalHandle = texMgr->RegisterTexture(state.normalMapGpuHandle, baseSrvIdx + 2);
+                         }
+
+                         m_context->Logging->Info("[TerrainGPUCreate] Registered: heightMap(idx={}) albedo(idx={}) normal(idx={})",
+                                                  m_terrainTextureHandle.index, m_terrainAlbedoHandle.index, m_terrainNormalHandle.index);
                      } else {
                          m_context->Logging->Error("[TerrainGPUCreate] Failed to allocate consecutive SRVs");
                      }
-                 } else if (m_terrainTextureHandle.IsValid() && m_terrainAlbedoHandle.IsValid()) {
+                 } else if (m_terrainTextureHandle.IsValid() && m_terrainAlbedoHandle.IsValid() && m_terrainNormalHandle.IsValid()) {
                      m_context->Logging->Info("[TerrainGPUCreate] Terrain textures already loaded, skipping");
                  }
 
@@ -2140,6 +2160,7 @@ void GameWorld::RegisterTerrainSystems() {
                  terrainComp.geometryHandle = m_terrainGeometryHandle;
                  terrainComp.heightMapHandle = m_terrainTextureHandle;
                  terrainComp.albedoHandle = m_terrainAlbedoHandle;
+                 terrainComp.normalHandle = m_terrainNormalHandle;
                  terrainComp.localBounds = bounds;
                  terrainComp.heightScale = m_terrainLoadData ? m_terrainLoadData->maxHeight : 20.0f;
                  reg.AddComponent<ECS::TerrainComponent>(entity, std::move(terrainComp));

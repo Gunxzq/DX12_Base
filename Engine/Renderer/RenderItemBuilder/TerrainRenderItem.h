@@ -16,7 +16,7 @@ struct TerrainRenderItem {
     // 每物体常量缓冲区 GPU 地址（cbPerObject）
     D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress;
 
-    // 纹理数组 SRV（连续 2 个槽位：[0]=高度图, [1]=漫反射）
+    // 纹理数组 SRV（连续 3 个槽位：[0]=高度图, [1]=漫反射, [2]=法线贴图）
     D3D12_GPU_DESCRIPTOR_HANDLE texTableSRV;
 
     // 曲面细分参数（LOD 控制）

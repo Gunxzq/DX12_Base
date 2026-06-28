@@ -114,7 +114,7 @@ SamplerState gSamplerAnisotropicClamp : register(s5);
 // gSampler = gSamplerLinearWrap（直接使用 gSamplerLinearWrap，无需别名）
 
 // ---- 地形纹理数组 (t0~t7, space0) ----
-Texture2D gTerrainTextures[2] : register(t0, space0);
+Texture2D gTerrainTextures[3] : register(t0, space0);
 
 // ============================================================================
 // 环境反射（与 Common_PBR.hlsl 一致）
@@ -358,13 +358,17 @@ float4 PS(DomainOutput pin) : SV_Target
     float ao = 0.5f;
     float3 emissive = float3(0, 0, 0);
 
-    // 法线
+    // 法线（含法线贴图 TBN 变换）
     float3 N = normalize(pin.WorldNormal);
     if (gNormalMapIndex != 0xFFFFFFFF)
     {
         float3 normalMap = gTerrainTextures[gNormalMapIndex].Sample(gSamplerLinearWrap, pin.TexCoord).xyz;
-        normalMap = normalMap * 2.0f - 1.0f;
-        N = normalize(normalMap);
+        float3 normalT = 2.0f * normalMap - 1.0f;
+
+        float3 T = normalize(pin.WorldTangent - N * dot(pin.WorldTangent, N));
+        float3 B = cross(N, T);
+        float3x3 TBN = float3x3(T, B, N);
+        N = normalize(mul(normalT, TBN));
     }
 
     float3 V = normalize(gCameraPos - pin.WorldPos);

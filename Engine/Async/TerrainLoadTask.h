@@ -75,6 +75,11 @@ struct TerrainReadyState {
     Resource::GpuResourceHandle albedoGpuHandle = Resource::GpuResourceHandle::Invalid();
     D3D12_RESOURCE_DESC albedoDesc = {};
 
+    // ── 法线贴图（N_heightmap.dds, 1280x1280）──
+    std::atomic<bool> normalCreated{false};
+    Resource::GpuResourceHandle normalMapGpuHandle = Resource::GpuResourceHandle::Invalid();
+    D3D12_RESOURCE_DESC normalMapDesc = {};
+
     // ── 包围盒（CPU 计算，直接写入）──
     Math::BoundingAABB bounds;
 };
@@ -321,7 +326,15 @@ private:
             }
             readyState->albedoCreated.store(true, std::memory_order_release);
 
-            if (!heightResult.ok && !albedoResult.ok) {
+            auto normalResult = LoadSingleTextureGpu(L"Content/Textures/N_heightmap.dds", device);
+            logger->Info("[TerrainLoadTask] Normal texture GPU resource created: ok={}", normalResult.ok);
+            if (normalResult.ok) {
+                readyState->normalMapGpuHandle = normalResult.gpuHandle;
+                readyState->normalMapDesc = normalResult.desc;
+            }
+            readyState->normalCreated.store(true, std::memory_order_release);
+
+            if (!heightResult.ok && !albedoResult.ok && !normalResult.ok) {
                 logger->Error("[TerrainLoadTask] Both textures failed to load!");
                 PostLoaded(requestId);
                 return;
@@ -346,6 +359,11 @@ private:
                 UINT64 albedoSize = GetRequiredIntermediateSize(
                     albedoResult.texResource, 0, static_cast<UINT>(albedoResult.ddsInfo.subresources.size()));
                 totalUploadSize += AlignUp(albedoSize, TEXTURE_DATA_ALIGNMENT);
+            }
+            if (normalResult.ok) {
+                UINT64 normalSize = GetRequiredIntermediateSize(
+                    normalResult.texResource, 0, static_cast<UINT>(normalResult.ddsInfo.subresources.size()));
+                totalUploadSize += AlignUp(normalSize, TEXTURE_DATA_ALIGNMENT);
             }
 
             logger->Info("[TerrainLoadTask] Creating upload buffer: size={} bytes", totalUploadSize);
@@ -396,10 +414,13 @@ private:
                 if (albedoResult.ok) {
                     uploadOne(albedoResult.texResource, albedoResult.ddsInfo, accumulatedOffset);
                 }
+                if (normalResult.ok) {
+                    uploadOne(normalResult.texResource, normalResult.ddsInfo, accumulatedOffset);
+                }
 
                 copyCmdList.Close();
                 logger->Info("[TerrainLoadTask] Merged COPY recorded: {} textures, {} bytes upload",
-                             (heightResult.ok ? 1 : 0) + (albedoResult.ok ? 1 : 0), totalUploadSize);
+                             (heightResult.ok ? 1 : 0) + (albedoResult.ok ? 1 : 0) + (normalResult.ok ? 1 : 0), totalUploadSize);
             }
 
             // ================================================================
@@ -415,7 +436,7 @@ private:
                 directCmdHandle = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(directAlloc);
                 auto directCmdList = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(directCmdHandle);
 
-                D3D12_RESOURCE_BARRIER barriers[2];
+                D3D12_RESOURCE_BARRIER barriers[3];
                 uint32_t barrierCount = 0;
 
                 if (heightResult.ok) {
@@ -426,6 +447,11 @@ private:
                 if (albedoResult.ok) {
                     barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
                         albedoResult.texResource, D3D12_RESOURCE_STATE_COMMON,
+                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                }
+                if (normalResult.ok) {
+                    barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
+                        normalResult.texResource, D3D12_RESOURCE_STATE_COMMON,
                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 }
 

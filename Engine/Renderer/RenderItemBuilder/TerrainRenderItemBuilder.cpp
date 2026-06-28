@@ -37,10 +37,10 @@ void TerrainRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
             continue;
 
         // 获取纹理描述符表起始 SRV
-        // AllocateConsecutive(2) 保证 [0]=高度图, [1]=漫反射 在堆中连续
-        // 根签名 texTable 有 2 个 SRV，两者都必须有效才能渲染
+        // AllocateConsecutive(3) 保证 [0]=高度图, [1]=漫反射, [2]=法线贴图 在堆中连续
+        // 根签名 texTable 有 3 个 SRV，三者都必须有效才能渲染
         D3D12_GPU_DESCRIPTOR_HANDLE texTableSRV = {};
-        if (terrainComp->heightMapHandle.IsValid() && terrainComp->albedoHandle.IsValid()) {
+        if (terrainComp->heightMapHandle.IsValid() && terrainComp->albedoHandle.IsValid() && terrainComp->normalHandle.IsValid()) {
             texTableSRV = m_textureManager->GetSRV(terrainComp->heightMapHandle);
         }
 
