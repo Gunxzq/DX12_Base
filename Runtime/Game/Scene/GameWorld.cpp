@@ -259,8 +259,8 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     // 注册反射探针捕获系统
     RegisterProbeCaptureSystem();
 
-    // 注册地形渲染系统
-    RegisterTerrainRenderSystem();
+    // [SSAO开发期间注释] 注册地形渲染系统
+    // RegisterTerrainRenderSystem();
 
     // 注册构建器
     RegisterBuilderSystems();
@@ -1704,8 +1704,8 @@ void GameWorld::CreateWater() {
 
     // m_registry->AddComponent<StaticComponent>(m_waterEntity);
 
-    // 绘制调用
-    RegisterWaterRenderSystem();
+    // [SSAO开发期间注释] 绘制调用
+    // RegisterWaterRenderSystem();
 }
 
 void GameWorld::RegisterWaterRenderSystem() {
