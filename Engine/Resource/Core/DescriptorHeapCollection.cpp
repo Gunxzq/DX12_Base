@@ -89,8 +89,8 @@ void DescriptorHeapCollection::Initialize(ID3D12Device *device, const std::vecto
  * @param size 分区大小（槽位数）
  * @date 2026-06-28
  */
-void DescriptorHeapCollection::AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE heapType, PartitionType partition, uint32_t baseOffset,
-                                            uint32_t size) {
+void DescriptorHeapCollection::AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE heapType, PartitionType partition,
+                                            uint32_t baseOffset, uint32_t size) {
     auto it = m_heaps.find(heapType);
     if (it == m_heaps.end())
         return;
@@ -342,7 +342,8 @@ void DescriptorHeapCollection::Reclaim(D3D12_DESCRIPTOR_HEAP_TYPE type, uint64_t
  * @return D3D12_CPU_DESCRIPTOR_HANDLE
  * @date 2026-05-24
  */
-D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetCpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t index) const {
+D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetCpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE type,
+                                                                   uint32_t index) const {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return {};
@@ -360,7 +361,8 @@ D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetCpuHandle(D3D12_DESCRIP
  * @return D3D12_GPU_DESCRIPTOR_HANDLE
  * @date 2026-05-24
  */
-D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetGpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t index) const {
+D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetGpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE type,
+                                                                   uint32_t index) const {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return {};
