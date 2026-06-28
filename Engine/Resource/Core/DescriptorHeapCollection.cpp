@@ -5,20 +5,21 @@
 namespace DX12Engine::Resource {
 
 /**
- * @brief 将DescriptorHeapType转换为D3D12_DESCRIPTOR_HEAP_TYPE
- * @param type 要转换的DescriptorHeap类型
- * @return D3D12_DESCRIPTOR_HEAP_TYPE
- * @date 2026-05-24
+ * @brief 将PartitionType映射到D3D12_DESCRIPTOR_HEAP_TYPE
  */
-static D3D12_DESCRIPTOR_HEAP_TYPE ToD3D12Type(DescriptorHeapType type) {
-    switch (type) {
-    case DescriptorHeapType::CbvSrvUav:
+static D3D12_DESCRIPTOR_HEAP_TYPE PartitionToD3D12Type(PartitionType partition) {
+    switch (partition) {
+    case PartitionType::Texture:
+    case PartitionType::Buffer:
+    case PartitionType::Shadow:
+    case PartitionType::Cubemap:
+    case PartitionType::PostFx:
         return D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    case DescriptorHeapType::Rtv:
+    case PartitionType::Rtv:
         return D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    case DescriptorHeapType::Dsv:
+    case PartitionType::Dsv:
         return D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-    case DescriptorHeapType::Sampler:
+    case PartitionType::Sampler:
         return D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
     default:
         return D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -39,7 +40,7 @@ void DescriptorHeapCollection::Initialize(ID3D12Device *device, const std::vecto
     m_device = device;
 
     for (const auto &config : configs) {
-        D3D12_DESCRIPTOR_HEAP_TYPE d3d12Type = ToD3D12Type(config.type);
+        D3D12_DESCRIPTOR_HEAP_TYPE d3d12Type = config.type;
 
         D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
         heapDesc.Type = d3d12Type;
@@ -80,10 +81,161 @@ void DescriptorHeapCollection::Initialize(ID3D12Device *device, const std::vecto
  * @brief 关闭DescriptorHeapCollection
  * @date 2026-05-24
  */
+/**
+ * @brief 在指定物理堆中创建逻辑分区
+ * @param heapType 物理堆类型（如 CbvSrvUav）
+ * @param partition 分区类型（如 TextureSrv）
+ * @param baseOffset 分区在物理堆中的起始槽位
+ * @param size 分区大小（槽位数）
+ * @date 2026-06-28
+ */
+void DescriptorHeapCollection::AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE heapType, PartitionType partition, uint32_t baseOffset,
+                                            uint32_t size) {
+    auto it = m_heaps.find(heapType);
+    if (it == m_heaps.end())
+        return;
+
+    // 从父堆分配器中预占用分区槽位，避免与父堆的其他分配冲突
+    uint32_t reservedStart = it->second.allocator->AllocateConsecutive(size);
+    if (reservedStart == UINT32_MAX || reservedStart != baseOffset)
+        return;
+    DescriptorSlotAllocatorConfig allocatorConfig;
+    allocatorConfig.initialCapacity = size;
+    allocatorConfig.maxCapacity = size;
+    allocatorConfig.flags = DescriptorSlotFlags::LinearAlloc | DescriptorSlotFlags::EnableExpand;
+
+    auto allocator = std::make_unique<DescriptorSlotAllocator>();
+    allocator->Initialize(allocatorConfig);
+
+    PartitionEntry entry;
+    entry.heapType = heapType;
+    entry.allocator = std::move(allocator);
+    entry.baseOffset = baseOffset;
+    entry.size = size;
+
+    m_partitions[partition] = std::move(entry);
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetPartitionGpuHandle(PartitionType partition,
+                                                                            uint32_t index) const {
+    auto pit = m_partitions.find(partition);
+    if (pit == m_partitions.end())
+        return {};
+
+    auto hit = m_heaps.find(pit->second.heapType);
+    if (hit == m_heaps.end())
+        return {};
+
+    D3D12_GPU_DESCRIPTOR_HANDLE handle = hit->second.heap->GetGPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<uint64_t>(pit->second.baseOffset + index) * hit->second.descriptorSize;
+    return handle;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetPartitionCpuHandle(PartitionType partition,
+                                                                            uint32_t index) const {
+    auto pit = m_partitions.find(partition);
+    if (pit == m_partitions.end())
+        return {};
+
+    auto hit = m_heaps.find(pit->second.heapType);
+    if (hit == m_heaps.end())
+        return {};
+
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = hit->second.heap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<uint64_t>(pit->second.baseOffset + index) * hit->second.descriptorSize;
+    return handle;
+}
+
+uint32_t DescriptorHeapCollection::GetPartitionBaseOffset(PartitionType partition) const {
+    auto it = m_partitions.find(partition);
+    if (it == m_partitions.end())
+        return 0;
+    return it->second.baseOffset;
+}
+
+DescriptorHeapCollection::PartitionEntry &DescriptorHeapCollection::GetPartitionEntry(PartitionType type) {
+    static PartitionEntry invalidEntry;
+    auto it = m_partitions.find(type);
+    if (it == m_partitions.end())
+        return invalidEntry;
+    return it->second;
+}
+
+uint32_t DescriptorHeapCollection::Allocate(PartitionType partition) {
+    auto it = m_partitions.find(partition);
+    if (it != m_partitions.end())
+        return it->second.allocator->Allocate();
+    // Fallback: 未创建分区的类型直接分配在物理堆上（如 Rtv/Dsv/Sampler）
+    auto hit = m_heaps.find(PartitionToD3D12Type(partition));
+    if (hit == m_heaps.end())
+        return UINT32_MAX;
+    return hit->second.allocator->Allocate();
+}
+
+uint32_t DescriptorHeapCollection::AllocateConsecutive(PartitionType partition, uint32_t count) {
+    auto it = m_partitions.find(partition);
+    if (it != m_partitions.end())
+        return it->second.allocator->AllocateConsecutive(count);
+    auto hit = m_heaps.find(PartitionToD3D12Type(partition));
+    if (hit == m_heaps.end())
+        return UINT32_MAX;
+    return hit->second.allocator->AllocateConsecutive(count);
+}
+
+void DescriptorHeapCollection::Free(PartitionType partition, uint32_t index, uint64_t fenceValue) {
+    auto it = m_partitions.find(partition);
+    if (it != m_partitions.end()) {
+        it->second.allocator->Free(index, fenceValue);
+        return;
+    }
+    auto hit = m_heaps.find(PartitionToD3D12Type(partition));
+    if (hit != m_heaps.end())
+        hit->second.allocator->Free(index, fenceValue);
+}
+
+void DescriptorHeapCollection::Reclaim(PartitionType partition, uint64_t completedFence) {
+    auto it = m_partitions.find(partition);
+    if (it == m_partitions.end())
+        return;
+    it->second.allocator->Reclaim(completedFence);
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetGpuHandle(PartitionType partition, uint32_t index) const {
+    // 如果是已创建的分区，用分区句柄（带 baseOffset）
+    auto pit = m_partitions.find(partition);
+    if (pit != m_partitions.end())
+        return GetPartitionGpuHandle(partition, index);
+    // 否则回退到物理堆
+    auto hit = m_heaps.find(PartitionToD3D12Type(partition));
+    if (hit == m_heaps.end())
+        return {};
+    D3D12_GPU_DESCRIPTOR_HANDLE handle = hit->second.heap->GetGPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<uint64_t>(index) * hit->second.descriptorSize;
+    return handle;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetCpuHandle(PartitionType partition, uint32_t index) const {
+    auto pit = m_partitions.find(partition);
+    if (pit != m_partitions.end())
+        return GetPartitionCpuHandle(partition, index);
+    auto hit = m_heaps.find(PartitionToD3D12Type(partition));
+    if (hit == m_heaps.end())
+        return {};
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = hit->second.heap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<uint64_t>(index) * hit->second.descriptorSize;
+    return handle;
+}
+
 void DescriptorHeapCollection::Shutdown() {
     if (!m_initialized) {
         return;
     }
+
+    for (auto &pair : m_partitions) {
+        if (pair.second.allocator)
+            pair.second.allocator->Shutdown();
+    }
+    m_partitions.clear();
 
     for (auto &pair : m_heaps) {
         if (pair.second.allocator) {
@@ -103,7 +255,7 @@ void DescriptorHeapCollection::Shutdown() {
  * @return ID3D12DescriptorHeap*
  * @date 2026-05-24
  */
-ID3D12DescriptorHeap *DescriptorHeapCollection::GetHeap(DescriptorHeapType type) const {
+ID3D12DescriptorHeap *DescriptorHeapCollection::GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE type) const {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return nullptr;
@@ -117,7 +269,7 @@ ID3D12DescriptorHeap *DescriptorHeapCollection::GetHeap(DescriptorHeapType type)
  * @return uint32_t
  * @date 2026-05-24
  */
-uint32_t DescriptorHeapCollection::GetDescriptorSize(DescriptorHeapType type) const {
+uint32_t DescriptorHeapCollection::GetDescriptorSize(D3D12_DESCRIPTOR_HEAP_TYPE type) const {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return 0;
@@ -131,7 +283,7 @@ uint32_t DescriptorHeapCollection::GetDescriptorSize(DescriptorHeapType type) co
  * @return uint32_t
  * @date 2026-05-24
  */
-uint32_t DescriptorHeapCollection::Allocate(DescriptorHeapType type) {
+uint32_t DescriptorHeapCollection::Allocate(D3D12_DESCRIPTOR_HEAP_TYPE type) {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return UINT32_MAX;
@@ -146,7 +298,7 @@ uint32_t DescriptorHeapCollection::Allocate(DescriptorHeapType type) {
  * @return uint32_t 起始索引，失败返回 UINT32_MAX
  * @date 2026-06-07
  */
-uint32_t DescriptorHeapCollection::AllocateConsecutive(DescriptorHeapType type, uint32_t count) {
+uint32_t DescriptorHeapCollection::AllocateConsecutive(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t count) {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return UINT32_MAX;
@@ -161,7 +313,7 @@ uint32_t DescriptorHeapCollection::AllocateConsecutive(DescriptorHeapType type, 
  * @param fenceValue 释放的Fence值，用于同步操作
  * @date 2026-05-24
  */
-void DescriptorHeapCollection::Free(DescriptorHeapType type, uint32_t index, uint64_t fenceValue) {
+void DescriptorHeapCollection::Free(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t index, uint64_t fenceValue) {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return;
@@ -175,7 +327,7 @@ void DescriptorHeapCollection::Free(DescriptorHeapType type, uint32_t index, uin
  * @param completedFence
  * @date 2026-05-24
  */
-void DescriptorHeapCollection::Reclaim(DescriptorHeapType type, uint64_t completedFence) {
+void DescriptorHeapCollection::Reclaim(D3D12_DESCRIPTOR_HEAP_TYPE type, uint64_t completedFence) {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return;
@@ -190,7 +342,7 @@ void DescriptorHeapCollection::Reclaim(DescriptorHeapType type, uint64_t complet
  * @return D3D12_CPU_DESCRIPTOR_HANDLE
  * @date 2026-05-24
  */
-D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetCpuHandle(DescriptorHeapType type, uint32_t index) const {
+D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetCpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t index) const {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return {};
@@ -208,7 +360,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetCpuHandle(DescriptorHea
  * @return D3D12_GPU_DESCRIPTOR_HANDLE
  * @date 2026-05-24
  */
-D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetGpuHandle(DescriptorHeapType type, uint32_t index) const {
+D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetGpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t index) const {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return {};
@@ -229,7 +381,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapCollection::GetGpuHandle(DescriptorHea
  * @return uint32_t
  * @date 2026-05-24
  */
-uint32_t DescriptorHeapCollection::GetHeapSize(DescriptorHeapType type) const {
+uint32_t DescriptorHeapCollection::GetHeapSize(D3D12_DESCRIPTOR_HEAP_TYPE type) const {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return 0;
@@ -243,7 +395,7 @@ uint32_t DescriptorHeapCollection::GetHeapSize(DescriptorHeapType type) const {
  * @return uint32_t
  * @date 2026-05-24
  */
-uint32_t DescriptorHeapCollection::GetAllocatedCount(DescriptorHeapType type) const {
+uint32_t DescriptorHeapCollection::GetAllocatedCount(D3D12_DESCRIPTOR_HEAP_TYPE type) const {
     auto it = m_heaps.find(type);
     if (it == m_heaps.end()) {
         return 0;
