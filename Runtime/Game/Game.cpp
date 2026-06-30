@@ -8,6 +8,7 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
+#include "Renderer/Scene/AmbientOcclusionManager/AmbientOcclusionManager.h"
 #include "Renderer/Scene/Struct/Frustum.h"
 #include "Resource/AssetLoader/AssetLoader.h"
 #include "Resource/AssetLoader/Loader/DDSLoader.h"
@@ -66,6 +67,16 @@ bool Game::Initialize() {
     LightManager::GetInstance().Initialize(m_context->DeviceContext->GetDevice(), m_context->DescriptorHeaps);
     LightManager::GetInstance().CreateTestLights(); // 创建测试光源
 
+    // 初始化环境光遮蔽管理器（SSAO 资源分配 + SsaoRenderer）
+    {
+        auto &aoMgr = AmbientOcclusionManager::GetInstance();
+        aoMgr.SetDeviceContext(m_context->DeviceContext);
+        const auto &vp = m_context->DeviceContext->GetViewport();
+        aoMgr.Initialize(m_context->DeviceContext->GetDevice(), m_context->DescriptorHeaps,
+                         static_cast<uint32_t>(vp.Width), static_cast<uint32_t>(vp.Height));
+        m_context->Logging->Info("[Game] AmbientOcclusionManager initialized");
+    }
+
     // // 为主方向光预创建阴影贴图（2048x2048）
     LightManager::GetInstance().CreateShadowMapForDirectionalLight(0, 2048, m_context->GetNextFence());
 
@@ -83,6 +94,12 @@ bool Game::Initialize() {
 
     // 6. 初始化游戏模块（它们会自己注册游戏逻辑系统）
     m_world.Initialize(m_context, m_opaqueRenderer.get());
+
+    // 上传 SSAO 随机向量纹理（命令管理器就绪后，与其他纹理上传在同一阶段）
+    AmbientOcclusionManager::GetInstance().BuildRandomVectorTexture();
+
+    // 初始化 AO RT 资源状态（COMMON → PIXEL_SHADER_RESOURCE，匹配 SSAO System 的入口屏障）
+    AmbientOcclusionManager::GetInstance().InitializeResourceStates();
 
     // 连接 CullingSystem/VisibleRaycaster 引用，必须在 Initialize 之前完成
     // 因为 Initialize → RegisterPickingSystems() 需要这些指针非空

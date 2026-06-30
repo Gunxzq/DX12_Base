@@ -66,6 +66,7 @@ public:
 
     void CreateTestCube();
     void CreateTestCylinder();
+    void CreateTestTorus();       // 程序化环形圆环（SSAO 测试用：自带凹陷）
     void CreateGroundPlane();
     void CreateSkybox();
     void CreateWater();
@@ -91,6 +92,9 @@ public:
 
     // 注册阴影渲染系统
     void RegisterShadowRenderSystem();
+
+    // 注册 SSAO 系统
+    void RegisterSsaoSystem();
 
     // 注册反射探针捕获系统
     void RegisterProbeCaptureSystem();

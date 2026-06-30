@@ -48,6 +48,7 @@
 #include "Async/ResourceTransitionTask.h"
 #include "Async/TerrainLoadTask.h"
 
+#include "Renderer/Scene/AmbientOcclusionManager/AmbientOcclusionManager.h"
 #include "Renderer/Scene/TerrainManager/TerrainManager.h"
 
 #include <DirectXMath.h>
@@ -222,13 +223,14 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     CreateGroundPlane();
     CreateTestCube();
     CreateTestCylinder();
+    CreateTestTorus(); // 程序化环面（SSAO 测试：内圈凹陷）
 
     // 压力测试：大量动态物体（已注释，后续需要时启用）
     // CreateStressTestScene();
 
-    // 初始化公告牌系统
-    LoadBillboardTextures();
-    CreateBillboardTrees();
+    // 初始化公告牌系统（SSAO 开发期间注释）
+    // LoadBillboardTextures();
+    // CreateBillboardTrees();
 
     // 创建后台异步执行器（类比帧驱动器，2 个工作线程）
     // 必须在 LoadTerrainAsync() 之前创建！
@@ -256,6 +258,8 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
 
     // 注册阴影渲染系统
     RegisterShadowRenderSystem();
+    // 注册 SSAO 系统（PrePass 深度就绪后，Opaque 光照前）
+    RegisterSsaoSystem();
     // 注册反射探针捕获系统
     RegisterProbeCaptureSystem();
 
@@ -855,6 +859,146 @@ void GameWorld::CreateTestCylinder() {
     m_context->Logging->Info("[GameWorld] Test cylinder created with brick material + normal map");
 }
 
+// ========================================================================
+// CreateTestTorus — 程序化生成环形圆环
+// 用途：SSAO 测试，圆环内圈有明确的自遮挡凹陷区域
+// ========================================================================
+void GameWorld::CreateTestTorus() {
+    if (!m_registry || !m_renderer || !m_context)
+        return;
+
+    constexpr float R = 2.0f;   // 主半径（圆心到管中心的距离）
+    constexpr float r = 0.8f;   // 次半径（管的半径）
+    constexpr UINT slices = 48; // 主方向分段
+    constexpr UINT stacks = 24; // 管方向分段
+    constexpr float PI = 3.14159265358979f;
+
+    std::vector<GeometryGenerator::Vertex> vertices;
+    std::vector<uint32_t> indices;
+
+    // 生成顶点
+    for (UINT i = 0; i <= slices; ++i) {
+        float theta = (float)i / slices * 2.0f * PI;
+        float cosTheta = cosf(theta);
+        float sinTheta = sinf(theta);
+
+        for (UINT j = 0; j <= stacks; ++j) {
+            float phi = (float)j / stacks * 2.0f * PI;
+            float cosPhi = cosf(phi);
+            float sinPhi = sinf(phi);
+
+            // 位置
+            float px = (R + r * cosPhi) * cosTheta;
+            float py = r * sinPhi;
+            float pz = (R + r * cosPhi) * sinTheta;
+
+            // 法线（从管表面指向外）
+            float nx = cosPhi * cosTheta;
+            float ny = sinPhi;
+            float nz = cosPhi * sinTheta;
+
+            // 切线（沿主方向）
+            float tx = -sinTheta;
+            float ty = 0.0f;
+            float tz = cosTheta;
+
+            // UV
+            float u = (float)i / slices;
+            float v = (float)j / stacks;
+
+            vertices.emplace_back(px, py, pz, nx, ny, nz, tx, ty, tz, u, v);
+        }
+    }
+
+    // 生成索引（网格拓扑）
+    for (UINT i = 0; i < slices; ++i) {
+        for (UINT j = 0; j < stacks; ++j) {
+            UINT i0 = i * (stacks + 1) + j;
+            UINT i1 = i0 + 1;
+            UINT i2 = (i + 1) * (stacks + 1) + j;
+            UINT i3 = i2 + 1;
+
+            // 两个三角形构成一个四边形
+            indices.push_back(i0);
+            indices.push_back(i1);
+            indices.push_back(i2);
+
+            indices.push_back(i1);
+            indices.push_back(i3);
+            indices.push_back(i2);
+        }
+    }
+
+    // 创建 GPU 缓冲区
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto device = m_context->DeviceContext->GetDevice();
+
+    size_t vbSize = vertices.size() * sizeof(GeometryGenerator::Vertex);
+    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
+    if (vbResource) {
+        void *vbMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        vbResource->Map(0, &readRange, &vbMapped);
+        memcpy(vbMapped, vertices.data(), vbSize);
+        vbResource->Unmap(0, nullptr);
+    }
+
+    size_t ibSize = indices.size() * sizeof(uint32_t);
+    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
+    if (ibResource) {
+        void *ibMapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        ibResource->Map(0, &readRange, &ibMapped);
+        memcpy(ibMapped, indices.data(), ibSize);
+        ibResource->Unmap(0, nullptr);
+    }
+
+    TriangleMesh triangleMesh;
+    triangleMesh.vertexBufferHandle = vbHandle;
+    triangleMesh.indexBufferHandle = ibHandle;
+    triangleMesh.vertexCount = static_cast<uint32_t>(vertices.size());
+    triangleMesh.indexCount = static_cast<uint32_t>(indices.size());
+    triangleMesh.vertexStride = sizeof(GeometryGenerator::Vertex);
+    triangleMesh.indexFormat = DXGI_FORMAT_R32_UINT;
+    triangleMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    triangleMesh.isGpuReady = true;
+
+    // 计算包围盒
+    float extent = R + r;
+    Math::BoundingAABB bounds;
+    bounds.min = XMFLOAT3(-extent, -r, -extent);
+    bounds.max = XMFLOAT3(extent, r, extent);
+
+    auto &geoMgr = m_context->GeometryResourceManager;
+    GeometryHandle geoHandle = geoMgr->RegisterGeometry<TriangleMesh>(triangleMesh);
+    if (!geoHandle.IsValid()) {
+        m_context->Logging->Error("[GameWorld] RegisterGeometry for torus failed!");
+        return;
+    }
+
+    // 注册 LOD
+    LODMesh lodMesh;
+    lodMesh.lodChain = {geoHandle};
+    LODMeshHandle lodHandle = m_context->LODSystem->RegisterLODMesh(lodMesh);
+
+    // 创建 ECS 实体，放在场景中央偏前位置
+    auto entity = m_registry->CreateEntity();
+    m_registry->AddComponent<TransformComponent>(entity, XMFLOAT3(0.0f, 32.0f, 0.0f), XMFLOAT3(0.0f, 0.0f, 0.0f),
+                                                 XMFLOAT3(1.0f, 1.0f, 1.0f));
+    MeshComponent meshComp;
+    meshComp.lodMeshHandle = lodHandle;
+    meshComp.localBounds = bounds;
+    meshComp.materialHandle = m_brickMaterialHandle;
+    meshComp.textureHandle = m_brickTextureHandle;
+    meshComp.receivesShadow = true;
+    m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
+
+    m_context->Logging->Info("[GameWorld] Test torus created: {} vertices, {} triangles (SSAO test)", vertices.size(),
+                             indices.size() / 3);
+}
+
 void GameWorld::LoadTestTexture() {
 
     DDSTextureInfo ddsInfo;
@@ -1250,7 +1394,7 @@ void GameWorld::CreateMaterials() {
     cubeMaterial.roughness = 0.5f;
     cubeMaterial.ambient = 0.5f;
     cubeMaterial.alpha = 1.0f;
-    cubeMaterial.baseColorTextureId = m_testTextureSrvSlot;
+    cubeMaterial.baseColorTextureId = m_testTextureSrvSlot != UINT32_MAX ? m_testTextureSrvSlot : 0;
     cubeMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
     m_cubeMaterialHandle = materialMgr->RegisterMaterial(cubeMaterial);
 
@@ -1264,11 +1408,12 @@ void GameWorld::CreateMaterials() {
     brickMaterial.ambient = 0.5f;   // 固定值回退
     brickMaterial.alpha = 1.0f;
     brickMaterial.normalIntensity = 1.0f;
-    brickMaterial.baseColorTextureId = m_brickTextureSrvSlot;
-    brickMaterial.normalTextureId = m_brickNormalSrvSlot;
-    brickMaterial.metallicRoughnessTextureId = m_brickMetallicRoughnessSrvSlot; // bricks2_SPEC.dds
-    brickMaterial.occlusionTextureId = m_brickOcclusionSrvSlot;                 // bricks2_OCC.dds
-    brickMaterial.heightTextureId = m_brickHeightSrvSlot;                       // bricks2_DISP.dds
+    brickMaterial.baseColorTextureId = m_brickTextureSrvSlot != UINT32_MAX ? m_brickTextureSrvSlot : 0;
+    brickMaterial.normalTextureId = m_brickNormalSrvSlot != UINT32_MAX ? m_brickNormalSrvSlot : 0;
+    brickMaterial.metallicRoughnessTextureId =
+        m_brickMetallicRoughnessSrvSlot != UINT32_MAX ? m_brickMetallicRoughnessSrvSlot : 0;
+    brickMaterial.occlusionTextureId = m_brickOcclusionSrvSlot != UINT32_MAX ? m_brickOcclusionSrvSlot : 0;
+    brickMaterial.heightTextureId = m_brickHeightSrvSlot != UINT32_MAX ? m_brickHeightSrvSlot : 0;
     brickMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
     m_brickMaterialHandle = materialMgr->RegisterMaterial(brickMaterial);
 
@@ -1305,7 +1450,7 @@ void GameWorld::CreateMaterials() {
     reflectionTestMaterial.roughness = 0.2f;                             // 光滑表面，清晰反射
     reflectionTestMaterial.ambient = 0.1f;
     reflectionTestMaterial.alpha = 1.0f;
-    reflectionTestMaterial.baseColorTextureId = m_whiteTextureSrvSlot;
+    reflectionTestMaterial.baseColorTextureId = m_whiteTextureSrvSlot != UINT32_MAX ? m_whiteTextureSrvSlot : 0;
     reflectionTestMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
     m_reflectionTestMaterialHandle = materialMgr->RegisterMaterial(reflectionTestMaterial);
 
@@ -1648,6 +1793,10 @@ void GameWorld::RegisterCubeRenderSystem() {
                  auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
                  cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
+                 // 清除 RTV（PrePass 将 back buffer 转回了 PRESENT，需重清）
+                 const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
+                 cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
                  // 获取 Pass Constant Buffer 地址
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
@@ -1679,9 +1828,12 @@ void GameWorld::RegisterCubeRenderSystem() {
                      envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
                  }
 
-                 // 开始渲染（传入阴影数据、反射探针Cubemap Array SRV、纹理堆起始、环境贴图）
+                 // 获取 SSAO Map SRV（若未初始化则为空 handle，shader 中跳过）
+                 D3D12_GPU_DESCRIPTOR_HANDLE aoMapSRV = AmbientOcclusionManager::GetInstance().GetAmbientMapSRV();
+
+                 // 开始渲染（传入阴影数据、反射探针Cubemap Array SRV、纹理堆起始、环境贴图、SSAO Map）
                  m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
-                                        shadowMapSRV, cubemapArraySRV, textureHeapStart, envMapSRV);
+                                        shadowMapSRV, cubemapArraySRV, textureHeapStart, envMapSRV, aoMapSRV);
 
                  for (const auto &item : m_opaqueQueue) {
                      if (!item.IsValid())
@@ -2609,6 +2761,136 @@ void GameWorld::RegisterShadowRenderSystem() {
          .threadType = ThreadType::Render,
          .priority = TaskPriority::Normal,
          .renderPhase = RenderPhase::PrePass,
+         .alwaysRun = true});
+}
+
+void GameWorld::RegisterSsaoSystem() {
+    SystemRegistry::Register(
+        {.name = "SsaoSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 auto &aoMgr = AmbientOcclusionManager::GetInstance();
+                 if (!aoMgr.IsInitialized())
+                     return;
+
+                 // 获取命令列表
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+                 // 获取深度缓冲 SRV（私有深度缓冲，DrawNormals 写入后供 ComputeAO 采样）
+                 D3D12_GPU_DESCRIPTOR_HANDLE depthSRV = aoMgr.GetPrivateDepthSRV();
+
+                 // 过渡正常和 AO RT 到 RENDER_TARGET 状态
+                 auto *normalRes = aoMgr.GetNormalResource();
+                 auto *ambient0 = aoMgr.GetAmbientResource0();
+                 auto *ambient1 = aoMgr.GetAmbientResource1();
+                 auto barrier = [&](ID3D12Resource *res, D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to) {
+                     if (!res)
+                         return;
+                     auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, from, to);
+                     cmdList.Get()->ResourceBarrier(1, &b);
+                 };
+                 barrier(normalRes, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                 barrier(ambient0, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                 barrier(ambient1, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+                 // ── 法线/深度 Pass（仿龙书 DrawNormalsAndDepth，使用私有 DSV）──
+                 D3D12_CPU_DESCRIPTOR_HANDLE normalRTV = aoMgr.GetNormalMapRTV();
+                 D3D12_CPU_DESCRIPTOR_HANDLE depthDSV = aoMgr.GetPrivateDepthDSV();
+                 auto *nativeCL = cmdList.Get();
+
+                 // 设置视口、裁剪矩形
+                 {
+                     const auto &viewport = m_context->DeviceContext->GetViewport();
+                     const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
+                     nativeCL->RSSetViewports(1, &viewport);
+                     nativeCL->RSSetScissorRects(1, &scissorRect);
+                 }
+
+                 // 龙书模式：先清除 RTV 和 DSV（不依赖 OMSetRenderTargets），再绑定
+                 const float clearBlue[] = {0.0f, 0.0f, 1.0f, 0.0f};
+                 nativeCL->ClearRenderTargetView(normalRTV, clearBlue, 0, nullptr);
+                 nativeCL->ClearDepthStencilView(depthDSV, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0,
+                                                 0, nullptr);
+
+                 // 再绑定法线 RT + 深度缓冲
+                 nativeCL->OMSetRenderTargets(1, &normalRTV, TRUE, &depthDSV);
+
+                 // 用法线 PSO 绘制场景几何体（同时写入法线和深度）
+                 if (ID3D12PipelineState *normPSO = aoMgr.GetNormalPipeline()) {
+                     nativeCL->SetPipelineState(normPSO);
+                     nativeCL->SetGraphicsRootSignature(aoMgr.GetNormalRootSig());
+
+                     const auto &passCB = m_context->FrameResourceManager->GetPassConstants();
+                     // PassConstants 完整布局，着色器自行索引到 gViewProj
+                     D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_context->FrameResourceManager->GetPassCBAddress();
+                     nativeCL->SetGraphicsRootConstantBufferView(0, cbAddr);
+
+                     auto &gpuMgr = GpuResourceManager::GetInstance();
+                     for (const auto &item : m_opaqueQueue) {
+                         if (!item.IsValid())
+                             continue;
+                         const TriangleMesh *mesh =
+                             m_context->GeometryResourceManager->GetGeometry<TriangleMesh>(item.geometryHandle);
+                         if (!mesh || !mesh->isGpuReady)
+                             continue;
+
+                         ID3D12Resource *vb = gpuMgr.GetResource(mesh->vertexBufferHandle);
+                         ID3D12Resource *ib = gpuMgr.GetResource(mesh->indexBufferHandle);
+                         if (!vb || !ib)
+                             continue;
+
+                         D3D12_VERTEX_BUFFER_VIEW vbv = {vb->GetGPUVirtualAddress(),
+                                                         (UINT)(mesh->vertexCount * mesh->vertexStride),
+                                                         mesh->vertexStride};
+                         D3D12_INDEX_BUFFER_VIEW ibv = {
+                             ib->GetGPUVirtualAddress(),
+                             (UINT)(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2)),
+                             mesh->indexFormat};
+                         nativeCL->IASetVertexBuffers(0, 1, &vbv);
+                         nativeCL->IASetIndexBuffer(&ibv);
+                         nativeCL->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                         nativeCL->SetGraphicsRootShaderResourceView(1, item.instanceBuffer);
+                         nativeCL->DrawIndexedInstanced(mesh->indexCount, item.instanceCount, 0, 0, 0);
+                     }
+                 }
+
+                 // 法线 RT 转回可读状态，供 ComputeAO 采样
+                 barrier(normalRes, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+                 // 私有深度缓冲从 DEPTH_WRITE 转 PIXEL_SHADER_RESOURCE，供 ComputeAO 采样法线/深度
+                 ID3D12Resource *privateDepthRes = aoMgr.GetPrivateDepthResource();
+                 if (privateDepthRes) {
+                     barrier(privateDepthRes, D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                 }
+
+                 // 执行 SSAO（仅 Compute + Blur，法线/深度已就绪）
+                 const auto &passCB = m_context->FrameResourceManager->GetPassConstants();
+                 aoMgr.Execute(cmdList.Get(), depthSRV, passCB.Proj);
+
+                 // 私有深度缓冲转回 DEPTH_WRITE，供下一帧 DrawNormals 清除使用
+                 if (privateDepthRes) {
+                     barrier(privateDepthRes, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                             D3D12_RESOURCE_STATE_DEPTH_WRITE);
+                 }
+
+                 // 过渡 AO RT 回 PIXEL_SHADER_RESOURCE（ambientRT1 已在 Execute 内部转回 PS）
+                 barrier(ambient0, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::DynamicAOcclusion, cmdListHandle);
+
+                 uint64_t sequence = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Render,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::DynamicAOcclusion,
          .alwaysRun = true});
 }
 
