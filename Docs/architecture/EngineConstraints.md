@@ -1,0 +1,51 @@
+# 引擎开发约束
+
+## 架构分层
+
+| 层 | 职责 | 行为边界 |
+|:--|:-----|:---------|
+| **ECS 组件** | 原子化数据 | 无行为，无生命周期，纯数据结构体 |
+| **System（L4）** | 状态机节点 | 可读写 ECS 组件，可发消息，常驻或消息触发 |
+| **Builder** | 构建渲染项 | 只读 ECS 组件，产出 RenderItem 队列 |
+| **Renderer** | 提交 DrawCall | 只读 RenderItem，绑定 PSO/缓冲区 |
+| **事件系统（L1）** | 跨线程通知 | SoA 环形缓冲区，优先级桶，无锁写入 |
+
+## System 调度约束
+
+| 路径 | 适用场景 | 注册方式 | 示例 |
+|:-----|:---------|:---------|:-----|
+| **高频**（每帧必执行） | 连续过程 | `AlwaysRun()` | 动画推进、物理步进、Transform 传播 |
+| **低频**（离散事件） | 状态变更 | `WithMessage<T>()` | 动画切换、伤害响应、开门 |
+
+**禁止**：用消息系统模拟每帧驱动（如每帧发 FrameTick 来触发 System）。
+
+## 多线程安全
+
+- System 中不能进行内存分配
+- 渲染阶段的 System 只能录制命令列表
+- 跨线程数据传递通过事件系统的 Arena 完成，不直接共享指针
+
+## 渲染管线数据访问
+
+参阅 `Docs/architecture/RenderDataAccess.md`
+
+| 资源 | 可读 | 可写 | 写入者 |
+|:----:|:----:|:----:|--------|
+| 主深度缓冲（Main DSV） | 所有 Pass | ❌ 仅 Opaque 主渲染阶段 | 场景主渲染 |
+| 主颜色缓冲（Main RTV） | 所有 Pass | ❌ 仅 Opaque 主渲染阶段 | 场景主渲染 |
+| 私有深度/颜色缓冲 | 创建者 + 下游 | ✅ 创建者 Pass | 各 Pass 内部 |
+
+## 蒙皮骨骼动画
+
+参阅 `Docs/architecture/SkinnedAnimation.md`
+
+- `SkinnedComponent` 持有动画状态（timePos、currentClip、boneBufferIndex）
+- `AnimationAdvancer`（常驻 System）每帧推进时间 → 插值矩阵 → 写入 GPU
+- `AnimationStateMachine`（消息 System）响应 `PlayAnimationEvent` / `StopAnimationEvent`
+- Builder 只读 SkinnedComponent，根据 `boneBufferIndex` 标记 InstanceData
+
+## 组件与渲染项的关系
+
+- **组件**：持久化存储，ECS Registry 管理生命周期
+- **渲染项**：每帧从组件临时生成，渲染完成后丢弃
+- 渲染项不直接持有 GPU 数据，通过索引引用帧资源的常量缓冲区
