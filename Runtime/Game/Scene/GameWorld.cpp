@@ -259,10 +259,10 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     // 注册阴影渲染系统
     RegisterShadowRenderSystem();
     // 注册 SSAO 系统（PrePass 深度就绪后，Opaque 光照前）
-    // RegisterSsaoSystem();
+    RegisterSsaoSystem();
     {
         auto &aoMgr = AmbientOcclusionManager::GetInstance();
-        aoMgr.SetEnabled(false);
+        aoMgr.SetEnabled(true);
         if (m_whiteTextureHandle.IsValid())
             aoMgr.SetFallbackWhiteSRV(m_context->TextureMgr->GetSRV(m_whiteTextureHandle));
     }
