@@ -5,8 +5,8 @@
 #include <d3d12.h>
 
 #include "Renderer/Pipeline/SsaoRenderer.h"
-#include "Resource/Pool/RenderTargetPool.h"
 #include "Resource/Pool/DepthStencilPool.h"
+#include "Resource/Pool/RenderTargetPool.h"
 #include "Resource/Struct/DescriptorHandle.h"
 
 namespace DX12Engine::Resource {
@@ -70,7 +70,11 @@ public:
     // ---- 资源访问（给 SsaoRenderer 使用） ----
     D3D12_GPU_DESCRIPTOR_HANDLE GetNormalMapSRV() const { return CpuSrvToGpu(m_normalSRV); }
     D3D12_CPU_DESCRIPTOR_HANDLE GetNormalMapRTV() const { return m_normalRTV; }
-    D3D12_GPU_DESCRIPTOR_HANDLE GetAmbientMapSRV() const { return CpuSrvToGpu(m_ambientSRV); }
+    D3D12_GPU_DESCRIPTOR_HANDLE GetAmbientMapSRV() const {
+        if (!m_enabled)
+            return m_fallbackWhiteSRV;
+        return CpuSrvToGpu(m_ambientSRV);
+    }
     D3D12_CPU_DESCRIPTOR_HANDLE GetAmbientMapRTV() const { return m_ambientRTV; }
     D3D12_GPU_DESCRIPTOR_HANDLE GetAmbientMap1SRV() const { return CpuSrvToGpu(m_ambient1SRV); }
     D3D12_CPU_DESCRIPTOR_HANDLE GetAmbientMap1RTV() const { return m_ambient1RTV; }
@@ -79,6 +83,11 @@ public:
     ID3D12Resource *GetPrivateDepthResource() const;
     D3D12_CPU_DESCRIPTOR_HANDLE GetPrivateDepthDSV() const { return m_privateDepthDSV; }
     D3D12_GPU_DESCRIPTOR_HANDLE GetPrivateDepthSRV() const { return CpuSrvToGpu(m_privateDepthSRV); }
+
+    // ---- SSAO 开关 ----
+    void SetEnabled(bool enabled) { m_enabled = enabled; }
+    bool IsEnabled() const { return m_enabled; }
+    void SetFallbackWhiteSRV(D3D12_GPU_DESCRIPTOR_HANDLE srv) { m_fallbackWhiteSRV = srv; }
 
     // ---- 资源屏障辅助（供 System 管理状态转换） ----
     ID3D12Resource *GetNormalResource() const;
@@ -138,6 +147,10 @@ private:
 
     // 随机向量纹理资源（必须在管理器生命周期内保持存活）
     Microsoft::WRL::ComPtr<ID3D12Resource> m_randomVectorTexture;
+
+    // SSAO 开关（关闭时返回材质系统的白色占位纹理）
+    bool m_enabled = true;
+    D3D12_GPU_DESCRIPTOR_HANDLE m_fallbackWhiteSRV = {};
 };
 
 } // namespace DX12Engine::Renderer

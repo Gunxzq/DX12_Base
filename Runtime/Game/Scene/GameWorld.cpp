@@ -259,7 +259,13 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     // 注册阴影渲染系统
     RegisterShadowRenderSystem();
     // 注册 SSAO 系统（PrePass 深度就绪后，Opaque 光照前）
-    RegisterSsaoSystem();
+    // RegisterSsaoSystem();
+    {
+        auto &aoMgr = AmbientOcclusionManager::GetInstance();
+        aoMgr.SetEnabled(false);
+        if (m_whiteTextureHandle.IsValid())
+            aoMgr.SetFallbackWhiteSRV(m_context->TextureMgr->GetSRV(m_whiteTextureHandle));
+    }
     // 注册反射探针捕获系统
     RegisterProbeCaptureSystem();
 
@@ -1792,10 +1798,6 @@ void GameWorld::RegisterCubeRenderSystem() {
                  auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
                  auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
                  cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-                 // 清除 RTV（PrePass 将 back buffer 转回了 PRESENT，需重清）
-                 const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-                 cmdList.Get()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
                  // 获取 Pass Constant Buffer 地址
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
