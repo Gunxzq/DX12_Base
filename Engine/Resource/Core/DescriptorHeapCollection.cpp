@@ -92,13 +92,31 @@ void DescriptorHeapCollection::Initialize(ID3D12Device *device, const std::vecto
 void DescriptorHeapCollection::AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE heapType, PartitionType partition,
                                             uint32_t baseOffset, uint32_t size) {
     auto it = m_heaps.find(heapType);
-    if (it == m_heaps.end())
+    if (it == m_heaps.end()) {
+        OutputDebugStringA("[DescriptorHeapCollection] AddPartition FAILED: heap type not found\n");
         return;
+    }
 
     // 从父堆分配器中预占用分区槽位，避免与父堆的其他分配冲突
     uint32_t reservedStart = it->second.allocator->AllocateConsecutive(size);
-    if (reservedStart == UINT32_MAX || reservedStart != baseOffset)
+    char buf[256];
+    sprintf_s(buf, "[DescriptorHeapCollection] AddPartition: partition=%d, baseOffset=%u, size=%u, reservedStart=%u\n",
+              static_cast<int>(partition), baseOffset, size, reservedStart);
+    OutputDebugStringA(buf);
+
+    if (reservedStart == UINT32_MAX) {
+        sprintf_s(buf, "[DescriptorHeapCollection] AddPartition FAILED: AllocateConsecutive returned UINT32_MAX\n");
+        OutputDebugStringA(buf);
         return;
+    }
+    if (reservedStart != baseOffset) {
+        sprintf_s(buf,
+                  "[DescriptorHeapCollection] AddPartition WARNING: reservedStart(%u) != baseOffset(%u), using "
+                  "reservedStart\n",
+                  reservedStart, baseOffset);
+        OutputDebugStringA(buf);
+        baseOffset = reservedStart; // 使用实际分配的偏移
+    }
     DescriptorSlotAllocatorConfig allocatorConfig;
     allocatorConfig.initialCapacity = size;
     allocatorConfig.maxCapacity = size;
