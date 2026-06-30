@@ -52,6 +52,9 @@ public:
     D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentBackBufferView() const;
     D3D12_CPU_DESCRIPTOR_HANDLE GetDepthStencilView() const;
 
+    // 获取深度缓冲资源（用于创建 SRV 供 SSAO 等 Pass 采样）
+    ID3D12Resource *GetDepthStencilBuffer() const { return m_depthStencilBuffer.Get(); }
+
     // 获取描述符大小
     UINT GetRtvDescriptorSize() const { return m_rtvDescriptorSize; }
     UINT GetDsvDescriptorSize() const { return m_dsvDescriptorSize; }

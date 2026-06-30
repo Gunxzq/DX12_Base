@@ -1,5 +1,6 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Common/d3dx12.h"
+#include "Resource/Core/DescriptorHeapCollection.h"
 
 using namespace DX12Engine::Renderer;
 using Microsoft::WRL::ComPtr;
@@ -109,6 +110,9 @@ void D3D12DeviceContext::OnResize(uint32_t width, uint32_t height) {
     // 委托给 SwapChainManager 处理调整大小
     m_swapChainManager.Resize(width, height);
 
+    // 深度缓冲已重建，重新创建深度 SRV
+    RebuildDepthSRV();
+
     UpdateViewportAndScissorRect();
 }
 
@@ -133,4 +137,51 @@ void D3D12DeviceContext::FlushCommandQueue(D3D12_COMMAND_LIST_TYPE type) { m_com
 ID3D12CommandQueue *D3D12DeviceContext::GetCommandQueue() const {
     CommandQueue *queue = m_commandManager.GetGraphicsQueue();
     return queue ? queue->Get() : nullptr;
+}
+
+// ========================================================================
+// 深度缓冲 SRV（初始化时显式创建，Resize 时重建；纯访问器 GetDepthSRV 为 const）
+// ========================================================================
+
+void D3D12DeviceContext::InitDepthSRV() {
+    if (m_depthSrvSlot != UINT32_MAX || !md3dDevice || !m_descriptorHeaps) {
+        return;
+    }
+
+    ID3D12Resource *depthBuffer = m_swapChainManager.GetDepthStencilBuffer();
+    if (!depthBuffer) {
+        return;
+    }
+
+    m_depthSrvSlot = m_descriptorHeaps->Allocate(Resource::PartitionType::Texture);
+    if (m_depthSrvSlot == UINT32_MAX) {
+        return;
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
+        m_descriptorHeaps->GetPartitionCpuHandle(Resource::PartitionType::Texture, m_depthSrvSlot);
+    m_depthSRV = m_descriptorHeaps->GetPartitionGpuHandle(Resource::PartitionType::Texture, m_depthSrvSlot);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    if (mDepthStencilFormat == DXGI_FORMAT_D32_FLOAT) {
+        srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    } else {
+        srvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    }
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels = 1;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+
+    md3dDevice->CreateShaderResourceView(depthBuffer, &srvDesc, cpuHandle);
+}
+
+void D3D12DeviceContext::RebuildDepthSRV() {
+    if (m_depthSrvSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(Resource::PartitionType::Texture, m_depthSrvSlot, UINT64_MAX);
+    }
+    m_depthSrvSlot = UINT32_MAX;
+    m_depthSRV = {};
+
+    InitDepthSRV();
 }

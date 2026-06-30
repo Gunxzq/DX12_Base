@@ -12,6 +12,10 @@
 // 前向声明
 class GameTimer;
 
+namespace DX12Engine::Resource {
+class DescriptorHeapCollection;
+} // namespace DX12Engine::Resource
+
 namespace DX12Engine {
 namespace Renderer {
 
@@ -37,9 +41,9 @@ public:
         uint32_t clientHeight = 720; // 客户端高度
         DXGI_FORMAT backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         DXGI_FORMAT depthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        bool enableDebugLayer = false;                              // 是否启用调试层
-        bool enableGPUBasedValidation = false;                      // 是否启用 GBV 调试层（会显著影响性能）
-        bool enable4xMsaa = false;                                  // 是否启用 4x MSAA
+        bool enableDebugLayer = false;         // 是否启用调试层
+        bool enableGPUBasedValidation = false; // 是否启用 GBV 调试层（会显著影响性能）
+        bool enable4xMsaa = false;             // 是否启用 4x MSAA
         D3D_FEATURE_LEVEL minFeatureLevel = D3D_FEATURE_LEVEL_11_0; // 最低功能级别
         int adapterIndex = -1;             // 适配器索引，-1 表示自动选择最佳适配器
         bool enableVsync = true;           // 是否启用垂直同步
@@ -115,6 +119,12 @@ public:
     }
     D3D12_CPU_DESCRIPTOR_HANDLE GetDepthStencilView() const { return m_swapChainManager.GetDepthStencilView(); }
 
+    // 深度缓冲采样 SRV（供后处理 Pass 使用）
+    void InitDepthSRV(); // 初始化时显式调用
+    D3D12_GPU_DESCRIPTOR_HANDLE GetDepthSRV() const { return m_depthSRV; }
+    void RebuildDepthSRV(); // Resize 时重建（释放旧槽位 + 创建新 SRV）
+    void SetDescriptorHeapCollection(Resource::DescriptorHeapCollection *heaps) { m_descriptorHeaps = heaps; }
+
     UINT GetRtvDescriptorSize() const { return m_swapChainManager.GetRtvDescriptorSize(); }
     UINT GetDsvDescriptorSize() const { return m_swapChainManager.GetDsvDescriptorSize(); }
     UINT GetCbvSrvUavDescriptorSize() const { return mCbvSrvUavDescriptorSize; }
@@ -170,6 +180,11 @@ private:
 
     // ── 命令管理器 ──
     CommandManager m_commandManager;
+
+    // ── 深度缓冲 SRV（惰性创建，供 SSAO 使用）──
+    uint32_t m_depthSrvSlot = UINT32_MAX;
+    D3D12_GPU_DESCRIPTOR_HANDLE m_depthSRV = {};
+    Resource::DescriptorHeapCollection *m_descriptorHeaps = nullptr;
 };
 
 } // namespace Renderer

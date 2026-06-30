@@ -104,10 +104,16 @@ void SwapChainManager::CreateRenderTargetViews(ID3D12Device *device) {
     rtvHeapDesc.NodeMask = 0;
     ThrowIfFailed(device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
 
-    // 为每个缓冲区创建 RTV
+    // 为每个缓冲区创建 RTV（显式指定 TEXTURE2D 单 slice，避免 flip-model 下被默认解释为 TEXTURE2DARRAY）
+    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+    rtvDesc.Format = m_params.format;
+    rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    rtvDesc.Texture2D.MipSlice = 0;
+    rtvDesc.Texture2D.PlaneSlice = 0;
+
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHeapHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
     for (UINT i = 0; i < m_backBuffers.size(); i++) {
-        device->CreateRenderTargetView(m_backBuffers[i].Get(), nullptr, rtvHeapHandle);
+        device->CreateRenderTargetView(m_backBuffers[i].Get(), &rtvDesc, rtvHeapHandle);
         rtvHeapHandle.Offset(1, m_rtvDescriptorSize);
     }
 }
@@ -129,7 +135,7 @@ void SwapChainManager::CreateDepthStencilView(ID3D12Device *device) {
     depthStencilDesc.Height = m_params.height;
     depthStencilDesc.DepthOrArraySize = 1;
     depthStencilDesc.MipLevels = 1;
-    depthStencilDesc.Format = DXGI_FORMAT_R24G8_TYPELESS; // Typeless for both SRV and DSV
+    depthStencilDesc.Format = m_params.depthStencilFormat;
     depthStencilDesc.SampleDesc.Count = m_enable4xMsaa ? 4 : 1;
     depthStencilDesc.SampleDesc.Quality = m_enable4xMsaa ? (m_4xMsaaQuality - 1) : 0;
     depthStencilDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;

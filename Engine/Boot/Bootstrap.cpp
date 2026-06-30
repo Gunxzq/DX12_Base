@@ -288,6 +288,9 @@ void Bootstrap::InitializeModules() {
                                        81920);
         EngineLogger::GetInstance()->Info("[Bootstrap] Buffer partition created: base=16384, size=81920");
 
+        // 初始化主深度缓冲 SRV（供后处理 Pass 只读采样）
+        m_deviceContext->InitDepthSRV();
+
         // 初始化深度模板资源池（单例）
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing DepthStencilPool...");
         DepthStencilPool::GetInstance().Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
