@@ -131,8 +131,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
     if (!(desc.flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)) {
         srvSlot = m_descriptorHeaps->Allocate(PartitionType::Buffer);
         if (srvSlot != UINT32_MAX) {
-            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle =
-                m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot);
+            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot);
 
             DXGI_FORMAT srvFormat = DXGI_FORMAT_UNKNOWN;
             switch (desc.format) {
@@ -163,6 +162,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
     entry.resource = resource;
     entry.desc = desc;
     entry.dsvSlot = dsvSlot;
+    entry.srvSlot = srvSlot;
     entry.lastUsedFrame = 0;
     entry.generation = m_nextGeneration++;
     entry.inUse = false;

@@ -134,8 +134,7 @@ uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc, const D3
         !(desc.flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)) {
         srvSlot = m_descriptorHeaps->Allocate(PartitionType::Buffer);
         if (srvSlot != UINT32_MAX) {
-            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle =
-                m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot);
+            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot);
             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
             srvDesc.Format = desc.format;
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
