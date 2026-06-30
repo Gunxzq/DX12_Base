@@ -31,9 +31,9 @@ void CameraManager::Initialize(uint32_t initialWidth, uint32_t initialHeight) {
     m_mainCamera.Type = ProjectionType::Perspective;
     m_mainCamera.FOV = XMConvertToRadians(60.0f);
     m_mainCamera.AspectRatio = static_cast<float>(initialWidth) / static_cast<float>(initialHeight);
-    m_mainCamera.NearPlane = 0.1f;
-    m_mainCamera.FarPlane = 1000.0f;
-    m_mainCamera.Position = XMFLOAT3(0.0f, 0.0f, -5.0f);
+    m_mainCamera.NearPlane = 0.5f;
+    m_mainCamera.FarPlane = 100.0f;
+    m_mainCamera.Position = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
     // 初始计算一次矩阵
     CalculateMatrices(m_mainCamera);                               // 计算当前帧矩阵

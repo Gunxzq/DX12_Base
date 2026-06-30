@@ -26,15 +26,15 @@ struct Camera {
     float OrthoSize = 10.0f; // 正交视图的高度一半
 
     // 通用裁剪面
-    float NearPlane = 0.1f;
-    float FarPlane = 1000.0f;
+    float NearPlane = 0.5f;
+    float FarPlane = 100.0f;
 
-    XMFLOAT3 Position = {0.0f, 0.0f, -5.0f};
+    XMFLOAT3 Position = {0.0f, 0.0f, 0.0f};
     XMFLOAT3 Rotation = {0.0f, 0.0f, 0.0f}; // Pitch, Yaw, Roll (弧度)
 
     // 相机运动预测（用于剔除延迟补偿）
     XMFLOAT3 Velocity = {0.0f, 0.0f, 0.0f};      // 当前帧速度（米/秒）
-    XMFLOAT3 PrevPosition = {0.0f, 0.0f, -5.0f}; // 上一帧位置
+    XMFLOAT3 PrevPosition = {0.0f, 0.0f, 0.0f}; // 上一帧位置
 
     // 相机基向量（龙书风格，手动维护，避免欧拉角万向节死锁）
     XMFLOAT3 Forward = {0.0f, 0.0f, 1.0f}; // Look direction

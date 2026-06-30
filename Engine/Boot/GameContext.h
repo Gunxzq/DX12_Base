@@ -15,6 +15,7 @@
 namespace DX12Engine::Renderer {
 class D3D12DeviceContext;
 class CameraManager;
+class AmbientOcclusionManager;
 template <D3D12_COMMAND_LIST_TYPE Type> class CommandAllocatorPool;
 template <D3D12_COMMAND_LIST_TYPE Type> class CommandListPool;
 class CommandList;
@@ -120,6 +121,9 @@ public:
 
     // 反射探针管理器
     Renderer::ReflectionProbeManager *ReflectionProbeMgr = nullptr;
+
+    // 环境光遮蔽管理器（编辑器模式）
+    Renderer::AmbientOcclusionManager *AmbientOcclusionMgr = nullptr;
 
     // ── 便捷访问方法 ──
     bool IsValid() const;

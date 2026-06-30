@@ -275,6 +275,9 @@ void Bootstrap::InitializeModules() {
         m_descriptorHeaps.Initialize(m_deviceContext->GetDevice(), heapConfigs);
         EngineLogger::GetInstance()->Info("[Bootstrap] DescriptorHeapCollection initialized.");
 
+        // 将描述符堆集合挂到 D3D12DeviceContext（供深度 SRV 等惰性创建使用）
+        m_deviceContext->SetDescriptorHeapCollection(&m_descriptorHeaps);
+
         // 创建 Texture 分区（纹理 SRV，gTextureMaps[] 无界表使用）
         m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Texture, 0,
                                        16384);
@@ -395,6 +398,10 @@ GameContext *Bootstrap::CreateContext() {
     // 初始化反射探针管理器
     m_reflectionProbeManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
     m_context->ReflectionProbeMgr = &m_reflectionProbeManager;
+
+    // 初始化环境光遮蔽管理器（编辑器模块）
+    m_ambientOcclusionManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps, width, height);
+    m_context->AmbientOcclusionMgr = &m_ambientOcclusionManager;
 
     m_context->DescriptorHeaps = &m_descriptorHeaps;
     m_context->DepthStencilPool = &DepthStencilPool::GetInstance();
