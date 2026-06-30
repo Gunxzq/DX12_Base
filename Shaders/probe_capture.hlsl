@@ -137,7 +137,11 @@ float4 PS(GSOutput pin) : SV_Target
 
     MaterialData matData = gMaterialData[matIndex];
 
-    float4 texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord);
+    float4 texColor = 1.0f;
+    [flatten] if (matData.BaseColorTexIndex != 0xFFFFFFFF)
+    {
+        texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord);
+    }
     float3 albedo = matData.BaseColor.rgb * texColor.rgb;
     float metallic = matData.Metallic;
     float roughness = matData.Roughness;

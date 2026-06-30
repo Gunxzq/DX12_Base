@@ -14,6 +14,13 @@
 TextureCubeArray gReflectionCubemapArray : register(t15);
 
 // =========================================================================
+// SSAO Map — 屏幕空间环境光遮蔽（由 SsaoRenderer Compute+Blur 生成）
+// 若未绑定则为全白（ssao=1.0）
+// =========================================================================
+Texture2D gSsaoMap : register(t16);
+SamplerState gsamPointClamp : register(s0);
+
+// =========================================================================
 // 实例数据（统一实例化模式，单物体 instanceCount=1）
 // =========================================================================
 struct InstanceData
@@ -43,6 +50,7 @@ struct VertexOut
     float3 WorldNormal : NORMAL;
     float3 WorldTangent : TANGENT;
     float2 TexCoord : TEXCOORD;
+    float4 SsaoPosH : POSITION1; // 投影后的 SSAO 纹理坐标
     nointerpolation uint InstanceIndex : INSTANCE_INDEX;
 };
 
@@ -61,6 +69,10 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
     vout.WorldNormal = normalize(mul(vin.NormalL, (float3x3)worldInvTrans));
     vout.WorldTangent = normalize(mul(vin.TangentL, (float3x3)world));
     vout.TexCoord = clamp(vin.TexCoord, 0.0f, 0.999f);
+
+    // 计算 SSAO 投影纹理坐标（mul(posW, gViewProj) + NDC→UV 变换由 PS 处理）
+    vout.SsaoPosH = mul(float4(vout.WorldPos, 1.0f), gViewProj);
+
     return vout;
 }
 
@@ -99,7 +111,11 @@ float4 PS(VertexOut pin) : SV_Target
 
     MaterialData matData = gMaterialData[matIndex];
 
-    float4 texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord);
+    float4 texColor = 1.0f;
+    [flatten] if (matData.BaseColorTexIndex != 0xFFFFFFFF)
+    {
+        texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord);
+    }
     float3 albedo = matData.BaseColor.rgb * texColor.rgb;
     float metallic = matData.Metallic;
     float roughness = matData.Roughness;
@@ -143,8 +159,11 @@ float4 PS(VertexOut pin) : SV_Target
     mat.Alpha = matData.Alpha;
     mat.AlphaCutoff = matData.AlphaCutoff;
 
-    // 环境光
-    float3 ambient = gAmbientLight.xyz * gAmbientLight.w * albedo * ao;
+    // 环境光（采样 SSAO Map — 屏幕空间投影 UV）
+    float2 ssaoUV = pin.SsaoPosH.xy / pin.SsaoPosH.w;
+    ssaoUV = ssaoUV * float2(0.5f, -0.5f) + 0.5f;
+    float ssao = gSsaoMap.SampleLevel(gsamPointClamp, ssaoUV, 0.0f).r;
+    float3 ambient = gAmbientLight.xyz * gAmbientLight.w * albedo * ao * ssao;
 
     // 直接光照（带阴影）
     float3 directLight = 0;

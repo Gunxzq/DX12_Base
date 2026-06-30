@@ -49,7 +49,7 @@ public:
                     D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
                     D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV,
                     D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV, D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart,
-                    D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {});
+                    D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}, D3D12_GPU_DESCRIPTOR_HANDLE aoMapSRV = {});
 
     // 统一实例化渲染（单物体 instanceCount=1）
     void DrawInstanced(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,

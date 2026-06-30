@@ -65,7 +65,8 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
                                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
                                 D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV,
                                 D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV,
-                                D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) {
+                                D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV,
+                                D3D12_GPU_DESCRIPTOR_HANDLE aoMapSRV) {
     if (!m_pso || !m_rootSignature)
         return;
 
@@ -102,6 +103,11 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
     // 绑定环境贴图 SRV (slot 8, t10)
     if (envMapSRV.ptr != 0) {
         cmdList.Get()->SetGraphicsRootDescriptorTable(8, envMapSRV);
+    }
+
+    // 绑定 SSAO Map SRV (slot 9, t16)
+    if (aoMapSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(9, aoMapSRV);
     }
 }
 
@@ -211,8 +217,9 @@ void OpaqueRenderer::CreateRootSignature() {
     //   slot 6: t12,space1          StructuredBuffer<InstanceData> (SRV)
     //   slot 7: t15                 TextureCubeArray 反射探针 Cubemap Array (SRV 描述符表)
     //   slot 8: t10                 TextureCube 环境贴图 (SRV 描述符表)
+    //   slot 9: t16                 Texture2D SSAO Map (SRV 描述符表)
     // ========================================================================
-    CD3DX12_ROOT_PARAMETER slotRootParameter[9];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[10];
 
     CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
@@ -232,6 +239,9 @@ void OpaqueRenderer::CreateRootSignature() {
     CD3DX12_DESCRIPTOR_RANGE envMapTable;
     envMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
+    CD3DX12_DESCRIPTOR_RANGE ssaoMapTable;
+    ssaoMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 16, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+
     slotRootParameter[0].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);                   // b1: cbPass
     slotRootParameter[1].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL);                   // b2: cbLights
     slotRootParameter[2].InitAsDescriptorTable(1, &materialBufferRange, D3D12_SHADER_VISIBILITY_PIXEL); // t0,space1
@@ -242,6 +252,7 @@ void OpaqueRenderer::CreateRootSignature() {
         12, 1, D3D12_SHADER_VISIBILITY_ALL); // t12,space1: InstanceData StructuredBuffer
     slotRootParameter[7].InitAsDescriptorTable(1, &cubemapTable, D3D12_SHADER_VISIBILITY_PIXEL); // t15: Cubemap Array
     slotRootParameter[8].InitAsDescriptorTable(1, &envMapTable, D3D12_SHADER_VISIBILITY_PIXEL);  // t10: Env Map
+    slotRootParameter[9].InitAsDescriptorTable(1, &ssaoMapTable, D3D12_SHADER_VISIBILITY_PIXEL); // t16: SSAO Map
 
     // ========================================================================
     // 静态采样器 (对齐 Common_PBR.hlsl: s0~s5 + s10 + s11)
@@ -271,7 +282,7 @@ void OpaqueRenderer::CreateRootSignature() {
                            D3D12_COMPARISON_FUNC_LESS_EQUAL, D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK, 0.0f, 0.0f,
                            D3D12_SHADER_VISIBILITY_PIXEL);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(9, slotRootParameter, 8, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(10, slotRootParameter, 8, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
