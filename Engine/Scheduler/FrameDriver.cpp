@@ -197,6 +197,8 @@ bool FrameDriver::Tick() {
     // 注意：此时 GPU 开始执行第 N-1 帧的渲染任务
     ExecuteRenderPhase(RenderPhase::PrePass, 0);
 
+    ExecuteRenderPhase(RenderPhase::DynamicAOcclusion, 0); // 动态屏幕空间环境光遮蔽（PrePass 深度就绪后执行）
+
     ExecuteRenderPhase(RenderPhase::Opaque, 0);    // 不透明物体 + 地形（资源状态一致，合并执行）
     ExecuteRenderPhase(RenderPhase::Billboard, 0); // 复用 Opaque 深度，不写深度
     ExecuteRenderPhase(RenderPhase::Transparent, 0);
