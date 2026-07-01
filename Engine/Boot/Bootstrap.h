@@ -14,6 +14,7 @@
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Manager/MaterialManager.h"
+#include "Resource/Manager/SkeletonManager.h"
 #include "Resource/Texture/TextureManager.h"
 #include <filesystem>
 
@@ -85,6 +86,7 @@ private:
     Resource::GeometryResourceManager m_geometryResourceManager;
     Resource::MaterialManager m_materialManager;
     Resource::TextureManager m_textureManager;
+    Resource::SkeletonManager m_skeletonManager;
     Resource::DescriptorHeapCollection m_descriptorHeaps;
 
     Renderer::CullingSystem m_cullingSystem;

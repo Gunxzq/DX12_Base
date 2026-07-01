@@ -10,6 +10,7 @@
 #include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Resource/Texture/TextureManager.h"
+#include "Resource/Manager/SkeletonManager.h"
 
 // 前向声明 Renderer 命名空间中的类型
 namespace DX12Engine::Renderer {
@@ -102,6 +103,7 @@ public:
     Resource::MaterialManager *MaterialMgr = nullptr;
     Resource::TextureManager *TextureMgr = nullptr;
     Resource::GeometryResourceManager *GeometryResourceManager = nullptr;
+    Resource::SkeletonManager *SkeletonMgr = nullptr;
     Resource::DescriptorHeapCollection *DescriptorHeaps = nullptr;
     Resource::DepthStencilPool *DepthStencilPool = nullptr;
     Resource::RenderTargetPool *RenderTargetPool = nullptr;

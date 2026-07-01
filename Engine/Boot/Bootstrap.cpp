@@ -167,6 +167,7 @@ bool Bootstrap::InitializeD3DDeviceContext() {
     params.hwnd = m_window->GetHandle();
     params.clientWidth = windowConfig.width;
     params.clientHeight = windowConfig.height;
+    // params.adapterIndex = 1; // 强制使用 NVIDIA GeForce MX330
 
     // 直接使用配置中已转换的枚举值
     params.backBufferFormat = rendererConfig.formats.BackBufferFormatEnum;
@@ -327,6 +328,13 @@ void Bootstrap::InitializeModules() {
         m_geometryResourceManager.Initialize(1024);
         EngineLogger::GetInstance()->Info("[Bootstrap] GeometryResourceManager initialized.");
 
+        // ====================================================================
+        // 初始化骨骼资源管理器
+        // ====================================================================
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing SkeletonManager...");
+        m_skeletonManager.Initialize(128);
+        EngineLogger::GetInstance()->Info("[Bootstrap] SkeletonManager initialized.");
+
         m_lodSystem.SetLODConfig(LODConfig::GetDefault());
         m_lodSystem.SetCameraManager(&DX12Engine::Renderer::CameraManager::GetInstance());
         m_lodSystem.SetGeometryManager(&m_geometryResourceManager);
@@ -415,6 +423,7 @@ GameContext *Bootstrap::CreateContext() {
     m_context->GeometryResourceManager = &m_geometryResourceManager;
     m_context->MaterialMgr = &m_materialManager;
     m_context->TextureMgr = &m_textureManager;
+    m_context->SkeletonMgr = &m_skeletonManager;
     m_context->CullingSystem = &m_cullingSystem;
     m_context->LODSystem = &m_lodSystem;
     m_visibleRaycaster.Initialize(m_registry.get());

@@ -52,15 +52,17 @@ static_assert(sizeof(ObjectConstants) % 16 == 0,
               "ObjectConstants alignment error: size must be multiple of 16 bytes for HLSL cbuffer compatibility");
 
 // ============================================================================
-// 3. Skinning Constants（骨骼动画）
+// 3. Skinning Constants（骨骼变换矩阵）
 // ============================================================================
 
 constexpr uint32_t MAX_BONE_COUNT = 256;
 
 struct SkinningConstants {
-    DirectX::XMFLOAT4X4 World;                          // 物体变换矩阵
-    DirectX::XMFLOAT4X4 BoneTransforms[MAX_BONE_COUNT]; // 骨骼变换矩阵
+    DirectX::XMFLOAT4X4 BoneTransforms[MAX_BONE_COUNT]; // 骨骼变换矩阵（已转置，供 GPU 直接使用）
 };
+
+static_assert(sizeof(SkinningConstants) % 16 == 0,
+              "SkinningConstants alignment error: size must be multiple of 16 bytes for HLSL cbuffer compatibility");
 
 // ============================================================================
 // 4. Material Constants（材质参数）
