@@ -4,13 +4,17 @@
 #include "ECS/Core/Entity.h"
 #include "Math/BoundingVolume.h"
 #include "Renderer/Pipeline/ReflectionProbeRenderer.h"
+#include "Renderer/Pipeline/SkinnedRenderer.h"
 #include "Renderer/RenderItemBuilder/BillboardRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/OpaqueRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/ProbeBuilder.h"
+#include "Renderer/RenderItemBuilder/SkinnedRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/TRenderQueue.h"
 #include "Renderer/RenderItemBuilder/TerrainRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/TransparentRenderItemBuilder.h"
+#include "Resource/AssetLoader/Loader/M3dLoader.h"
 #include "Resource/AssetLoader/Loader/TerrainLoader.h"
+#include "Resource/Manager/SkeletonManager.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/MaterialHandle.h"
 #include "Resource/Struct/ResourceHandle.h"
@@ -66,13 +70,25 @@ public:
 
     void CreateTestCube();
     void CreateTestCylinder();
-    void CreateTestTorus();       // 程序化环形圆环（SSAO 测试用：自带凹陷）
+    void CreateTestTorus(); // 程序化环形圆环（SSAO 测试用：自带凹陷）
     void CreateGroundPlane();
     void CreateSkybox();
     void CreateWater();
 
     // 压力测试：大量动态物体（不附加 StaticComponent）
     void CreateStressTestScene();
+
+    // 注册骨骼动画推进 System
+    void RegisterAnimationAdvancer();
+
+    // 注册蒙皮渲染 System
+    void RegisterSkinnedOpaqueRenderSystem();
+
+    // 验证 M3d 解析器
+    void TestM3dLoader();
+
+    // 加载 soldier 角色（完整管线验证）
+    void LoadSoldierCharacter();
 
     // 公告牌（Billboard）系统
     void LoadBillboardTextures();
@@ -223,4 +239,12 @@ private:
 
     // 后台异步执行器（纯 CPU 线程池，独立于 FrameDriver）
     std::unique_ptr<DX12Engine::Async::BackgroundExecutor> m_backgroundExecutor;
+
+    // Soldier 角色
+    std::vector<DX12Engine::ECS::Entity> m_soldierEntities;
+    DX12Engine::Resource::SkeletonHandle m_soldierSkeletonHandle;
+    float m_soldierAngle = 0.0f;  // 圆周运动角度
+    std::unique_ptr<DX12Engine::Renderer::SkinnedRenderItemBuilder> m_skinnedBuilder;
+    std::unique_ptr<DX12Engine::Renderer::SkinnedRenderer> m_skinnedRenderer;
+    DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::SkinnedRenderItem> m_skinnedQueue;
 };

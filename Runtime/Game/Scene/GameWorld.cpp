@@ -14,6 +14,8 @@
 #include "Renderer/Core/RendererRegistry.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
+#include <algorithm>
+#include <fstream>
 
 #include "Renderer/Pipeline/BillboardRenderer.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
@@ -218,6 +220,13 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
             }
         }
     }
+    // 验证 M3d 解析器
+    TestM3dLoader();
+
+    // 加载 Soldier 角色（完整管线）
+    // 必须先注册士兵材质再创建 GPU 材质 Buffer，否则纹理索引为默认值 0 → 采样到深度缓冲
+    LoadSoldierCharacter();
+
     CreateMaterials();
     CreateSkybox();
     CreateGroundPlane();
@@ -250,8 +259,21 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     // 注册地形常量立即回调（LightManager 模式：Immediate 中分配+上传地形常量）
     RegisterTerrainImmediateCallback();
 
+    // 骨骼管理器已由 Bootstrap 注入 GameContext
+
+    // 初始化蒙皮构建器 & 渲染器
+    m_skinnedBuilder = std::make_unique<SkinnedRenderItemBuilder>(m_context->FrameResourceManager,
+                                                                  m_context->MaterialMgr, m_context->SkeletonMgr);
+
+    m_skinnedRenderer = std::make_unique<SkinnedRenderer>();
+    m_skinnedRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_skinnedRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
+    m_skinnedRenderer->SetMaterialManager(m_context->MaterialMgr);
+    m_skinnedRenderer->Initialize();
+
     // 注册探针场景数据上传回调（SceneDataUpload 阶段：填充 ProbeCaptureInfo + 分配 CB）
-    RegisterProbeSceneDataCallback();
+    // TODO: 窗口缩放 TDR 排查，临时注释探针系统
+    // RegisterProbeSceneDataCallback();
 
     // 注册清除系统（PrePass 阶段，独立于任何实体渲染）
     RegisterClearSystem();
@@ -267,10 +289,17 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
             aoMgr.SetFallbackWhiteSRV(m_context->TextureMgr->GetSRV(m_whiteTextureHandle));
     }
     // 注册反射探针捕获系统
-    RegisterProbeCaptureSystem();
+    // TODO: 窗口缩放 TDR 排查，临时注释探针系统
+    // RegisterProbeCaptureSystem();
 
     // [SSAO开发期间注释] 注册地形渲染系统
     // RegisterTerrainRenderSystem();
+
+    // 注册骨骼动画推进 System
+    RegisterAnimationAdvancer();
+
+    // 注册蒙皮渲染 System（调试期间注释，排除 TDR 干扰）
+    RegisterSkinnedOpaqueRenderSystem();
 
     // 注册构建器
     RegisterBuilderSystems();
@@ -324,6 +353,23 @@ void GameWorld::RegisterBuilderSystems() {
                 m_opaqueBuilder->SetCullingResult(&m_context->cullingResult);
                 m_opaqueBuilder->SetLODResult(&m_context->lodResult);
                 m_opaqueBuilder->BuildTyped(reg, m_opaqueQueue);
+
+                // 6. 蒙皮构建器
+                if (m_skinnedBuilder) {
+                    m_skinnedBuilder->SetCullingResult(&m_context->cullingResult);
+                    m_skinnedBuilder->SetLODResult(&m_context->lodResult);
+                    size_t before = m_skinnedQueue.Size();
+                    m_skinnedBuilder->BuildTyped(reg, m_skinnedQueue);
+                    size_t after = m_skinnedQueue.Size();
+                    if (after > before) {
+                        wchar_t dbg[128];
+                        swprintf_s(dbg, L"[SkinnedBuilder] Produced %zu items (queue now %zu)\n", after - before,
+                                   after);
+                        OutputDebugStringW(dbg);
+                    } else {
+                        OutputDebugStringW(L"[SkinnedBuilder] No items produced\n");
+                    }
+                }
 
                 // 3. 公告牌构建器（需要相机位置做朝向计算）
                 if (m_billboardBuilder) {
@@ -379,6 +425,85 @@ void GameWorld::RegisterWaterConstantsCallback() {
 
         m_waterCBAddress = m_context->FrameResourceManager->AllocateWaterCB(&waterCB, sizeof(WaterConstants));
     });
+}
+
+// ========================================================================
+// RegisterAnimationAdvancer — 每帧推进骨骼动画
+//   遍历所有 SkinnedComponent，推进 timePos → 插值骨骼矩阵 → 上传 GPU RingBuffer
+// ========================================================================
+void GameWorld::RegisterAnimationAdvancer() {
+    SystemRegistry::Register(
+        {.name = "AnimationAdvancer",
+         .func =
+             [this](Registry &registry, const MessageContext &) {
+                 auto *skeletonMgr = m_context->SkeletonMgr;
+                 auto *frameResMgr = m_context->FrameResourceManager;
+                 if (!skeletonMgr || !frameResMgr)
+                     return;
+
+                 float deltaTime = m_context->MainTimer->GetDeltaTime();
+
+                 auto view = registry.view<ECS::SkinnedComponent>();
+                 if (view.empty())
+                     return;
+
+                 std::vector<DirectX::XMFLOAT4X4> boneTransforms;
+
+                 for (auto entity : view) {
+                     auto &skin = view.get<ECS::SkinnedComponent>(entity);
+                     if (!skin.skeletonHandle.IsValid() || skin.currentClip.empty())
+                         continue;
+
+                     uint32_t boneCount = skeletonMgr->GetBoneCount(skin.skeletonHandle);
+                     if (boneCount == 0)
+                         continue;
+
+                     // 推进动画时间
+                     float clipDuration = skeletonMgr->GetClipDuration(skin.skeletonHandle, skin.currentClip);
+                     if (clipDuration > 0.0f) {
+                         skin.timePos += deltaTime;
+                         // 循环：超过片段时长则重置到起点
+                         while (skin.timePos >= clipDuration)
+                             skin.timePos -= clipDuration;
+                     }
+
+                     // 计算最终骨骼变换矩阵
+                     if (boneTransforms.size() < boneCount)
+                         boneTransforms.resize(boneCount);
+
+                     bool ok = skeletonMgr->ComputeFinalTransforms(skin.skeletonHandle, skin.currentClip, skin.timePos,
+                                                                   boneTransforms);
+                     if (!ok) {
+                         // 回退到单位矩阵
+                         for (uint32_t i = 0; i < boneCount; ++i) {
+                             XMStoreFloat4x4(&boneTransforms[i], XMMatrixIdentity());
+                         }
+                     }
+
+                     // 上传到 GPU RingBuffer
+                     uint32_t uploadSize = boneCount * sizeof(DirectX::XMFLOAT4X4);
+                     skin.boneBufferAddress = frameResMgr->AllocateSkinning(boneTransforms.data(), uploadSize);
+                 }
+
+                 // 圆周运动：士兵绕 Y 轴旋转
+                 if (!m_soldierEntities.empty()) {
+                     m_soldierAngle += deltaTime * 0.5f; // 速度
+                     float radius = 8.0f;
+                     float cx = 0.0f, cz = 0.0f;
+                     float x = cx + radius * cosf(m_soldierAngle);
+                     float z = cz + radius * sinf(m_soldierAngle);
+                     for (auto entity : m_soldierEntities) {
+                         auto *xform = registry.TryGetComponent<ECS::TransformComponent>(entity);
+                         if (xform) {
+                             xform->position = XMFLOAT3(x, 30.0f, z);
+                         }
+                     }
+                 }
+             },
+         .phase = TaskPhase::LateUpdate,
+         .threadType = ThreadType::Any,
+         .priority = TaskPriority::Normal,
+         .alwaysRun = true});
 }
 
 void GameWorld::RegisterTerrainImmediateCallback() {
@@ -538,6 +663,7 @@ void GameWorld::CreateGroundPlane() {
     meshComp.textureHandle = m_brickTextureHandle;
     meshComp.receivesShadow = true;
     m_registry->AddComponent<MeshComponent>(m_groundPlaneEntity, std::move(meshComp));
+    m_registry->AddComponent<OpaqueTag>(m_groundPlaneEntity);
 
     // m_registry->AddComponent<StaticComponent>(m_groundPlaneEntity);
 
@@ -661,6 +787,7 @@ void GameWorld::CreateTestCube() {
         meshComp.materialHandle = m_cubeMaterialHandle;
         meshComp.textureHandle = m_testTextureHandle;
         m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
+        m_registry->AddComponent<OpaqueTag>(entity);
 
         // 第二个立方体（放大 2 倍）添加拾取组件
         if (i == 1) {
@@ -691,6 +818,7 @@ void GameWorld::CreateTestCube() {
         meshComp.materialHandle = m_reflectionTestMaterialHandle; // 金属材质
         meshComp.textureHandle = m_whiteTextureHandle;
         m_registry->AddComponent<MeshComponent>(m_reflectionCubeEntity, std::move(meshComp));
+        m_registry->AddComponent<OpaqueTag>(m_reflectionCubeEntity);
 
         // 绑定反射探针索引 0，使该立方体在渲染时采样探针 Cubemap
         m_registry->AddComponent<ReflectionConsumerComponent>(
@@ -788,6 +916,7 @@ void GameWorld::CreateStressTestScene() {
             meshComp.textureHandle = m_testTextureHandle;
             meshComp.receivesShadow = true;
             m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
+            m_registry->AddComponent<OpaqueTag>(entity);
             // m_registry->AddComponent<ECS::StaticComponent>(entity);
 
             m_stressEntities.push_back(entity);
@@ -862,6 +991,7 @@ void GameWorld::CreateTestCylinder() {
     meshComp.textureHandle = m_brickTextureHandle;
     meshComp.receivesShadow = true;
     m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
+    m_registry->AddComponent<OpaqueTag>(entity);
     m_context->Logging->Info("[GameWorld] Test cylinder created with brick material + normal map");
 }
 
@@ -1000,9 +1130,426 @@ void GameWorld::CreateTestTorus() {
     meshComp.textureHandle = m_brickTextureHandle;
     meshComp.receivesShadow = true;
     m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
+    m_registry->AddComponent<OpaqueTag>(entity);
 
     m_context->Logging->Info("[GameWorld] Test torus created: {} vertices, {} triangles (SSAO test)", vertices.size(),
                              indices.size() / 3);
+}
+
+// ========================================================================
+// TestM3dLoader — 验证 M3dLoader 解析器
+// 输出解析结果到控制台和 M3dVerify.txt
+// ========================================================================
+void GameWorld::TestM3dLoader() {
+    if (!m_context)
+        return;
+
+    // 尝试加载 .m3d 测试文件
+    const char *testFiles[] = {
+        "Content/Models/soldier.m3d",
+        nullptr // 结束标记
+    };
+
+    // 输出到工作目录（build/Bin/x64/Debug/M3dVerify.txt）
+    std::ofstream outFile("M3dVerify.txt");
+    if (!outFile) {
+        m_context->Logging->Warn("[M3dTest] Cannot create M3dVerify.txt, writing to debug output only");
+    }
+
+    auto log = [&](const std::string &msg) {
+        m_context->Logging->Info("[M3dTest] {}", msg);
+        if (outFile) {
+            outFile << msg << std::endl;
+        }
+    };
+
+    int loadedCount = 0;
+    for (int i = 0; testFiles[i] != nullptr; ++i) {
+        std::string filepath = testFiles[i];
+        m_context->Logging->Info("[M3dTest] Attempting to load: {}", filepath);
+
+        Resource::M3dMeshData meshData;
+        if (!Resource::M3dLoader::LoadFromFile(filepath, meshData)) {
+            log(filepath + " — FAILED to load (file not found or invalid format)");
+            continue;
+        }
+
+        loadedCount++;
+        log("=== " + filepath + " ===");
+        log("  Vertices:     " + std::to_string(meshData.vertices.size()));
+        log("  Indices:      " + std::to_string(meshData.indices.size()));
+        log("  Triangles:    " + std::to_string(meshData.indices.size() / 3));
+        log("  Subsets:      " + std::to_string(meshData.subsets.size()));
+        log("  Materials:    " + std::to_string(meshData.materials.size()));
+        log("  HasSkeleton:  " + std::string(meshData.HasSkeleton() ? "true" : "false"));
+
+        if (meshData.HasSkeleton()) {
+            log("  Bones:        " + std::to_string(meshData.boneHierarchy.size()));
+            log("  BoneNames:    " + std::to_string(meshData.boneNames.size()));
+            log("  AnimClips:    " + std::to_string(meshData.animations.size()));
+
+            // 输出骨骼层次（前 10 根）
+            log("  --- Bone Hierarchy (first 10) ---");
+            uint32_t bonePrintCount = std::min<uint32_t>(10, (uint32_t)meshData.boneHierarchy.size());
+            for (uint32_t b = 0; b < bonePrintCount; ++b) {
+                std::string name = b < meshData.boneNames.size() ? meshData.boneNames[b] : ("Bone" + std::to_string(b));
+                log("    [" + std::to_string(b) + "] " + name + " → parent " +
+                    std::to_string(meshData.boneHierarchy[b]));
+            }
+
+            // 输出动画片段名
+            if (!meshData.animations.empty()) {
+                log("  --- Animation Clips ---");
+                for (auto &[clipName, clipData] : meshData.animations) {
+                    log("    " + clipName + " (bones: " + std::to_string(clipData.BoneAnimations.size()) + ")");
+                    (void)clipData;
+                }
+            }
+        }
+
+        // 输出子集信息
+        log("  --- Subsets ---");
+        for (uint32_t s = 0; s < (uint32_t)meshData.subsets.size(); ++s) {
+            auto &sub = meshData.subsets[s];
+            log("    Subset " + std::to_string(s) + ": matIdx=" + std::to_string(sub.materialIndex) + " vertices[" +
+                std::to_string(sub.vertexStart) + ".." + std::to_string(sub.vertexStart + sub.vertexCount) + "]" +
+                " faces[" + std::to_string(sub.faceStart) + ".." + std::to_string(sub.faceStart + sub.faceCount) + "]");
+        }
+
+        // 输出材质信息
+        log("  --- Materials ---");
+        for (uint32_t m = 0; m < (uint32_t)meshData.materials.size(); ++m) {
+            auto &mat = meshData.materials[m];
+            log("    Material " + std::to_string(m) + ": diffuse=" + std::to_string(mat.DiffuseAlbedo.x) + "," +
+                std::to_string(mat.DiffuseAlbedo.y) + "," + std::to_string(mat.DiffuseAlbedo.z) + " roughness=" +
+                std::to_string(mat.Roughness) + " alphaClip=" + std::string(mat.AlphaClip ? "true" : "false") +
+                " diffuseMap=" + mat.DiffuseMapName + " normalMap=" + mat.NormalMapName);
+        }
+
+        // 验证第一个顶点数据
+        if (!meshData.vertices.empty()) {
+            auto &v0 = meshData.vertices[0];
+            log("  --- First Vertex ---");
+            log("    Pos:       " + std::to_string(v0.Pos.x) + ", " + std::to_string(v0.Pos.y) + ", " +
+                std::to_string(v0.Pos.z));
+            log("    Normal:    " + std::to_string(v0.Normal.x) + ", " + std::to_string(v0.Normal.y) + ", " +
+                std::to_string(v0.Normal.z));
+            log("    TexC:      " + std::to_string(v0.TexC.x) + ", " + std::to_string(v0.TexC.y));
+            log("    Weights:   " + std::to_string(v0.BoneWeights.x) + ", " + std::to_string(v0.BoneWeights.y) + ", " +
+                std::to_string(v0.BoneWeights.z) + ", " + std::to_string(v0.BoneWeights.w));
+            log("    Indices:   " + std::to_string(v0.BoneIndices[0]) + ", " + std::to_string(v0.BoneIndices[1]) +
+                ", " + std::to_string(v0.BoneIndices[2]) + ", " + std::to_string(v0.BoneIndices[3]));
+
+            // 验证顶点大小
+            log("  sizeof(M3dVertex) = " + std::to_string(sizeof(Resource::M3dVertex)) + " (expect 64)");
+        }
+
+        log("");
+    }
+
+    log("=== Summary: " + std::to_string(loadedCount) + " file(s) loaded ===");
+
+    if (outFile) {
+        outFile.close();
+        m_context->Logging->Info("[M3dTest] Detailed output written to M3dVerify.txt");
+    }
+}
+
+// ========================================================================
+// LoadSoldierCharacter — 完整管线验证
+//   解析 .m3d → 上传纹理/材质 → 上传几何 → 注册骨骼 → 创建 ECS 实体
+// ========================================================================
+void GameWorld::LoadSoldierCharacter() {
+    if (!m_registry || !m_context)
+        return;
+
+    auto device = m_context->DeviceContext->GetDevice();
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto &descriptorHeaps = m_context->DescriptorHeaps;
+    auto *materialMgr = m_context->MaterialMgr;
+    auto *texMgr = m_context->TextureMgr;
+    auto &geoMgr = m_context->GeometryResourceManager;
+    auto *skeletonMgr = m_context->SkeletonMgr; // 从 GameContext 注入
+
+    // ========================================================================
+    // 1. 解析 .m3d
+    // ========================================================================
+    Resource::M3dMeshData meshData;
+    if (!Resource::M3dLoader::LoadFromFile("Content/Models/soldier.m3d", meshData)) {
+        m_context->Logging->Error("[GameWorld] Failed to load soldier.m3d");
+        return;
+    }
+    m_context->Logging->Info("[GameWorld] Soldier loaded: {} vertices, {} subsets", meshData.vertices.size(),
+                             meshData.subsets.size());
+
+    // ========================================================================
+    // 2. 纹理加载（先创建 GPU 资源，再单次批量上传）
+    // ========================================================================
+    struct LoadedTexture {
+        uint32_t srvSlot = UINT32_MAX;
+        Resource::TextureHandle handle;
+    };
+    std::vector<LoadedTexture> loadedDiffuse(meshData.materials.size());
+    std::vector<LoadedTexture> loadedNormal(meshData.materials.size());
+
+    struct PendingTex {
+        Resource::GpuResourceHandle gpuHandle;
+        DDSTextureInfo ddsInfo;
+    };
+    std::vector<PendingTex> allUploads;
+
+    // 第一遍：加载 DDS + 创建 GPU 纹理 + SRV（不执行上传）
+    for (uint32_t m = 0; m < (uint32_t)meshData.materials.size(); ++m) {
+        auto &matRef = meshData.materials[m];
+        auto loadOne = [&](const std::string &filename, LoadedTexture &out) {
+            if (filename.empty())
+                return;
+            std::wstring wpath = L"Content/Textures/" + std::wstring(filename.begin(), filename.end());
+            DDSTextureInfo ddsInfo;
+            if (!AssetLoader::GetInstance().LoadTextureFromFile(wpath, ddsInfo)) {
+                m_context->Logging->Warn("[Soldier] Failed to load: {}", filename);
+                return;
+            }
+            auto gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+            if (!gpuHandle.IsValid())
+                return;
+            uint32_t srvSlot = descriptorHeaps->Allocate(PartitionType::Texture);
+            if (srvSlot == UINT32_MAX) {
+                gpuMgr.Release(gpuHandle, 0);
+                return;
+            }
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+            srvDesc.Format = ddsInfo.desc.Format;
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Texture2D.MipLevels = ddsInfo.desc.MipLevels;
+            srvDesc.Texture2D.MostDetailedMip = 0;
+            auto cpuHandle = descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, srvSlot);
+            device->CreateShaderResourceView(gpuMgr.GetResource(gpuHandle), &srvDesc, cpuHandle);
+            out.srvSlot = srvSlot;
+            out.handle = texMgr->RegisterTexture(gpuHandle, srvSlot);
+            allUploads.push_back({gpuHandle, std::move(ddsInfo)});
+        };
+        loadOne(matRef.DiffuseMapName, loadedDiffuse[m]);
+        loadOne(matRef.NormalMapName, loadedNormal[m]);
+    }
+
+    // 第二遍：单条 command list 批量上传所有纹理
+    if (!allUploads.empty()) {
+        m_context->Logging->Info("[Soldier] Uploading {} textures to GPU...", allUploads.size());
+
+        uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+        auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+        auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+        auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+        auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+
+        struct UploadBuf {
+            GpuResourceHandle handle;
+        };
+        std::vector<UploadBuf> uploadBufs;
+        uploadBufs.reserve(allUploads.size());
+
+        for (auto &pt : allUploads) {
+            UINT64 uploadSize = GetRequiredIntermediateSize(gpuMgr.GetResource(pt.gpuHandle), 0,
+                                                            static_cast<UINT>(pt.ddsInfo.subresources.size()));
+            GpuResourceHandle uploadBuf =
+                gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+            if (!uploadBuf.IsValid()) {
+                m_context->Logging->Error("[Soldier] Failed to create upload buffer");
+                continue;
+            }
+            uploadBufs.push_back({uploadBuf});
+
+            // COMMON → COPY_DEST
+            auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                gpuMgr.GetResource(pt.gpuHandle), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+            cmd.Get()->ResourceBarrier(1, &barrier);
+
+            UpdateSubresources(cmd.Get(), gpuMgr.GetResource(pt.gpuHandle), gpuMgr.GetResource(uploadBuf), 0, 0,
+                               static_cast<UINT>(pt.ddsInfo.subresources.size()), pt.ddsInfo.subresources.data());
+
+            // COPY_DEST → PIXEL_SHADER_RESOURCE
+            auto barrier2 =
+                CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(pt.gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            cmd.Get()->ResourceBarrier(1, &barrier2);
+        }
+
+        cmd.Close();
+        m_context->DeviceContext->GetCommandManager().Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmd);
+        m_context->DeviceContext->GetCommandManager().Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+        uint64_t seq = m_context->GetNextSequence();
+        for (auto &ub : uploadBufs) {
+            gpuMgr.Release(ub.handle, seq);
+        }
+        m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+        m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
+
+        m_context->Logging->Info("[Soldier] Texture upload complete");
+        allUploads.clear();
+    }
+
+    // ========================================================================
+    // 3. 注册材质到 MaterialManager
+    // ========================================================================
+    std::vector<Resource::MaterialHandle> matHandles(meshData.materials.size());
+    for (uint32_t m = 0; m < (uint32_t)meshData.materials.size(); ++m) {
+        auto &matRef = meshData.materials[m];
+
+        Resource::MaterialData matData;
+        matData.materialId = TYPE_HASH(("soldier_" + std::to_string(m)).c_str());
+        matData.name = "soldier_mat_" + std::to_string(m);
+        matData.baseColor = matRef.DiffuseAlbedo;
+        matData.roughness = matRef.Roughness;
+        matData.alpha = matRef.AlphaClip ? 0.0f : 1.0f;
+        matData.baseColorTextureId = loadedDiffuse[m].srvSlot;
+        matData.normalTextureId = loadedNormal[m].srvSlot;
+        matData.rendererTypeHash = TYPE_HASH("OpaquePBR");
+
+        matHandles[m] = materialMgr->RegisterMaterial(matData);
+    }
+
+    // ========================================================================
+    // 4. 上传完整几何体（单一 VB/IB，子集通过偏移引用）
+    // ========================================================================
+    size_t fullVbSize = meshData.vertices.size() * sizeof(Resource::M3dVertex);
+    size_t fullIbSize = meshData.indices.size() * sizeof(uint32_t);
+
+    auto fullVbHandle =
+        gpuMgr.CreateBuffer(device, fullVbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    if (auto *res = gpuMgr.GetResource(fullVbHandle)) {
+        void *mapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        res->Map(0, &readRange, &mapped);
+        memcpy(mapped, meshData.vertices.data(), fullVbSize);
+        res->Unmap(0, nullptr);
+    }
+
+    auto fullIbHandle =
+        gpuMgr.CreateBuffer(device, fullIbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    if (auto *res = gpuMgr.GetResource(fullIbHandle)) {
+        void *mapped = nullptr;
+        CD3DX12_RANGE readRange(0, 0);
+        res->Map(0, &readRange, &mapped);
+        memcpy(mapped, meshData.indices.data(), fullIbSize);
+        res->Unmap(0, nullptr);
+    }
+
+    Resource::TriangleMesh fullMesh;
+    fullMesh.vertexBufferHandle = fullVbHandle;
+    fullMesh.indexBufferHandle = fullIbHandle;
+    fullMesh.vertexCount = static_cast<uint32_t>(meshData.vertices.size());
+    fullMesh.indexCount = static_cast<uint32_t>(meshData.indices.size());
+    fullMesh.vertexStride = sizeof(Resource::M3dVertex);
+    fullMesh.indexFormat = DXGI_FORMAT_R32_UINT;
+    fullMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    fullMesh.isGpuReady = true;
+
+    Resource::GeometryHandle fullGeoHandle = geoMgr->RegisterGeometry<Resource::TriangleMesh>(fullMesh);
+    m_context->Logging->Info("[Soldier] Full mesh: {} verts {} tris, geoHandle(idx={}, gen={})",
+                             meshData.vertices.size(), meshData.indices.size() / 3, fullGeoHandle.index,
+                             fullGeoHandle.generation);
+
+    // 计算整体包围盒
+    Math::BoundingAABB fullBounds;
+    fullBounds.min = XMFLOAT3(FLT_MAX, FLT_MAX, FLT_MAX);
+    fullBounds.max = XMFLOAT3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+    for (auto &v : meshData.vertices) {
+        fullBounds.min.x = std::min(fullBounds.min.x, v.Pos.x);
+        fullBounds.min.y = std::min(fullBounds.min.y, v.Pos.y);
+        fullBounds.min.z = std::min(fullBounds.min.z, v.Pos.z);
+        fullBounds.max.x = std::max(fullBounds.max.x, v.Pos.x);
+        fullBounds.max.y = std::max(fullBounds.max.y, v.Pos.y);
+        fullBounds.max.z = std::max(fullBounds.max.z, v.Pos.z);
+    }
+
+    // ========================================================================
+    // 5. 注册骨骼到 SkeletonManager
+    // ========================================================================
+    m_soldierSkeletonHandle = Resource::SkeletonHandle::Invalid();
+    OutputDebugStringW(L"[Skeleton] LoadSoldierCharacter: checking HasSkeleton && skeletonMgr\n");
+    if (meshData.HasSkeleton() && skeletonMgr) {
+        OutputDebugStringW(L"[Skeleton] Registering skeleton...\n");
+        Resource::SkeletonData skelData;
+        skelData.BoneHierarchy = std::move(meshData.boneHierarchy);
+        skelData.BoneOffsets = std::move(meshData.boneOffsets);
+        skelData.BoneNames = std::move(meshData.boneNames);
+        skelData.Animations = std::move(meshData.animations);
+        m_soldierSkeletonHandle = skeletonMgr->RegisterSkeleton(skelData);
+        wchar_t dbg[128];
+        swprintf_s(dbg, L"[Skeleton] RegisterSkeleton returned: index=%d gen=%d isValid=%d\n",
+                   m_soldierSkeletonHandle.index, m_soldierSkeletonHandle.generation,
+                   m_soldierSkeletonHandle.IsValid() ? 1 : 0);
+        OutputDebugStringW(dbg);
+        m_context->Logging->Info("[GameWorld] Skeleton registered: {} bones", skelData.BoneCount());
+    } else {
+        OutputDebugStringW(L"[Skeleton] SKIPPED: HasSkeleton=");
+        OutputDebugStringW(meshData.HasSkeleton() ? L"true" : L"false");
+        OutputDebugStringW(L" skeletonMgr=");
+        OutputDebugStringW(skeletonMgr ? L"nonnull" : L"null");
+        OutputDebugStringW(L"\n");
+    }
+
+    // ========================================================================
+    // 6. 创建 ECS 实体（共用完整网格，子集通过偏移绘制）
+    // ========================================================================
+    m_soldierEntities.clear();
+    auto *lodSystem = m_context->LODSystem;
+
+    // 注册单条 LODMesh（指向完整网格）
+    Resource::LODMesh fullLodMesh;
+    fullLodMesh.lodChain = {fullGeoHandle};
+    Resource::LODMeshHandle fullLodHandle = lodSystem->RegisterLODMesh(fullLodMesh);
+
+    for (uint32_t s = 0; s < (uint32_t)meshData.subsets.size(); ++s) {
+        auto &sub = meshData.subsets[s];
+
+        auto entity = m_registry->CreateEntity();
+
+        // Transform
+        m_registry->AddComponent<TransformComponent>(entity, XMFLOAT3(0.0f, 30.0f, 0.0f), XMFLOAT3(0.0f, 0.0f, 0.0f),
+                                                     XMFLOAT3(0.05f, 0.05f, 0.05f));
+
+        // MeshComponent（共用完整网格，通过偏移指定子集范围）
+        ECS::MeshComponent meshComp;
+        meshComp.lodMeshHandle = fullLodHandle;
+        meshComp.localBounds = fullBounds;
+        meshComp.materialHandle = matHandles[s];
+        meshComp.textureHandle = loadedDiffuse[s].handle;
+        meshComp.receivesShadow = true;
+        meshComp.indexCount = sub.faceCount * 3;
+        meshComp.startIndex = sub.faceStart * 3;
+        meshComp.startVertex = 0; // .m3d 索引是全局的（0..13747），不需偏移
+        m_registry->AddComponent<ECS::MeshComponent>(entity, std::move(meshComp));
+
+        // SkinnedComponent
+        if (m_soldierSkeletonHandle.IsValid()) {
+            OutputDebugStringW(L"[Soldier] No skeleton: ");
+            OutputDebugStringW(!meshData.HasSkeleton() ? L"HasSkeleton=false"
+                               : !skeletonMgr          ? L"skeletonMgr=null"
+                                                       : L"RegisterSkeleton returned Invalid");
+            OutputDebugStringW(L"\n");
+            ECS::SkinnedComponent skinnedComp;
+            skinnedComp.skeletonHandle = m_soldierSkeletonHandle;
+            skinnedComp.currentClip = "Take1";
+            skinnedComp.timePos = 0.0f;
+            m_registry->AddComponent<ECS::SkinnedComponent>(entity, std::move(skinnedComp));
+            m_registry->AddComponent<ECS::SkinnedTag>(entity);
+            // m_registry->AddComponent<ECS::OpaqueTag>(entity);
+            if (!m_registry->HasComponent<ECS::SkinnedTag>(entity)) {
+                OutputDebugStringW(L"[Soldier] ERROR: SkinnedTag NOT added after AddComponent!\n");
+            }
+        } else {
+            OutputDebugStringW(L"[Soldier] No skeleton, SkinnedComponent NOT added\n");
+        }
+
+        m_soldierEntities.push_back(entity);
+    }
+
+    m_context->Logging->Info("[GameWorld] Soldier character created: {} entities ({} subsets, single mesh)",
+                             m_soldierEntities.size(), meshData.subsets.size());
 }
 
 void GameWorld::LoadTestTexture() {
@@ -1840,7 +2387,8 @@ void GameWorld::RegisterCubeRenderSystem() {
                  for (const auto &item : m_opaqueQueue) {
                      if (!item.IsValid())
                          continue;
-                     m_renderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer, item.instanceCount);
+                     m_renderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer, item.instanceCount,
+                                               item.startIndex, item.startVertex, item.indexCount);
                  }
 
                  m_renderer->EndFrame();
@@ -1860,6 +2408,93 @@ void GameWorld::RegisterCubeRenderSystem() {
 
                  uint64_t sequence = m_context->GetNextSequence();
                  m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Render,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::Opaque,
+         .alwaysRun = true});
+}
+
+// ========================================================================
+// RegisterSkinnedOpaqueRenderSystem — 独立蒙皮渲染 System（Opaque 阶段）
+// ========================================================================
+void GameWorld::RegisterSkinnedOpaqueRenderSystem() {
+    SystemRegistry::Register(
+        {.name = "SkinnedOpaqueRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 if (!m_skinnedRenderer || m_skinnedQueue.Empty()) {
+                     return;
+                 }
+
+                 // 获取命令列表
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+                 auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+
+                 auto backBuffer = m_context->GetBackBuffer();
+
+                 // 屏障：Present -> RenderTarget
+                 D3D12_RESOURCE_BARRIER beginBarrier = {};
+                 beginBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 beginBarrier.Transition.pResource = backBuffer;
+                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 beginBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
+
+                 // 设置视口和渲染目标
+                 const auto &viewport = m_context->DeviceContext->GetViewport();
+                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
+                 cmdList.Get()->RSSetViewports(1, &viewport);
+                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+
+                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
+                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
+                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+                 // 设置描述符堆
+                 ID3D12DescriptorHeap *heaps[] = {
+                     m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
+                 cmdList.Get()->SetDescriptorHeaps(1, heaps);
+
+                 // 获取资源
+                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
+                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
+                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
+                 D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
+                     m_context->DescriptorHeaps->GetPartitionGpuHandle(PartitionType::Texture, 0);
+
+                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};
+                 if (m_skyboxTextureHandle.IsValid()) {
+                     envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
+                 }
+
+                 // 绘制蒙皮物体
+                 OutputDebugStringW(L"[SkinnedRenderSystem] Drawing skinned items\n");
+                 m_skinnedRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, textureHeapStart,
+                                               envMapSRV);
+                 m_skinnedRenderer->DrawOpaque(cmdList, m_skinnedQueue);
+                 m_skinnedRenderer->EndFrame();
+
+                 // 屏障：RenderTarget -> Present
+                 D3D12_RESOURCE_BARRIER endBarrier = {};
+                 endBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 endBarrier.Transition.pResource = backBuffer;
+                 endBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 endBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+                 endBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmdList.Get()->ResourceBarrier(1, &endBarrier);
+
+                 // 提交
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdH);
+
+                 uint64_t seq = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Render,

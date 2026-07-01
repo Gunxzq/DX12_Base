@@ -55,10 +55,10 @@ bool Game::Initialize() {
 
     // 4. 初始化相机
     // 场景物体在 y=30 平面，x∈[-100,100], z∈[-100,100]
-    // 相机放在场景前方偏高位置，看向场景中心
+    // 相机放在场景前方，平视平面以看到 soldier 角色
     if (m_context->CameraMgr) {
         auto &mainCamera = m_context->CameraMgr->GetMainCamera();
-        mainCamera.Position = DirectX::XMFLOAT3(0.0f, 50.0f, -110.0f);
+        mainCamera.Position = DirectX::XMFLOAT3(0.0f, 25.0f, -30.0f);
         mainCamera.Rotation = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f);
         m_context->CameraMgr->UpdateMainCamera();
     }
@@ -75,6 +75,8 @@ bool Game::Initialize() {
         aoMgr.Initialize(m_context->DeviceContext->GetDevice(), m_context->DescriptorHeaps,
                          static_cast<uint32_t>(vp.Width), static_cast<uint32_t>(vp.Height));
         m_context->Logging->Info("[Game] AmbientOcclusionManager initialized");
+        // SSAO 已添加 OnResize 支持，窗口缩放不再导致 TDR
+        aoMgr.SetEnabled(true);
     }
 
     // // 为主方向光预创建阴影贴图（2048x2048）
@@ -255,6 +257,11 @@ void Game::RegisterEngineSystems() {
                                       }
                                       if (m_opaqueRenderer) {
                                           m_opaqueRenderer->OnResize(width, height);
+                                      }
+                                      // SSAO RT 尺寸跟随窗口缩放
+                                      auto &aoMgr = DX12Engine::Renderer::AmbientOcclusionManager::GetInstance();
+                                      if (aoMgr.IsInitialized()) {
+                                          aoMgr.OnResize(width, height);
                                       }
                                   },
                               .phase = TaskPhase::EarlyUpdate,
