@@ -67,7 +67,7 @@ public:
      * @param args 构造函数参数
      * @return 组件引用
      */
-    template <typename T, typename... Args> T &AddComponent(Entity e, Args &&...args) {
+    template <typename T, typename... Args> decltype(auto) AddComponent(Entity e, Args &&...args) {
         ValidateEntity(e);
         return m_registry.emplace<T>(e, std::forward<Args>(args)...);
     }

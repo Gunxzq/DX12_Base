@@ -7,6 +7,7 @@
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/LODMeshHandle.h"
 #include "Resource/Struct/MaterialHandle.h"
+#include "Resource/Struct/SkeletonHandle.h"
 #include "Resource/Struct/TextureHandle.h"
 
 namespace DX12Engine {
@@ -44,6 +45,11 @@ struct MeshComponent {
     Resource::TextureHandle textureHandle;
 
     bool receivesShadow = true;
+
+    // 子网格偏移（完整 VB/IB 中的绘制范围）
+    uint32_t indexCount = 0;  // 子集索引数量
+    uint32_t startIndex = 0; // 索引起始偏移
+    int32_t startVertex = 0; // 顶点起始偏移（支持负值，BaseVertexLocation）
 
     Math::BoundingVolumeVariant localBounds;
     bool IsValid() const { return lodMeshHandle.IsValid(); }
@@ -151,6 +157,22 @@ struct PickingComponent {
 struct PositionComponent {
     DirectX::XMFLOAT3 position;
 };
+
+// 骨骼动画组件 — 标记实体使用蒙皮网格
+struct SkinnedComponent {
+    Resource::SkeletonHandle skeletonHandle; // 骨骼资源引用
+    std::string currentClip;                 // 当前动画片段名
+    float timePos = 0.0f;                    // 当前时间位置
+    D3D12_GPU_VIRTUAL_ADDRESS boneBufferAddress = 0; // AnimationAdvancer 预计算后写入的骨骼矩阵 GPU 地址
+
+    bool IsValid() const { return skeletonHandle.IsValid(); }
+};
+
+// 蒙皮标记组件（用于 Builder 区分）
+struct SkinnedTag { int _dummy = 0; };
+
+// 不透明实体标记组件（用于 OpaqueRenderItemBuilder 筛选）
+struct OpaqueTag { int _dummy = 0; };
 
 // 静态绑定反射探针组件
 struct ReflectionConsumerComponent {
