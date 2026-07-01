@@ -112,7 +112,9 @@ void OpaqueRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS 
 }
 
 void OpaqueRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometryHandle,
-                                   D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount) {
+                                   D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount,
+                                   uint32_t startIndex, int32_t startVertex,
+                                   uint32_t indexCount /* = 0, 默认使用 mesh->indexCount */) {
     if (!m_geometryManager) {
         OutputDebugStringW(L"[ERROR] OpaqueRenderer::DrawInstanced - GeometryResourceManager not set!\n");
         return;
@@ -152,8 +154,9 @@ void OpaqueRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometry
 
     // 纹理数组已在 BeginFrame 全局绑定 (slot 3)，着色器通过 MaterialData.BaseColorTexIndex 索引
 
-    // 执行实例化绘制
-    cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, instanceCount, 0, 0, 0);
+    // 执行实例化绘制（支持子网格偏移）
+    uint32_t actualIndexCount = indexCount > 0 ? indexCount : mesh->indexCount;
+    cmdList.Get()->DrawIndexedInstanced(actualIndexCount, instanceCount, startIndex, startVertex, 0);
 }
 
 void OpaqueRenderer::EndFrame() {

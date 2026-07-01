@@ -14,14 +14,21 @@ namespace DX12Engine::Renderer {
 struct BatchKey {
     GeometryHandle geometry;
     uint32_t materialIdx;
+    uint32_t startIndex = 0;
+    int32_t startVertex = 0;
+    uint32_t indexCount = 0;
 
     bool operator==(const BatchKey &other) const {
-        return geometry.index == other.geometry.index && materialIdx == other.materialIdx;
+        return geometry.index == other.geometry.index && materialIdx == other.materialIdx &&
+               startIndex == other.startIndex && startVertex == other.startVertex && indexCount == other.indexCount;
     }
 };
 
 struct BatchKeyHash {
-    size_t operator()(const BatchKey &key) const { return ((size_t)key.geometry.index << 32) ^ (key.materialIdx << 1); }
+    size_t operator()(const BatchKey &key) const {
+        return ((size_t)key.geometry.index << 32) ^ (key.materialIdx << 1) ^ ((size_t)key.startIndex << 16) ^
+               ((size_t)key.startVertex) ^ ((size_t)key.indexCount << 2);
+    }
 };
 
 OpaqueRenderItemBuilder::OpaqueRenderItemBuilder(FrameResourceManager *frameResources, MaterialManager *materialManager,
@@ -39,17 +46,22 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
     std::unordered_map<BatchKey, BatchEntry, BatchKeyHash> batches;
 
     for (auto entity : m_cullingResult->visibleEntities) {
-        auto *meshComp = registry.TryGetComponent<MeshComponent>(entity);
-        if (!meshComp)
+        // 只有带 OpaqueTag 的实体才走 OpaqueBuilder
+        if (!registry.HasComponent<OpaqueTag>(entity)) {
             continue;
+        }
+
+        auto *meshComp = registry.TryGetComponent<MeshComponent>(entity);
 
         GeometryHandle geoHandle = m_lodResult->GetHandle(entity);
-        if (!geoHandle.IsValid())
+        if (!geoHandle.IsValid()) {
             continue;
+        }
 
         auto *transform = registry.TryGetComponent<TransformComponent>(entity);
-        if (!transform)
+        if (!transform) {
             continue;
+        }
 
         uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp->materialHandle);
 
@@ -71,7 +83,7 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         }
         instData.ProbeIndex = probeIdx;
 
-        BatchKey key{geoHandle, materialIdx};
+        BatchKey key{geoHandle, materialIdx, meshComp->startIndex, meshComp->startVertex, meshComp->indexCount};
         auto &entry = batches[key];
         entry.instances.push_back(instData);
         entry.probeIndex = probeIdx; // 批次内所有物体共享同一探针索引
@@ -83,8 +95,9 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer = m_frameResourceManager->AllocateInstance(
             instances.data(), static_cast<uint32_t>(instances.size() * sizeof(InstanceData)));
 
-        OpaqueRenderItem item = OpaqueRenderItem::Create(key.geometry, key.materialIdx, instanceBuffer,
-                                                         (uint32_t)instances.size(), entry.probeIndex);
+        OpaqueRenderItem item =
+            OpaqueRenderItem::Create(key.geometry, key.materialIdx, instanceBuffer, (uint32_t)instances.size(),
+                                     entry.probeIndex, key.startIndex, key.startVertex, key.indexCount);
         outQueue.Add(item);
     }
 }

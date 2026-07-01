@@ -51,9 +51,10 @@ public:
                     D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV, D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart,
                     D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {}, D3D12_GPU_DESCRIPTOR_HANDLE aoMapSRV = {});
 
-    // 统一实例化渲染（单物体 instanceCount=1）
+    // 统一实例化渲染（单物体 instanceCount=1，支持子网格偏移）
     void DrawInstanced(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
-                       D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount);
+                       D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount, uint32_t startIndex = 0,
+                       int32_t startVertex = 0, uint32_t indexCount = 0);
 
     void EndFrame();
 
