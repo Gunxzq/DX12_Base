@@ -18,7 +18,6 @@ void TerrainRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
     outQueue.Clear();
 
     if (!m_cullingResult) {
-        OutputDebugStringW(L"[TerrainBuilder] No culling result, skip\n");
         return;
     }
 

@@ -169,8 +169,7 @@ void AmbientOcclusionManager::BuildResources(uint32_t width, uint32_t height) {
 
             WCHAR buf[256];
             swprintf_s(buf, L"[SSAO] PrivateDepth: poolSize=%u allocCount=%u dsvSRV.ptr=0x%llx srvSRV.ptr=0x%llx\n",
-                       dsPool.GetPoolSize(), dsPool.GetAllocatedCount(),
-                       m_privateDepthDSV.ptr, m_privateDepthSRV.ptr);
+                       dsPool.GetPoolSize(), dsPool.GetAllocatedCount(), m_privateDepthDSV.ptr, m_privateDepthSRV.ptr);
             OutputDebugStringW(buf);
         } else {
             OutputDebugStringW(L"[SSAO] WARNING: PrivateDepth allocation FAILED!\n");
@@ -213,7 +212,9 @@ void AmbientOcclusionManager::BuildRandomVectorTexture() {
     constexpr UINT kRandomTexSize = 256;
 
     // 生成随机数据
-    struct RandomVec { uint8_t r, g, b, a; };
+    struct RandomVec {
+        uint8_t r, g, b, a;
+    };
     std::vector<RandomVec> s_data(kRandomTexSize * kRandomTexSize);
     std::mt19937 rng(42);
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
@@ -280,7 +281,8 @@ void AmbientOcclusionManager::BuildRandomVectorTexture() {
         uint32_t slot = m_descriptorHeaps->Allocate(PartitionType::Texture);
         char buf[128];
         if (slot == UINT32_MAX) {
-            sprintf_s(buf, "[SSAO] BuildRandomVectorTexture: Allocate SRV slot FAILED (Texture partition may be full)\n");
+            sprintf_s(buf,
+                      "[SSAO] BuildRandomVectorTexture: Allocate SRV slot FAILED (Texture partition may be full)\n");
             OutputDebugStringA(buf);
         } else {
             sprintf_s(buf, "[SSAO] BuildRandomVectorTexture: SRV slot=%u\n", slot);
@@ -430,14 +432,14 @@ void AmbientOcclusionManager::Execute(ID3D12GraphicsCommandList *cmdList, D3D12_
 
     // 执行 SSAO 管线
     m_ssaoRenderer.Execute(wrappedCmdList, aoPSO, blurPSO, depthSRV,
-                           GetNormalMapSRV(),   // normalSRV
-                           GetAmbientMapSRV(),  // ambientSRV
-                           GetAmbientMapRTV(),  // ambientRTV
-                           GetAmbientMap1SRV(), // ambient1SRV
-                           GetAmbientMap1RTV(), // ambient1RTV
+                           GetNormalMapSRV(),     // normalSRV
+                           GetAmbientMapSRV(),    // ambientSRV
+                           GetAmbientMapRTV(),    // ambientRTV
+                           GetAmbientMap1SRV(),   // ambient1SRV
+                           GetAmbientMap1RTV(),   // ambient1RTV
                            GetAmbientResource0(), // ambientRes0
                            GetAmbientResource1(), // ambientRes1
-                           viewProj);           // viewProj
+                           viewProj);             // viewProj
 }
 
 // ========================================================================
@@ -452,6 +454,13 @@ void AmbientOcclusionManager::BakeStaticAO(uint32_t regionX, uint32_t regionY, u
     (void)regionY;
     (void)regionWidth;
     (void)regionHeight;
+}
+
+void AmbientOcclusionManager::OnResize(uint32_t width, uint32_t height) {
+    if (!m_initialized || width == 0 || height == 0)
+        return;
+    ReleaseResources();
+    BuildResources(width, height);
 }
 
 } // namespace DX12Engine::Renderer

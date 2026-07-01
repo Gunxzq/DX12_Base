@@ -67,6 +67,9 @@ public:
     void Execute(ID3D12GraphicsCommandList *cmdList, D3D12_GPU_DESCRIPTOR_HANDLE depthSRV,
                  const DirectX::XMFLOAT4X4 &viewProj);
 
+    // ---- 窗口缩放 ----
+    void OnResize(uint32_t width, uint32_t height);
+
     // ---- 资源访问（给 SsaoRenderer 使用） ----
     D3D12_GPU_DESCRIPTOR_HANDLE GetNormalMapSRV() const { return CpuSrvToGpu(m_normalSRV); }
     D3D12_CPU_DESCRIPTOR_HANDLE GetNormalMapRTV() const { return m_normalRTV; }
