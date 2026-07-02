@@ -27,10 +27,9 @@
 
 ## 具体影响
 
-### SSAO DrawNormals（当前需修复）
+### SSAO DrawNormals（已修复）
 
-❌ 当前问题：DrawNormals 直接写入主深度缓冲（`GetDepthStencilView()`）
-✅ 正确做法：使用 SSAO 私有深度缓冲
+当前 SSAO DrawNormals 使用私有深度缓冲，不再写入主 DSV：
 
 ```
 SSAO DrawNormals:
@@ -40,6 +39,10 @@ SSAO DrawNormals:
                              ↑
                          只读，不写
 ```
+
+关键代码路径：
+- `aoMgr.GetPrivateDepthDSV()` — DrawNormals 写入的私有深度缓冲
+- `aoMgr.GetPrivateDepthSRV()` — ComputeAO 采样的主深度 SRV
 
 ### ShadowMap
 
@@ -59,4 +62,6 @@ SSAO DrawNormals:
 
 ## 状态
 
-约束已确定，待实现 SSAO 私有深度缓冲。
+- ✅ SSAO 私有深度缓冲 — 已完成
+- ✅ ShadowMap 私有深度缓冲 — 已有正确做法
+- 其余后处理 Pass（Bloom、Tonemapping 等）— 待实现时按此约束设计
