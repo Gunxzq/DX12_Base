@@ -32,6 +32,11 @@ SystemBuilder &SystemBuilder::Priority(TaskPriority priority) {
     return *this;
 }
 
+SystemBuilder &SystemBuilder::AlwaysRun() {
+    m_info.alwaysRun = true;
+    return *this;
+}
+
 SystemId SystemBuilder::Build() { return SystemRegistry::Register(m_info); }
 
 } // namespace DX12Engine::Scheduler

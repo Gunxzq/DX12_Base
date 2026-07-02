@@ -38,6 +38,9 @@ public:
     /// 设置优先级
     SystemBuilder &Priority(TaskPriority priority);
 
+    /// 标记为常驻 System（每帧执行）
+    SystemBuilder &AlwaysRun();
+
     SystemBuilder &RenderPhase(RenderPhase phase) {
         m_info.renderPhase = phase;
         return *this;
