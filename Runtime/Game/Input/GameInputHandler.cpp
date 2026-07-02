@@ -33,7 +33,7 @@ void GameInputHandler::Initialize(GameContext *context) {
     // 注册输入处理系统
     RegisterInputSystem();
 
-    // 注册拾取系统（PostCulling + EarlyUpdate）
+    // 注册拾取系统（EarlyUpdate）
     RegisterPickingSystems();
 }
 
@@ -65,7 +65,7 @@ void GameInputHandler::RegisterPickingSystems() {
         return;
 
     // ========================================================================
-    // PickingProcessSystem — PostCulling 阶段：输入检测 + 射线投射
+    // PickingProcessSystem — EarlyUpdate 阶段：输入检测 + 射线投射
     //
     // ⚠️ 不触碰 ECS 组件（读/写都不行，必须在 FrameSync 进行）
     //
@@ -113,7 +113,7 @@ void GameInputHandler::RegisterPickingSystems() {
                  // 状态 1: 按下 —— 射线检测 → 意图 Start
                  // ================================================================
                  if (inputSys->IsActionPressed(ActionId_Pick)) {
-                     m_context->raycastResult = m_visibleRaycaster->RaycastAll(ray, m_context->cullingResult);
+                     m_context->raycastResult = m_visibleRaycaster->RaycastAll(ray);
                      if (m_context->raycastResult.HasAny()) {
                          const auto &closest = m_context->raycastResult.GetClosest();
                          m_pendingHitEntity = closest.entity;
@@ -154,7 +154,7 @@ void GameInputHandler::RegisterPickingSystems() {
                      m_pendingDragIntent = DragIntent::End;
                  }
              },
-         .phase = TaskPhase::PostCulling,
+         .phase = TaskPhase::EarlyUpdate,
          .threadType = ThreadType::Main,
          .priority = TaskPriority::Normal,
          .alwaysRun = true});

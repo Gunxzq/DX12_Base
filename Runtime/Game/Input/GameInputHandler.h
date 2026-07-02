@@ -21,7 +21,6 @@ class InputManager;
 namespace Renderer {
 class CameraManager;
 class VisibleRaycaster;
-struct CullingResult;
 struct RaycastHit;
 struct PredictedCameraData;
 } // namespace Renderer
@@ -67,7 +66,7 @@ public:
 
     // =========================================================================
     // 拖拽逻辑
-    // PostCulling: 纯数学计算意图（不碰 ECS）
+    // EarlyUpdate: 纯数学计算意图（不碰 ECS）
     // FrameSync:   ApplyDragToECS() 安全地更新 ECS 组件
     // =========================================================================
 
@@ -86,7 +85,7 @@ private:
     void RegisterInputSystem();
 
     /**
-     * @brief 注册拾取+拖拽系统到 PostCulling 阶段
+     * @brief 注册拾取+拖拽系统到 EarlyUpdate 阶段
      */
     void RegisterPickingSystems();
 
@@ -140,7 +139,7 @@ private:
 
     float m_dragDepth = 0.0f; // 拾取深度（沿相机前向到命中点的距离）
 
-    // ── 拖拽意图（PostCulling 计算，FrameSync 应用）──
+    // ── 拖拽意图（EarlyUpdate 计算，FrameSync 应用）──
     DragIntent m_pendingDragIntent = DragIntent::None;
 
     DX12Engine::ECS::Entity m_pendingHitEntity = DX12Engine::ECS::INVALID_ENTITY;

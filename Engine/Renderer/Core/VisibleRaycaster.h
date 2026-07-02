@@ -4,6 +4,7 @@
 #include "ECS/Core/Registry.h"
 #include "Math/MathTypes.h"
 #include "Renderer/Scene/CameraManager.h"
+#include "Renderer/Scene/Struct/Frustum.h"
 #include <vector>
 
 namespace DX12Engine {
@@ -11,7 +12,6 @@ namespace DX12Engine {
 namespace Renderer {
 
 struct PredictedCameraData;
-struct CullingResult;
 
 // ============================================================================
 // 射线命中结果
@@ -34,11 +34,11 @@ struct RaycastResult {
 };
 
 // ============================================================================
-// VisibleRaycaster — 基于可见集的射线检测工具（纯引擎层）
+// VisibleRaycaster — 基于 ECS 的射线检测工具（纯引擎层）
 //
 // 职责：
 //   - 屏幕坐标 → 世界射线
-//   - 对剔除后的可见实体集做射线相交测试
+//   - 对所有实体（或候选列表）做射线相交测试
 //   - 返回所有命中实体列表（按距离排序）
 //
 // 不负责：输入状态检测、上下文过滤、结果应用（高亮/选中）
@@ -59,14 +59,14 @@ public:
     // 从屏幕坐标生成世界空间射线
     FRay ScreenToRay(float screenX, float screenY, uint32_t screenWidth, uint32_t screenHeight) const;
 
-    // 对可见集做射线检测，返回所有命中（按距离由近到远排序）
-    RaycastResult RaycastAll(const FRay &ray, const CullingResult &cullingResult) const;
+    // 对所有 MeshComponent 实体做射线检测，返回命中（按距离由近到远排序）
+    RaycastResult RaycastAll(const FRay &ray) const;
 
 private:
-    void CollectHits(const FRay &ray, const CullingResult &cullingResult, std::vector<RaycastHit> &outHits) const;
+    void CollectHits(const FRay &ray, std::vector<RaycastHit> &outHits) const;
 
-    ECS::Registry *m_registry = nullptr; // ECS 注册表（只读）
-    PredictedCameraData m_cameraData{};  // 预测相机数据（只读）
+    ECS::Registry *m_registry = nullptr;
+    PredictedCameraData m_cameraData{};
 };
 
 } // namespace Renderer

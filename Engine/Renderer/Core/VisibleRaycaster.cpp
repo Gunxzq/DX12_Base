@@ -35,21 +35,19 @@ FRay VisibleRaycaster::ScreenToRay(float screenX, float screenY, uint32_t screen
     return {origin, dir};
 }
 
-void VisibleRaycaster::CollectHits(const FRay &ray, const CullingResult &cullingResult,
+void VisibleRaycaster::CollectHits(const FRay &ray,
                                    std::vector<RaycastHit> &outHits) const {
     if (!m_registry)
         return;
 
-    for (auto entity : cullingResult.visibleEntities) {
-        // 必须有 PickingComponent 且 isPickable
-        auto *pickComp = m_registry->TryGetComponent<PickingComponent>(entity);
-        if (!pickComp || !pickComp->isPickable)
+    // 遍历所有可拾取实体（MeshComponent + PickingComponent）
+    auto view = m_registry->view<PickingComponent, TransformComponent>();
+    for (auto entity : view) {
+        auto &pickComp = view.get<PickingComponent>(entity);
+        if (!pickComp.isPickable)
             continue;
 
-        // 获取 Transform（将 localBounds 变换到世界空间）
-        auto *transform = m_registry->TryGetComponent<TransformComponent>(entity);
-        if (!transform)
-            continue;
+        auto &transform = view.get<TransformComponent>(entity);
 
         // 获取包围盒
         const Math::BoundingVolumeVariant *bounds = nullptr;
@@ -66,7 +64,7 @@ void VisibleRaycaster::CollectHits(const FRay &ray, const CullingResult &culling
             continue;
 
         // 将 localBounds 变换到世界空间后测试
-        XMMATRIX worldMatrix = transform->GetMatrix();
+        XMMATRIX worldMatrix = transform.GetMatrix();
 
         float t = 0.0f;
         bool hit = std::visit(
@@ -141,9 +139,9 @@ void VisibleRaycaster::CollectHits(const FRay &ray, const CullingResult &culling
               [](const RaycastHit &a, const RaycastHit &b) { return a.distance < b.distance; });
 }
 
-RaycastResult VisibleRaycaster::RaycastAll(const FRay &ray, const CullingResult &cullingResult) const {
+RaycastResult VisibleRaycaster::RaycastAll(const FRay &ray) const {
     RaycastResult result;
-    CollectHits(ray, cullingResult, result.hits);
+    CollectHits(ray, result.hits);
     return result;
 }
 
