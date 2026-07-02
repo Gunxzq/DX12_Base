@@ -46,6 +46,9 @@ public:
     /// 获取对某消息感兴趣的所有System
     static std::vector<SystemId> GetInterestedSystems(MessageTypeHash messageType);
 
+    /// 为已注册的 System 添加依赖（供 BuildDependencies 使用）
+    static void AddDependency(SystemId systemId, SystemId dependencyId);
+
     /// 获取所有已注册的System
     static const std::unordered_map<SystemId, SystemInfo> &GetAllSystems();
 

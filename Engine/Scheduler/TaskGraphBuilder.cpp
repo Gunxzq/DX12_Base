@@ -84,18 +84,19 @@ void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, Event::MessageDispatch
     // 空的图在执行阶段会直接跳过，实现"极致节能"
 
     // ========================================================================
-    // 阶段 2: 将消息和System转化为Task
+    // 阶段 2: 激活 System（消息触发 + 常驻）
     // ========================================================================
-    // BuildTasks 会：
-    // 1. 遍历每条消息
-    // 2. 找到对该消息感兴趣的 System
-    // 3. 为每个 System 创建 Task（通过线程局部上下文传递消息）
-    auto systemToTask = BuildTasks(graph, {}, messages, registry, frameStats);
+    auto activatedSystems = ActivateSystems(messages);
 
     // ========================================================================
-    // 阶段 3: 建立依赖关系（暂时为空，为未来扩展预留）
+    // 阶段 3: 将消息和System转化为Task
     // ========================================================================
-    // BuildDependencies(graph, {}, systemToTask);
+    auto systemToTask = BuildTasks(graph, activatedSystems, messages, registry, frameStats);
+
+    // ========================================================================
+    // 阶段 4: 建立依赖关系
+    // ========================================================================
+    BuildDependencies(graph, activatedSystems, systemToTask);
 
     // ========================================================================
     // 阶段 4: 验证图的合法性

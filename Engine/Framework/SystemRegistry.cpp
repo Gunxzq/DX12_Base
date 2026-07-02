@@ -51,6 +51,17 @@ std::vector<SystemId> SystemRegistry::GetInterestedSystems(MessageTypeHash messa
     return {};
 }
 
+void SystemRegistry::AddDependency(SystemId systemId, SystemId dependencyId) {
+    auto it = s_systems.find(systemId);
+    if (it != s_systems.end()) {
+        // 避免重复添加
+        auto &deps = it->second.dependencies;
+        if (std::find(deps.begin(), deps.end(), dependencyId) == deps.end()) {
+            deps.push_back(dependencyId);
+        }
+    }
+}
+
 const std::unordered_map<SystemId, SystemInfo> &SystemRegistry::GetAllSystems() { return s_systems; }
 
 void SystemRegistry::Clear() {

@@ -215,16 +215,14 @@ bool FrameDriver::Tick() {
     ExecutePhase(TaskPhase::Update);
     ExecutePhase(TaskPhase::LateUpdate);
 
-    // PreCulling：剔除 + LOD 计算（CullingSystem + LODSystem）
+    // PreCulling / PostCulling：保留阶段钩子供后续八叉树、遮挡查询等使用
     ExecutePhase(TaskPhase::PreCulling);
-
-    // PostCulling：射线检测、遮挡查询（使用 PreCulling 可见集作为候选）
     ExecutePhase(TaskPhase::PostCulling);
 
     // SceneDataUpload：所有 Manager 上传 GPU 数据（探针/光源/地形）
     ExecuteSceneDataUpload();
 
-    // PreRender：构建器并行生成渲染队列（Opaque/Transparent/Terrain/Billboard）
+    // PreRender：构建器生成渲染队列
     ExecutePhase(TaskPhase::PreRender);
 
     // ========================================================================
