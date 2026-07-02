@@ -7,6 +7,7 @@
 #include "Event/EventRegistry.h"
 #include "Event/EventTypes.h"
 #include "Event/MessageDispatcher.h"
+#include "Framework/SystemBuilder.h"
 #include "Framework/SystemRegistry.h"
 #include "Math/BoundingVolume.h"
 #include "Math/HashTypes.h"
@@ -234,12 +235,12 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     CreateTestCylinder();
     CreateTestTorus(); // 程序化环面（SSAO 测试：内圈凹陷）
 
-    // 压力测试：大量动态物体（已注释，后续需要时启用）
-    // CreateStressTestScene();
+    // 压力测试：大量动态物体
+    CreateStressTestScene();
 
-    // 初始化公告牌系统（SSAO 开发期间注释）
-    // LoadBillboardTextures();
-    // CreateBillboardTrees();
+    // 初始化公告牌系统
+    LoadBillboardTextures();
+    CreateBillboardTrees();
 
     // 创建后台异步执行器（类比帧驱动器，2 个工作线程）
     // 必须在 LoadTerrainAsync() 之前创建！
@@ -292,8 +293,8 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     // TODO: 窗口缩放 TDR 排查，临时注释探针系统
     // RegisterProbeCaptureSystem();
 
-    // [SSAO开发期间注释] 注册地形渲染系统
-    // RegisterTerrainRenderSystem();
+    // 注册地形渲染系统
+    RegisterTerrainRenderSystem();
 
     // 注册骨骼动画推进 System
     RegisterAnimationAdvancer();
@@ -327,79 +328,173 @@ void GameWorld::Clear() {
     DestroyEntityWithCleanup(m_groundPlaneEntity);
     m_groundPlaneEntity = INVALID_ENTITY;
 
-    // 移除压力测试实体（当前已注释，保留清理代码备查）
-    // for (auto entity : m_stressEntities) {
-    //     DestroyEntityWithCleanup(entity);
-    // }
-    // m_stressEntities.clear();
+    // 移除压力测试实体
+    for (auto entity : m_stressEntities) {
+        DestroyEntityWithCleanup(entity);
+    }
+    m_stressEntities.clear();
 }
 
 void GameWorld::RegisterBuilderSystems() {
     // =========================================================================
-    // 所有构建器合并在一个 System 中串行执行，避免 RingBuffer 多线程竞争
+    // 上传阶段（串行）：计数 → 预留 → 分发 FrameWriter
     // =========================================================================
 
-    SystemRegistry::Register({
-        .name = "RenderBuilders",
-        .func =
-            [this](Registry &reg, const MessageContext &) {
-                // 4. 地形构建器
-                if (m_terrainBuilder) {
-                    m_terrainBuilder->SetCullingResult(&m_context->cullingResult);
-                    m_terrainBuilder->BuildTyped(reg, m_terrainQueue);
+    REGISTER_SYSTEM(BuilderUpload, PreRender, Worker)
+        .Func([this](Registry &reg, const MessageContext &) {
+            const Frustum &frustum = m_context->CullingSystem->GetFrustum();
+            auto camPos = m_context->CameraMgr->GetMainCamera().Position;
+
+            // 设置帧数据到各构建器
+            m_opaqueBuilder->SetFrustum(&frustum);
+            m_opaqueBuilder->SetCameraPos(camPos);
+            m_opaqueBuilder->SetLODSystem(m_context->LODSystem);
+
+            if (m_skinnedBuilder) {
+                m_skinnedBuilder->SetFrustum(&frustum);
+                m_skinnedBuilder->SetCameraPos(camPos);
+                m_skinnedBuilder->SetLODSystem(m_context->LODSystem);
+            }
+
+            m_transparentBuilder->SetFrustum(&frustum);
+            m_transparentBuilder->SetCameraPos(camPos);
+            m_transparentBuilder->SetLODSystem(m_context->LODSystem);
+
+            if (m_terrainBuilder)
+                m_terrainBuilder->SetFrustum(&frustum);
+            if (m_billboardBuilder) {
+                m_billboardBuilder->SetFrustum(&frustum);
+                m_billboardBuilder->SetCameraPos(camPos);
+            }
+            if (m_probeBuilder && m_activeProbeCount > 0) {
+                m_probeBuilder->SetFrustum(&frustum);
+                m_probeBuilder->SetCameraPos(camPos);
+                m_probeBuilder->SetLODSystem(m_context->LODSystem);
+            }
+        })
+        .AlwaysRun()
+        .Build();
+
+    // =========================================================================
+    // 构建阶段（并行）：各构建器独立 System，Worker 线程并发执行
+    // 当前使用传统的 AllocateInstance 路径（串行安全），
+    // 后续 FrameSync 统一上传时可改为只产生临时数据+槽位索引
+    // =========================================================================
+
+    REGISTER_SYSTEM(BuildOpaque, PreRender, Worker)
+        .Func([this](Registry &reg, const MessageContext &) { m_opaqueBuilder->BuildTyped(reg, m_opaqueQueue); })
+        .AlwaysRun()
+        .DependsOn("BuilderUpload")
+        .Build();
+
+    if (m_skinnedBuilder) {
+        REGISTER_SYSTEM(BuildSkinned, PreRender, Worker)
+            .Func([this](Registry &reg, const MessageContext &) { m_skinnedBuilder->BuildTyped(reg, m_skinnedQueue); })
+            .AlwaysRun()
+            .DependsOn("BuilderUpload")
+            .Build();
+    }
+
+    REGISTER_SYSTEM(BuildTransparent, PreRender, Worker)
+        .Func([this](Registry &reg, const MessageContext &) {
+            m_transparentBuilder->BuildTyped(reg, m_transparentQueue);
+        })
+        .AlwaysRun()
+        .DependsOn("BuilderUpload")
+        .Build();
+
+    if (m_terrainBuilder) {
+        REGISTER_SYSTEM(BuildTerrain, PreRender, Worker)
+            .Func([this](Registry &reg, const MessageContext &) { m_terrainBuilder->BuildTyped(reg, m_terrainQueue); })
+            .AlwaysRun()
+            .DependsOn("BuilderUpload")
+            .Build();
+    }
+
+    if (m_billboardBuilder) {
+        REGISTER_SYSTEM(BuildBillboard, PreRender, Worker)
+            .Func([this](Registry &reg, const MessageContext &) {
+                m_billboardBuilder->BuildTyped(reg, m_billboardQueue);
+            })
+            .AlwaysRun()
+            .DependsOn("BuilderUpload")
+            .Build();
+    }
+
+    if (m_probeBuilder && m_context->ReflectionProbeMgr) {
+        REGISTER_SYSTEM(BuildProbes, PreRender, Worker)
+            .Func([this](Registry &reg, const MessageContext &) {
+                uint32_t probeCount = m_context->ReflectionProbeMgr->GetActiveProbeCount();
+                m_activeProbeCount = probeCount;
+                if (probeCount > 0) {
+                    m_probeBuilder->Build(m_probeCaptureInfo, m_activeProbeCount, reg, m_probeQueues);
+                }
+            })
+            .AlwaysRun()
+            .DependsOn("BuilderUpload")
+            .Build();
+    }
+
+    // =========================================================================
+    // 依赖声明：BuilderUpload → Builders → [future] FrameSync Upload
+    // =========================================================================
+
+    // =========================================================================
+    // FrameSync 回调：统一上传所有临时 InstanceData 到 GPU RingBuffer
+    // =========================================================================
+    if (m_context && m_context->FrameDriver) {
+        m_context->FrameDriver->RegisterFrameSyncCallback(
+            [this]() {
+                auto *frameRes = m_context->FrameResourceManager;
+                if (!frameRes)
+                    return;
+
+                // ── Opaque ──
+                {
+                    auto &batches = m_opaqueBuilder->GetPendingBatches();
+                    auto &queue = m_opaqueQueue;
+                    for (auto &batch : batches) {
+                        if (batch.queueIndex >= queue.Size() || batch.instances.empty())
+                            continue;
+                        D3D12_GPU_VIRTUAL_ADDRESS addr = frameRes->AllocateInstance(
+                            batch.instances.data(),
+                            static_cast<uint32_t>(batch.instances.size() * sizeof(InstanceData)));
+                        queue[batch.queueIndex].instanceBuffer = addr;
+                    }
+                    batches.clear();
                 }
 
-                // 1. 不透明构建器（统一实例化模式）
-                m_opaqueBuilder->SetCullingResult(&m_context->cullingResult);
-                m_opaqueBuilder->SetLODResult(&m_context->lodResult);
-                m_opaqueBuilder->BuildTyped(reg, m_opaqueQueue);
-
-                // 6. 蒙皮构建器
+                // ── Skinned ──
                 if (m_skinnedBuilder) {
-                    m_skinnedBuilder->SetCullingResult(&m_context->cullingResult);
-                    m_skinnedBuilder->SetLODResult(&m_context->lodResult);
-                    size_t before = m_skinnedQueue.Size();
-                    m_skinnedBuilder->BuildTyped(reg, m_skinnedQueue);
-                    size_t after = m_skinnedQueue.Size();
-                    if (after > before) {
-                        wchar_t dbg[128];
-                        swprintf_s(dbg, L"[SkinnedBuilder] Produced %zu items (queue now %zu)\n", after - before,
-                                   after);
-                        OutputDebugStringW(dbg);
-                    } else {
-                        OutputDebugStringW(L"[SkinnedBuilder] No items produced\n");
+                    auto &batches = m_skinnedBuilder->GetPendingBatches();
+                    auto &queue = m_skinnedQueue;
+                    for (auto &batch : batches) {
+                        if (batch.queueIndex >= queue.Size() || batch.instances.empty())
+                            continue;
+                        D3D12_GPU_VIRTUAL_ADDRESS addr = frameRes->AllocateInstance(
+                            batch.instances.data(),
+                            static_cast<uint32_t>(batch.instances.size() * sizeof(InstanceData)));
+                        queue[batch.queueIndex].instanceBuffer = addr;
                     }
+                    batches.clear();
                 }
 
-                // 3. 公告牌构建器（需要相机位置做朝向计算）
-                if (m_billboardBuilder) {
-                    m_billboardBuilder->SetCullingResult(&m_context->cullingResult);
-                    m_billboardBuilder->SetLODResult(&m_context->lodResult);
-                    m_billboardBuilder->SetCameraPosition(m_context->CameraMgr->GetMainCamera().Position);
-                    m_billboardBuilder->BuildTyped(reg, m_billboardQueue);
-                }
-
-                // 2. 透明构建器（远到近排序，需要相机位置）
-                m_transparentBuilder->SetCullingResult(&m_context->cullingResult);
-                m_transparentBuilder->SetLODResult(&m_context->lodResult);
-                m_transparentBuilder->BuildTyped(reg, m_transparentQueue);
-
-                // 5. 反射探头构建器（使用 SceneDataUpload 准备好的 m_probeCaptureInfo）
-                if (m_probeBuilder && m_activeProbeCount > 0) {
-                    uint32_t probeCount = m_context->ReflectionProbeMgr->GetActiveProbeCount();
-                    m_activeProbeCount = probeCount;
-                    if (probeCount > 0) {
-                        ProbeCaptureInfo probeSet[64];
-                        m_probeBuilder->SetLODSystem(m_context->LODSystem);
-
-                        m_probeBuilder->Build(m_probeCaptureInfo, m_activeProbeCount, reg, m_probeQueues);
+                // ── Transparent ObjectConstants ──
+                {
+                    auto &batches = m_transparentBuilder->GetPendingBatches();
+                    auto &queue = m_transparentQueue;
+                    for (uint32_t i = 0; i < queue.Size(); ++i) {
+                        auto &item = queue[i];
+                        if (item.tempSlot != UINT32_MAX && item.tempSlot < batches.size()) {
+                            item.objectCBAddress =
+                                frameRes->AllocateObjectCB(&batches[item.tempSlot].object, sizeof(ObjectConstants));
+                        }
                     }
+                    batches.clear();
                 }
             },
-        .phase = TaskPhase::PreRender,
-        .threadType = ThreadType::Worker,
-        .alwaysRun = true,
-    });
+            "FrameSync_UploadInstanceData");
+    }
 }
 
 void GameWorld::RegisterWaterConstantsCallback() {
@@ -2666,7 +2761,7 @@ void GameWorld::CreateWater() {
     // m_registry->AddComponent<StaticComponent>(m_waterEntity);
 
     // [SSAO开发期间注释] 绘制调用
-    // RegisterWaterRenderSystem();
+    RegisterWaterRenderSystem();
 }
 
 void GameWorld::RegisterWaterRenderSystem() {

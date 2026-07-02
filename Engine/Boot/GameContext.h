@@ -110,12 +110,8 @@ public:
 
     Input::InputManager *InputMgr = nullptr;
 
-    // 临时结构
-    Renderer::CullingResult cullingResult;
-    Renderer::LODResult lodResult;
-    Renderer::RaycastResult raycastResult;
-
     Renderer::PredictedCameraData predictedCameraData;
+    Renderer::RaycastResult raycastResult;
 
     Renderer::CullingSystem *CullingSystem = nullptr;
     Renderer::LODSystem *LODSystem = nullptr;

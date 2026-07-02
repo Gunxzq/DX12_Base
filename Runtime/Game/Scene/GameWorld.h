@@ -243,7 +243,7 @@ private:
     // Soldier 角色
     std::vector<DX12Engine::ECS::Entity> m_soldierEntities;
     DX12Engine::Resource::SkeletonHandle m_soldierSkeletonHandle;
-    float m_soldierAngle = 0.0f;  // 圆周运动角度
+    float m_soldierAngle = 0.0f; // 圆周运动角度
     std::unique_ptr<DX12Engine::Renderer::SkinnedRenderItemBuilder> m_skinnedBuilder;
     std::unique_ptr<DX12Engine::Renderer::SkinnedRenderer> m_skinnedRenderer;
     DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::SkinnedRenderItem> m_skinnedQueue;

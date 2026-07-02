@@ -109,7 +109,7 @@ bool Game::Initialize() {
 
     m_inputHandler.Initialize(m_context);
 
-    // 7. 注册帧同步回调：消费 raycastResult + 应用拖拽到 ECS（PostCulling 后已就绪）
+    // 7. 注册帧同步回调：消费 raycastResult + 应用拖拽到 ECS
     if (m_context->FrameDriver) {
         m_context->FrameDriver->RegisterFrameSyncCallback(
             [this]() {
@@ -280,23 +280,17 @@ void Game::RegisterEngineSystems() {
                               .priority = TaskPriority::High,
                               .interestedMessages = {Event::FullscreenToggleEvent::StaticTypeHash}});
 
-    SystemRegistry::Register({.name = "CullingLODPipeline",
+    SystemRegistry::Register({.name = "CullingCameraUpdate",
                               .func =
-                                  [this](Registry &reg, const MessageContext &ctx) {
+                                  [this](Registry &, const MessageContext &) {
                                       float dt = m_context->MainTimer->GetDeltaTime();
-                                      float predictionFactor = 0.5f; // 安全系数, 用于调整预测位置的权重
+                                      float predictionFactor = 0.5f;
                                       auto &camMgr = CameraManager::GetInstance();
-
-                                      // 预测相机
                                       m_context->predictedCameraData =
                                           camMgr.GetPredictedCameraData(dt, predictionFactor);
-
                                       m_context->CullingSystem->SetCamera(m_context->predictedCameraData);
-                                      m_context->CullingSystem->Execute(reg, m_context->cullingResult);
-
-                                      m_context->LODSystem->Execute(reg, m_context->lodResult);
                                   },
-                              .phase = TaskPhase::PreCulling,
+                              .phase = TaskPhase::LateUpdate,
                               .threadType = ThreadType::Worker,
                               .alwaysRun = true});
 }
