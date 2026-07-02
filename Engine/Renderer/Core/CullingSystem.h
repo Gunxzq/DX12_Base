@@ -18,43 +18,26 @@ class CameraManager;
 struct PredictedCameraData;
 
 // ============================================================================
-// 剔除结果
-// ============================================================================
-struct CullingResult {
-    std::vector<ECS::Entity> visibleEntities;
-
-    void Clear() { visibleEntities.clear(); }
-    void SetVisible(ECS::Entity entity) { visibleEntities.push_back(entity); }
-    bool IsVisible(ECS::Entity entity) const {
-        // 线性查找（小规模没问题）
-        return std::find(visibleEntities.begin(), visibleEntities.end(), entity) != visibleEntities.end();
-    }
-    size_t Size() const { return visibleEntities.size(); }
-};
-
-// ============================================================================
-// 剔除系统 - 负责计算实体的可见性
+// 剔除系统 — 仅提供视锥体维护（供 VisibleRaycaster 等使用）
 // ============================================================================
 class CullingSystem {
 public:
     CullingSystem() = default;
     ~CullingSystem() = default;
 
-    // 禁止拷贝
     CullingSystem(const CullingSystem &) = delete;
     CullingSystem &operator=(const CullingSystem &) = delete;
 
     void SetCamera(const PredictedCameraData &camera);
-    void Execute(ECS::Registry &registry, CullingResult &outResult);
+
+    /// 获取当前视锥体（供 Builder/CullingUtil 使用）
+    const Frustum &GetFrustum() const { return m_frustum; }
+    bool HasFrustum() const { return m_hasFrustum; }
 
 private:
-    bool Intersects(const Math::BoundingAABB &bounds) const;
-    bool Intersects(const Math::BoundingSphere &bounds) const;
-    bool TestVisibility(const Math::BoundingVolumeVariant &bounds, const DirectX::XMMATRIX &worldMatrix) const;
-
     Frustum m_frustum;
     bool m_hasFrustum = false;
 };
-} // namespace Renderer
 
+} // namespace Renderer
 } // namespace DX12Engine

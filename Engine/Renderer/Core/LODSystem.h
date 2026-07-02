@@ -9,22 +9,8 @@
 
 namespace DX12Engine::Renderer {
 
-struct LODResult {
-    std::unordered_map<ECS::Entity, Resource::GeometryHandle> handleMap;
-
-    void Clear() { handleMap.clear(); }
-    void SetHandle(ECS::Entity entity, Resource::GeometryHandle handle) { handleMap[entity] = handle; }
-    Resource::GeometryHandle GetHandle(ECS::Entity entity) const {
-        auto it = handleMap.find(entity);
-        return it != handleMap.end() ? it->second : Resource::GeometryHandle::Invalid();
-    }
-
-    // size
-    size_t Size() const { return handleMap.size(); }
-};
-
 // ============================================================================
-// LOD 系统 - 负责为每个实体选择合适的几何体精度
+// LOD 系统 — 仅提供 LODMesh 存储（供 Builder/PickLOD 查询）
 // ============================================================================
 
 class LODSystem {
@@ -32,7 +18,6 @@ public:
     LODSystem() = default;
     ~LODSystem() = default;
 
-    // 禁止拷贝
     LODSystem(const LODSystem &) = delete;
     LODSystem &operator=(const LODSystem &) = delete;
 
@@ -41,7 +26,7 @@ public:
     void SetGeometryManager(Resource::GeometryResourceManager *mgr) { m_geometryManager = mgr; }
 
     // ========================================================================
-    // LODMesh 管理（临时，后续可由 AssetManager 接管）
+    // LODMesh 管理
     // ========================================================================
 
     Resource::LODMeshHandle RegisterLODMesh(const Resource::LODMesh &lodMesh);
@@ -49,22 +34,14 @@ public:
     void UnregisterLODMesh(Resource::LODMeshHandle handle);
     const Resource::LODMesh *GetLODMesh(Resource::LODMeshHandle handle) const;
 
-    void Execute(ECS::Registry &registry, LODResult &outResult);
+    /// 获取当前 LOD 配置（供 PickLOD 使用）
+    const LODConfig &GetLODConfig() const { return m_lodConfig; }
 
 private:
-    // ========================================================================
-    // 辅助方法
-    // ========================================================================
-
-    float CalculateDistance(const DirectX::XMFLOAT3 &pos, const DirectX::XMFLOAT3 &cameraPos) const;
-
-    Resource::GeometryHandle ResolveGeometryHandle(const Resource::LODMesh &lodMesh, uint32_t configIndex) const;
-
     LODConfig m_lodConfig;
     CameraManager *m_cameraManager = nullptr;
     Resource::GeometryResourceManager *m_geometryManager = nullptr;
 
-    // LODMesh 存储（临时，后续可由 AssetManager 接管）
     std::unordered_map<Resource::LODMeshHandle, Resource::LODMesh> m_lodMeshes;
 };
 
