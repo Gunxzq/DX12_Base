@@ -24,6 +24,9 @@ struct TransparentRenderItem {
     // 深度值（到相机的距离），用于远到近排序
     float depth = 0.0f;
 
+    // 临时 ObjectConstants 槽位索引（FrameSync 回填 objectCBAddress）
+    uint32_t tempSlot = UINT32_MAX;
+
     bool IsValid() const { return geometryHandle.IsValid(); }
 };
 

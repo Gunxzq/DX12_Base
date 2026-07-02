@@ -10,9 +10,6 @@ using namespace DX12Engine::ECS;
 
 namespace DX12Engine::Renderer {
 
-// ============================================================================
-// 分组键：同 Mesh + 同 Material + 同子网格偏移可以合批
-// ============================================================================
 struct SkinnedBatchKey {
     GeometryHandle geometry;
     uint32_t materialIdx;
@@ -37,87 +34,112 @@ SkinnedRenderItemBuilder::SkinnedRenderItemBuilder(FrameResourceManager *frameRe
                                                    MaterialManager *materialManager, SkeletonManager *skeletonManager)
     : m_frameResourceManager(frameResources), m_materialManager(materialManager), m_skeletonManager(skeletonManager) {}
 
+uint32_t SkinnedRenderItemBuilder::Count(ECS::Registry &registry) {
+    if (!m_frustum)
+        return 0;
+
+    uint32_t count = 0;
+    auto view = registry.view<MeshComponent, TransformComponent, SkinnedTag>();
+    for (auto entity : view) {
+        auto &meshComp = view.get<MeshComponent>(entity);
+        auto &transform = view.get<TransformComponent>(entity);
+
+        if (!FrustumCull(meshComp.localBounds, transform.GetMatrix(), *m_frustum))
+            continue;
+
+        GeometryHandle geoHandle;
+        if (m_lodSystem && meshComp.lodMeshHandle.IsValid()) {
+            const auto *lodMesh = m_lodSystem->GetLODMesh(meshComp.lodMeshHandle);
+            if (lodMesh) {
+                geoHandle = PickLOD(*lodMesh, transform.position, m_cameraPos, m_lodSystem->GetLODConfig());
+            }
+        }
+        if (!geoHandle.IsValid())
+            continue;
+
+        count++;
+    }
+    return count;
+}
+
 void SkinnedRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<SkinnedRenderItem> &outQueue) {
     outQueue.Clear();
 
-    if (!m_cullingResult || !m_lodResult) {
+    if (!m_frustum)
         return;
-    }
 
-    // ========================================================================
-    // 批处理：遍历所有同时持有 MeshComponent + SkinnedComponent 的可见实体
-    // ========================================================================
     struct BatchEntry {
         std::vector<InstanceData> instances;
         std::vector<Entity> entities;
     };
     std::unordered_map<SkinnedBatchKey, BatchEntry, SkinnedBatchKeyHash> batches;
 
-    for (auto entity : m_cullingResult->visibleEntities) {
-        // 只有带 SkinnedTag 的实体才走此 Builder
-        if (!registry.HasComponent<SkinnedTag>(entity))
+    auto view = registry.view<MeshComponent, TransformComponent, SkinnedTag>();
+    for (auto entity : view) {
+        auto &meshComp = view.get<MeshComponent>(entity);
+        auto &transform = view.get<TransformComponent>(entity);
+
+        if (!FrustumCull(meshComp.localBounds, transform.GetMatrix(), *m_frustum))
             continue;
 
-        auto *meshComp = registry.TryGetComponent<MeshComponent>(entity);
-        if (!meshComp)
-            continue;
-
-        GeometryHandle geoHandle = m_lodResult->GetHandle(entity);
+        GeometryHandle geoHandle;
+        if (m_lodSystem && meshComp.lodMeshHandle.IsValid()) {
+            const auto *lodMesh = m_lodSystem->GetLODMesh(meshComp.lodMeshHandle);
+            if (lodMesh) {
+                geoHandle = PickLOD(*lodMesh, transform.position, m_cameraPos, m_lodSystem->GetLODConfig());
+            }
+        }
         if (!geoHandle.IsValid())
             continue;
 
-        auto *transform = registry.TryGetComponent<TransformComponent>(entity);
-        if (!transform)
-            continue;
+        uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp.materialHandle);
 
-        uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp->materialHandle);
-
-        // --- InstanceData（与 Opaque 相同，World 矩阵来自 Transform） ---
         InstanceData instData = {};
-        XMMATRIX world = transform->GetMatrix();
+        XMMATRIX world = transform.GetMatrix();
         XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
         XMStoreFloat4x4(&instData.World, world);
         XMStoreFloat4x4(&instData.WorldInvTranspose, worldInvTranspose);
         instData.MaterialIndex = materialIdx;
-        instData.ReceiveShadow = meshComp->receivesShadow ? 1 : 0;
-        // 蒙皮角色暂不考虑反射探针
+        instData.ReceiveShadow = meshComp.receivesShadow ? 1 : 0;
         instData.ProbeIndex = UINT32_MAX;
 
-        SkinnedBatchKey key{geoHandle, materialIdx, meshComp->indexCount, meshComp->startIndex, meshComp->startVertex};
-        batches[key].instances.push_back(instData);
-        batches[key].entities.push_back(entity);
+        SkinnedBatchKey key{geoHandle, materialIdx, meshComp.indexCount, meshComp.startIndex, meshComp.startVertex};
+        auto &entry = batches[key];
+        entry.instances.push_back(instData);
+        entry.entities.push_back(entity);
     }
 
-    // ========================================================================
-    // 每批次：上传 InstanceData + 骨骼矩阵 → 产出 SkinnedRenderItem
-    // ========================================================================
+    // 写入临时批次（FrameSync 统一上传用）
+    m_pendingBatches.clear();
     for (auto &[key, entry] : batches) {
         auto &instances = entry.instances;
-
-        // 上传 InstanceData
-        D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer = m_frameResourceManager->AllocateInstance(
-            instances.data(), static_cast<uint32_t>(instances.size() * sizeof(InstanceData)));
-
-        // 骨骼矩阵由 AnimationAdvancer 在 LateUpdate 阶段预计算并上传，
-        // 此处直接从 SkinnedComponent.boneBufferAddress 读取 GPU 地址
-        D3D12_GPU_VIRTUAL_ADDRESS boneBuffer = 0;
-
-        if (!entry.entities.empty()) {
-            Entity firstEntity = entry.entities.front();
-            auto *skinnedComp = registry.TryGetComponent<SkinnedComponent>(firstEntity);
-            if (skinnedComp && skinnedComp->boneBufferAddress != 0) {
-                boneBuffer = skinnedComp->boneBufferAddress;
-            }
-        }
-
-        if (boneBuffer == 0) {
-            // 骨骼上传失败时跳过该批次
+        if (instances.empty())
             continue;
-        }
 
-        SkinnedRenderItem item = SkinnedRenderItem::Create(key.geometry, key.materialIdx, instanceBuffer, boneBuffer,
-                                                           static_cast<uint32_t>(instances.size()), key.indexCount,
-                                                           key.startIndex, key.startVertex);
+        uint32_t qIdx = static_cast<uint32_t>(outQueue.Size());
+        PendingBatch pendingBatch;
+        pendingBatch.instances = std::move(instances);
+        pendingBatch.entities = std::move(entry.entities);
+        pendingBatch.queueIndex = qIdx;
+        m_pendingBatches.push_back(std::move(pendingBatch));
+
+        D3D12_GPU_VIRTUAL_ADDRESS boneBuffer = 0;
+        auto &pending = m_pendingBatches.back();
+        if (!pending.entities.empty()) {
+            Entity firstEntity = pending.entities.front();
+            auto *skinnedComp = registry.TryGetComponent<SkinnedComponent>(firstEntity);
+            if (skinnedComp && skinnedComp->boneBufferAddress != 0)
+                boneBuffer = skinnedComp->boneBufferAddress;
+        }
+        if (boneBuffer == 0)
+            continue;
+
+        uint32_t slot = static_cast<uint32_t>(m_pendingBatches.size() - 1);
+        SkinnedRenderItem item =
+            SkinnedRenderItem::Create(key.geometry, key.materialIdx, 0, boneBuffer,
+                                      static_cast<uint32_t>(pending.instances.size()), key.indexCount,
+                                      key.startIndex, key.startVertex);
+        item.tempSlot = slot;
         outQueue.Add(item);
     }
 }

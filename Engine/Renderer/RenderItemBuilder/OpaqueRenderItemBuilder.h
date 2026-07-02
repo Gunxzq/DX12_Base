@@ -3,8 +3,9 @@
 #include "ECS/Core/Registry.h"
 #include "IRenderItemBuilder.h"
 #include "OpaqueRenderItem.h"
-#include "Renderer/Core/CullingSystem.h"
+#include "Renderer/Core/CullingUtil.h"
 #include "Renderer/Core/LODSystem.h"
+#include "Renderer/Scene/Struct/Frustum.h"
 #include "TRenderQueue.h"
 
 // 前向声明
@@ -22,9 +23,18 @@ public:
     OpaqueRenderItemBuilder(FrameResourceManager *frameResources, Resource::MaterialManager *materialManager,
                             Resource::TextureManager *textureManager);
 
-    // 设置每帧数据
-    void SetCullingResult(const CullingResult *result) { m_cullingResult = result; }
-    void SetLODResult(const LODResult *result) { m_lodResult = result; }
+    void SetFrustum(const Frustum *frustum) { m_frustum = frustum; }
+    void SetCameraPos(const DirectX::XMFLOAT3 &pos) { m_cameraPos = pos; }
+    void SetLODSystem(const LODSystem *system) { m_lodSystem = system; }
+
+    // 临时批次数据（FrameSync 统一上传用）
+    struct PendingBatch {
+        std::vector<InstanceData> instances;
+        uint32_t queueIndex;
+    };
+    std::vector<PendingBatch> &GetPendingBatches() { return m_pendingBatches; }
+
+    uint32_t Count(ECS::Registry &registry);
 
     void BuildTyped(ECS::Registry &registry, TRenderQueue<OpaqueRenderItem> &outQueue) override;
 
@@ -33,8 +43,10 @@ private:
     Resource::MaterialManager *m_materialManager;
     Resource::TextureManager *m_textureManager;
 
-    const CullingResult *m_cullingResult = nullptr;
-    const LODResult *m_lodResult = nullptr;
+    const Frustum *m_frustum = nullptr;
+    const LODSystem *m_lodSystem = nullptr;
+    DirectX::XMFLOAT3 m_cameraPos = {};
+    std::vector<PendingBatch> m_pendingBatches;
 };
 
 } // namespace DX12Engine::Renderer

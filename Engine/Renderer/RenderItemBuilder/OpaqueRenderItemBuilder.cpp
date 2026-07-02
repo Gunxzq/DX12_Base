@@ -35,69 +35,108 @@ OpaqueRenderItemBuilder::OpaqueRenderItemBuilder(FrameResourceManager *frameReso
                                                  TextureManager *textureManager)
     : m_frameResourceManager(frameResources), m_materialManager(materialManager), m_textureManager(textureManager) {}
 
+// ========================================================================
+// Count — 轻量计数遍（只做剔除+LOD判断，不分配不构建）
+// ========================================================================
+
+uint32_t OpaqueRenderItemBuilder::Count(ECS::Registry &registry) {
+    if (!m_frustum)
+        return 0;
+
+    uint32_t count = 0;
+    auto view = registry.view<MeshComponent, TransformComponent, OpaqueTag>();
+    for (auto entity : view) {
+        auto &meshComp = view.get<MeshComponent>(entity);
+        auto &transform = view.get<TransformComponent>(entity);
+
+        if (!FrustumCull(meshComp.localBounds, transform.GetMatrix(), *m_frustum))
+            continue;
+
+        GeometryHandle geoHandle;
+        if (m_lodSystem && meshComp.lodMeshHandle.IsValid()) {
+            const auto *lodMesh = m_lodSystem->GetLODMesh(meshComp.lodMeshHandle);
+            if (lodMesh) {
+                geoHandle = PickLOD(*lodMesh, transform.position, m_cameraPos, m_lodSystem->GetLODConfig());
+            }
+        }
+        if (!geoHandle.IsValid())
+            continue;
+
+        count++;
+    }
+    return count;
+}
+
+// ========================================================================
+// BuildTyped — 实际构建
+// ========================================================================
+
 void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<OpaqueRenderItem> &outQueue) {
     outQueue.Clear();
+
+    if (!m_frustum)
+        return;
 
     struct BatchEntry {
         std::vector<InstanceData> instances;
         std::vector<Entity> entities;
-        uint32_t probeIndex = UINT32_MAX; // 批次探针索引（批次内所有实体应一致）
+        uint32_t probeIndex = UINT32_MAX;
     };
     std::unordered_map<BatchKey, BatchEntry, BatchKeyHash> batches;
 
-    for (auto entity : m_cullingResult->visibleEntities) {
-        // 只有带 OpaqueTag 的实体才走 OpaqueBuilder
-        if (!registry.HasComponent<OpaqueTag>(entity)) {
+    auto view = registry.view<MeshComponent, TransformComponent, OpaqueTag>();
+    for (auto entity : view) {
+        auto &meshComp = view.get<MeshComponent>(entity);
+        auto &transform = view.get<TransformComponent>(entity);
+
+        if (!FrustumCull(meshComp.localBounds, transform.GetMatrix(), *m_frustum))
             continue;
+
+        GeometryHandle geoHandle;
+        if (m_lodSystem && meshComp.lodMeshHandle.IsValid()) {
+            const auto *lodMesh = m_lodSystem->GetLODMesh(meshComp.lodMeshHandle);
+            if (lodMesh) {
+                geoHandle = PickLOD(*lodMesh, transform.position, m_cameraPos, m_lodSystem->GetLODConfig());
+            }
         }
-
-        auto *meshComp = registry.TryGetComponent<MeshComponent>(entity);
-
-        GeometryHandle geoHandle = m_lodResult->GetHandle(entity);
-        if (!geoHandle.IsValid()) {
+        if (!geoHandle.IsValid())
             continue;
-        }
 
-        auto *transform = registry.TryGetComponent<TransformComponent>(entity);
-        if (!transform) {
-            continue;
-        }
-
-        uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp->materialHandle);
+        uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp.materialHandle);
 
         InstanceData instData = {};
-        XMMATRIX world = transform->GetMatrix();
+        XMMATRIX world = transform.GetMatrix();
         XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
         XMStoreFloat4x4(&instData.World, world);
         XMStoreFloat4x4(&instData.WorldInvTranspose, worldInvTranspose);
         instData.MaterialIndex = materialIdx;
-        instData.ReceiveShadow = meshComp->receivesShadow ? 1 : 0;
+        instData.ReceiveShadow = meshComp.receivesShadow ? 1 : 0;
 
-        // 读取 ReflectionConsumerComponent，确定探针索引
         uint32_t probeIdx = UINT32_MAX;
         auto *reflectionComp = registry.TryGetComponent<ReflectionConsumerComponent>(entity);
-        if (reflectionComp) {
+        if (reflectionComp)
             probeIdx = reflectionComp->probeIndex;
-            // TODO: 当 probeIndex == UINT32_MAX && useDynamicFallback == true 时，
-            //       调用 ReflectionProbeManager::FindClosestProbe() 做动态回退
-        }
         instData.ProbeIndex = probeIdx;
 
-        BatchKey key{geoHandle, materialIdx, meshComp->startIndex, meshComp->startVertex, meshComp->indexCount};
+        BatchKey key{geoHandle, materialIdx, meshComp.startIndex, meshComp.startVertex, meshComp.indexCount};
         auto &entry = batches[key];
         entry.instances.push_back(instData);
-        entry.probeIndex = probeIdx; // 批次内所有物体共享同一探针索引
+        entry.probeIndex = probeIdx;
     }
 
     for (auto &[key, entry] : batches) {
         auto &instances = entry.instances;
+        if (instances.empty())
+            continue;
 
-        D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer = m_frameResourceManager->AllocateInstance(
-            instances.data(), static_cast<uint32_t>(instances.size() * sizeof(InstanceData)));
+        uint32_t queueIndex = static_cast<uint32_t>(outQueue.Size());
+        uint32_t instCount = static_cast<uint32_t>(instances.size());
+        m_pendingBatches.push_back({std::move(instances), queueIndex});
 
         OpaqueRenderItem item =
-            OpaqueRenderItem::Create(key.geometry, key.materialIdx, instanceBuffer, (uint32_t)instances.size(),
+            OpaqueRenderItem::Create(key.geometry, key.materialIdx, 0, instCount,
                                      entry.probeIndex, key.startIndex, key.startVertex, key.indexCount);
+        item.tempSlot = static_cast<uint32_t>(m_pendingBatches.size() - 1);
         outQueue.Add(item);
     }
 }

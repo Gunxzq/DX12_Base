@@ -20,9 +20,10 @@ struct SkinnedRenderItem {
     uint32_t indexCount = 0;                     // 子集索引数量（非完整 mesh 的索引数）
     uint32_t startIndex = 0;                     // 索引起始偏移（子网格）
     int32_t startVertex = 0;                     // 顶点起始偏移（子网格）
+    uint32_t tempSlot = UINT32_MAX;              // 临时 InstanceData 槽位索引（FrameSync 解析）
 
     bool IsValid() const {
-        return geometryHandle.IsValid() && instanceBuffer != 0 && boneBufferAddress != 0 && instanceCount > 0;
+        return geometryHandle.IsValid() && instanceCount > 0;
     }
 
     static SkinnedRenderItem Create(Resource::GeometryHandle geometry, uint32_t materialIdx,

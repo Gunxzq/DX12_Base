@@ -65,6 +65,7 @@ void ProbeBuilder::Build(const ProbeCaptureInfo *probes, uint32_t probeCount, EC
             if (!meshComp)
                 continue;
 
+            // LOD 选择（探针用最高精度）
             GeometryHandle geoHandle;
             if (m_lodSystem && meshComp->lodMeshHandle.IsValid()) {
                 const auto *lodMesh = m_lodSystem->GetLODMesh(meshComp->lodMeshHandle);
@@ -77,18 +78,19 @@ void ProbeBuilder::Build(const ProbeCaptureInfo *probes, uint32_t probeCount, EC
             if (!transform)
                 continue;
 
-            // 世界空间包围球 + captureRange 剔除
+            // 探针 captureRange 剔除（用包围球距离判断）
+            // 探针有自身的 capture 范围
             Math::BoundingSphere localSphere;
             std::visit(
                 [&](const auto &bounds) {
                     using T = std::decay_t<decltype(bounds)>;
-                    if constexpr (std::is_same_v<T, Math::BoundingSphere>) {
-                        localSphere = bounds; // 直接拷贝
-                    } else {
-                        localSphere = bounds.ToSphere(); // 转换
-                    }
+                    if constexpr (std::is_same_v<T, Math::BoundingSphere>)
+                        localSphere = bounds;
+                    else
+                        localSphere = bounds.ToSphere();
                 },
                 meshComp->localBounds);
+
             DirectX::XMMATRIX world = transform->GetMatrix();
             DirectX::XMVECTOR worldCenter =
                 DirectX::XMVector3Transform(DirectX::XMLoadFloat3(&localSphere.center), world);
@@ -120,7 +122,6 @@ void ProbeBuilder::Build(const ProbeCaptureInfo *probes, uint32_t probeCount, EC
 
         for (auto &[key, entry] : batches) {
             auto &instances = entry.instances;
-
             D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer = m_frameResourceManager->AllocateInstance(
                 instances.data(), static_cast<uint32_t>(instances.size() * sizeof(InstanceData)));
 

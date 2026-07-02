@@ -14,14 +14,15 @@ struct OpaqueRenderItem {
 
     Resource::GeometryHandle geometryHandle;
     uint32_t materialIndex;
-    D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer; // InstanceData 数组 GPU 地址
+    D3D12_GPU_VIRTUAL_ADDRESS instanceBuffer; // InstanceData 数组 GPU 地址（FrameSync 填充）
     uint32_t instanceCount;                   // 实例数量（单物体=1）
     uint32_t probeIndex = UINT32_MAX;         // 反射探针索引 (UINT32_MAX = 无反射)
     uint32_t startIndex = 0;                  // 索引缓冲起始偏移（子网格）
     int32_t startVertex = 0;                  // 顶点缓冲起始偏移（子网格）
     uint32_t indexCount = 0;                  // 绘制索引数（0 = 使用 mesh->indexCount）
+    uint32_t tempSlot = UINT32_MAX;           // 临时 InstanceData 槽位索引（FrameSync 解析）
 
-    bool IsValid() const { return geometryHandle.IsValid() && instanceBuffer != 0 && instanceCount > 0; }
+    bool IsValid() const { return geometryHandle.IsValid() && instanceCount > 0; }
 
     // 工厂方法
     static OpaqueRenderItem Create(Resource::GeometryHandle geometry, uint32_t materialIdx,

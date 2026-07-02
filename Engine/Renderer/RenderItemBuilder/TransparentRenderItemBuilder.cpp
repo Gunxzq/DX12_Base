@@ -17,74 +17,89 @@ TransparentRenderItemBuilder::TransparentRenderItemBuilder(FrameResourceManager 
     : m_frameResourceManager(frameResources), m_materialManager(materialManager), m_textureManager(textureManager),
       m_cameraManager(cameraManager) {}
 
-void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<TransparentRenderItem> &outQueue) {
-    outQueue.Clear();
+uint32_t TransparentRenderItemBuilder::Count(ECS::Registry &registry) {
+    if (!m_frustum)
+        return 0;
 
-    // 获取相机位置，用于计算深度
-    DirectX::XMFLOAT3 cameraPos = {0.0f, 0.0f, 0.0f};
-    if (m_cameraManager) {
-        const auto &camera = m_cameraManager->GetMainCamera();
-        cameraPos = camera.Position;
-    }
+    uint32_t count = 0;
+    auto view = registry.view<TransparentMeshComponent, TransformComponent>();
+    for (auto entity : view) {
+        auto &comp = view.get<TransparentMeshComponent>(entity);
+        auto &transform = view.get<TransformComponent>(entity);
 
-    for (auto entity : m_cullingResult->visibleEntities) {
-        // 只处理有 TransparentMeshComponent 的实体
-        auto *transparentComp = registry.TryGetComponent<TransparentMeshComponent>(entity);
-        if (!transparentComp)
+        if (!FrustumCull(comp.localBounds, transform.GetMatrix(), *m_frustum))
             continue;
 
-        // 从 LODResult 获取几何体
-        GeometryHandle geoHandle = m_lodResult->GetHandle(entity);
+        GeometryHandle geoHandle;
+        if (m_lodSystem && comp.lodMeshHandle.IsValid()) {
+            const auto *lodMesh = m_lodSystem->GetLODMesh(comp.lodMeshHandle);
+            if (lodMesh)
+                geoHandle = PickLOD(*lodMesh, transform.position, m_cameraPos, m_lodSystem->GetLODConfig());
+        }
+        if (!geoHandle.IsValid() || !comp.materialHandle.IsValid() || !comp.textureHandle.IsValid())
+            continue;
+
+        count++;
+    }
+    return count;
+}
+
+void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<TransparentRenderItem> &outQueue) {
+    outQueue.Clear();
+    m_pendingBatches.clear();
+
+    if (!m_frustum)
+        return;
+
+    auto view = registry.view<TransparentMeshComponent, TransformComponent>();
+    for (auto entity : view) {
+        auto &comp = view.get<TransparentMeshComponent>(entity);
+        auto &transform = view.get<TransformComponent>(entity);
+
+        if (!FrustumCull(comp.localBounds, transform.GetMatrix(), *m_frustum))
+            continue;
+
+        GeometryHandle geoHandle;
+        if (m_lodSystem && comp.lodMeshHandle.IsValid()) {
+            const auto *lodMesh = m_lodSystem->GetLODMesh(comp.lodMeshHandle);
+            if (lodMesh)
+                geoHandle = PickLOD(*lodMesh, transform.position, m_cameraPos, m_lodSystem->GetLODConfig());
+        }
         if (!geoHandle.IsValid())
             continue;
 
-        auto *transform = registry.TryGetComponent<TransformComponent>(entity);
-        if (!transform)
-            continue;
-
-        // 获取材质和纹理
-        MaterialHandle materialHandle = transparentComp->materialHandle;
-        TextureHandle textureHandle = transparentComp->textureHandle;
+        MaterialHandle materialHandle = comp.materialHandle;
+        TextureHandle textureHandle = comp.textureHandle;
         if (!materialHandle.IsValid() || !textureHandle.IsValid())
             continue;
 
-        // TODO(StaticComponent): 静态优化暂未启用，全部走动态路径
-        // auto *staticComp = registry.TryGetComponent<StaticComponent>(entity);
-        // bool isStatic = (staticComp != nullptr);
+        float depth = CalculateDepth(transform.position, m_cameraPos);
 
-        // 计算到相机的距离（用于远到近排序）
-        float depth = CalculateDepth(transform->position, cameraPos);
-
-        // 构建 ObjectConstants
         ObjectConstants objCB;
-        XMMATRIX world;
-
-        // 每帧重新计算 World 矩阵（静态优化禁用后统一路径）
-        world = transform->GetMatrix();
+        XMMATRIX world = transform.GetMatrix();
         XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
         XMStoreFloat4x4(&objCB.World, world);
         XMStoreFloat4x4(&objCB.WorldInvTranspose, worldInvTranspose);
-
         objCB.MaterialIndex = m_materialManager->GetGPUIndex(materialHandle);
-        objCB.ReceiveShadow = 0; // 透明物体通常不接收阴影
+        objCB.ReceiveShadow = 0;
 
-        // TODO(StaticComponent): 静态优化暂未启用，全部走动态路径
-        D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress =
-            m_frameResourceManager->AllocateObjectCB(&objCB, sizeof(ObjectConstants));
+        // 暂存 ObjectConstants 到 PendingBatch，FrameSync 统一上传
+        auto &batch = m_pendingBatches.emplace_back();
+        batch.object = objCB;
+        uint32_t batchIdx = static_cast<uint32_t>(m_pendingBatches.size() - 1);
 
-        // 构建渲染项
         TransparentRenderItem item;
         item.geometryHandle = geoHandle;
         item.worldMatrix = world;
-        item.objectCBAddress = objectCBAddress;
+        item.objectCBAddress = 0; // FrameSync 回填
         item.materialIndex = objCB.MaterialIndex;
         item.textureSRV = m_textureManager->GetSRV(textureHandle);
         item.depth = depth;
+        item.tempSlot = batchIdx;
 
         outQueue.Add(item);
     }
 
-    // 透明物体：从远到近排序（depth 降序）
     outQueue.Sort([](const TransparentRenderItem &a, const TransparentRenderItem &b) { return a.depth > b.depth; });
 }
 
