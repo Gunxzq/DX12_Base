@@ -33,6 +33,7 @@ void CameraManager::Initialize(uint32_t initialWidth, uint32_t initialHeight) {
     m_mainCamera.AspectRatio = static_cast<float>(initialWidth) / static_cast<float>(initialHeight);
     m_mainCamera.NearPlane = 0.5f;
     m_mainCamera.FarPlane = 100.0f;
+    m_mainCamera.CullFarPlane = 1000.0f;
     m_mainCamera.Position = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
     // 初始计算一次矩阵
@@ -54,6 +55,7 @@ PredictedCameraData CameraManager::GetPredictedCameraData(float dt, float predic
     result.AspectRatio = m_mainCamera.AspectRatio;
     result.NearPlane = m_mainCamera.NearPlane;
     result.FarPlane = m_mainCamera.FarPlane;
+    result.CullFarPlane = m_mainCamera.CullFarPlane;
     result.InverseViewProj = m_mainCamera.InverseViewProj;
 
     float dtK = dt * predictionFactor;

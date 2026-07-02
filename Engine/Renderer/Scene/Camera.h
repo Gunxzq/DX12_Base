@@ -27,7 +27,8 @@ struct Camera {
 
     // 通用裁剪面
     float NearPlane = 0.5f;
-    float FarPlane = 100.0f;
+    float FarPlane = 100.0f;      // 渲染视锥远平面（紧，用于投影矩阵/深度缓冲/SSAO）
+    float CullFarPlane = 1000.0f; // 剔除视锥远平面（宽，用于 CPU 视锥剔除）
 
     XMFLOAT3 Position = {0.0f, 0.0f, 0.0f};
     XMFLOAT3 Rotation = {0.0f, 0.0f, 0.0f}; // Pitch, Yaw, Roll (弧度)

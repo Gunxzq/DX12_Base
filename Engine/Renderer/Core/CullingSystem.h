@@ -18,7 +18,7 @@ class CameraManager;
 struct PredictedCameraData;
 
 // ============================================================================
-// 剔除系统 — 仅提供视锥体维护（供 VisibleRaycaster 等使用）
+// 剔除系统 — 维护双视锥体（剔除 + 渲染）
 // ============================================================================
 class CullingSystem {
 public:
@@ -30,13 +30,17 @@ public:
 
     void SetCamera(const PredictedCameraData &camera);
 
-    /// 获取当前视锥体（供 Builder/CullingUtil 使用）
-    const Frustum &GetFrustum() const { return m_frustum; }
-    bool HasFrustum() const { return m_hasFrustum; }
+    /// 获取剔除视锥体（宽远平面，供 Builder/CullingUtil 做 CPU 剔除）
+    const Frustum &GetFrustum() const { return m_cullFrustum; }
+    bool HasFrustum() const { return m_hasCullFrustum; }
+
+    /// 获取渲染视锥体（紧远平面，用于投影矩阵/SSAO/Shadow Map 空间计算）
+    const Frustum &GetRenderFrustum() const { return m_renderFrustum; }
 
 private:
-    Frustum m_frustum;
-    bool m_hasFrustum = false;
+    Frustum m_cullFrustum;    // 剔除视锥（宽范围）
+    Frustum m_renderFrustum;  // 渲染视锥（紧范围）
+    bool m_hasCullFrustum = false;
 };
 
 } // namespace Renderer

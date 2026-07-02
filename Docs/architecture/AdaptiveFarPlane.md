@@ -84,4 +84,42 @@
 
 ## 状态
 
-待实现。
+### 已实现
+
+- **双视锥体 (Dual Frustum)** — 基础架构已就绪
+
+| 组件 | 实现状态 | 说明 |
+|------|:--------:|------|
+| `Camera::CullFarPlane` | ✅ | 剔除远平面，默认 `1000.0` |
+| `Camera::FarPlane` | ✅ | 渲染远平面，默认 `100.0`（原字段，语义变为渲染远平面） |
+| `PredictedCameraData::CullFarPlane` | ✅ | 预测数据携带双远平面 |
+| `CullingSystem::m_cullFrustum` | ✅ | 剔除视锥（宽范围，Builder 用） |
+| `CullingSystem::m_renderFrustum` | ✅ | 渲染视锥（紧范围，SSAO/深度计算用） |
+| `CullingSystem::GetRenderFrustum()` | ✅ | 新增接口 |
+| `Camera::CalculateMatrices()` | ✅ | 投影矩阵自动用 `FarPlane=100`（紧） |
+
+#### 当前数据流
+
+```
+每一帧:
+  1. CullingCameraUpdate → GetPredictedCameraData() → FarPlane=100, CullFarPlane=1000
+  2. CullingSystem::SetCamera() → 构建两个视锥体
+  3. BuilderUpload → GetFrustum() → 剔除视锥（宽）做 CPU 剔除
+  4. PassConstants → Camera::ProjMatrix → 渲染视锥（紧）设投影矩阵
+  5. SSAO/Shadow Map → 使用紧远平面的深度缓冲，精度受益
+```
+
+#### 后续待实现
+
+- **动态渲染远平面** — 当前 `FarPlane=100` 仍为固定值
+  - 需引入八叉树查询最远可见物体距离
+  - 动态计算 `targetFarPlane`，替代硬编码 `100`
+- **帧间平滑插值** — `FarPlane = lerp(FarPlane, targetFarPlane, 0.1f)` 防止跳变
+- **八叉树空间分区** — 用于高效查询视锥内最远物体
+
+---
+
+## 优先级
+
+1. ✅ **双视锥体** — 已完成
+2. ❌ **八叉树自适应** — 待实现（SSAO 功能稳定后推进）

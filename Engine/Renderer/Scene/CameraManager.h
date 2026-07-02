@@ -19,7 +19,8 @@ struct PredictedCameraData {
     float FOV = 0.0f;
     float AspectRatio = 0.0f;
     float NearPlane = 0.0f;
-    float FarPlane = 0.0f;
+    float FarPlane = 0.0f;       // 渲染远平面（紧）
+    float CullFarPlane = 0.0f;   // 剔除远平面（宽）
 };
 
 class CameraManager {
