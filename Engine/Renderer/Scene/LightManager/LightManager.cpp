@@ -51,8 +51,8 @@ void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *de
     }
 
     // 初始化内部 RingBuffer
-    m_lightBuffer.Initialize(device, DEFAULT_LIGHT_BUFFER_SIZE);
-    m_dirShadowBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE);
+    m_lightBuffer.Initialize(device, DEFAULT_LIGHT_BUFFER_SIZE, L"LightManager_LightBuffer");
+    m_dirShadowBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE, L"LightManager_DirShadowBuffer");
 
     // 创建阴影数据 StructuredBuffer (UPLOAD 堆，每帧 UpdateAndUpload 写入)
     {

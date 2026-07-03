@@ -2,6 +2,7 @@
 
 #include "Common/d3dUtil.h"
 #include <queue>
+#include <string>
 #include <wrl/client.h>
 
 namespace DX12Engine::Renderer {
@@ -20,7 +21,8 @@ public:
     RingBuffer(const RingBuffer &) = delete;
     RingBuffer &operator=(const RingBuffer &) = delete;
 
-    bool Initialize(ID3D12Device *device, uint32_t size, D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_UPLOAD);
+    bool Initialize(ID3D12Device *device, uint32_t size, const std::wstring &name,
+                    D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_UPLOAD);
     void Shutdown();
     void Reset();
 
@@ -44,6 +46,8 @@ public:
     // 获取 GPU 地址（基于偏移）
     D3D12_GPU_VIRTUAL_ADDRESS GetGPUAddress(uint32_t offset) const;
 
+    const std::wstring &GetName() const { return m_name; }
+
     // 释放指定偏移的空间（标记待回收）
     void Free(uint32_t offset, uint64_t fence);
 
@@ -65,6 +69,7 @@ private:
     uint32_t m_tail = 0;          // 读指针（已回收位置）
     uint32_t m_allocatedSize = 0; // 当前已分配总量
     std::queue<PendingAlloc> m_pending;
+    std::wstring m_name;
     bool m_initialized = false;
 };
 

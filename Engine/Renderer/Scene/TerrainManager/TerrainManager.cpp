@@ -33,7 +33,7 @@ void TerrainManager::Initialize(ID3D12Device *device, uint32_t bufferSize) {
     m_bufferSize = bufferSize;
 
     // 初始化常量缓冲区 RingBuffer
-    m_constantBuffer.Initialize(device, bufferSize);
+    m_constantBuffer.Initialize(device, bufferSize, L"TerrainManager_ConstantBuffer");
 
     m_activeAllocations.clear();
 
@@ -179,7 +179,7 @@ bool TerrainManager::ReallocateBuffer(uint32_t requiredSize) {
 
     // 重新初始化 RingBuffer
     m_constantBuffer.Shutdown();
-    m_constantBuffer.Initialize(m_device, newSize);
+    m_constantBuffer.Initialize(m_device, newSize, m_constantBuffer.GetName());
 
     // 注意：扩容后原有的偏移量失效，需要重新分配
     // 调用者需要处理重新上传数据

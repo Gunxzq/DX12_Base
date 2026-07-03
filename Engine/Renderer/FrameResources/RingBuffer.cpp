@@ -8,7 +8,8 @@ namespace DX12Engine::Renderer {
 
 RingBuffer::~RingBuffer() { Shutdown(); }
 
-bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, D3D12_HEAP_TYPE heapType) {
+bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, const std::wstring &name,
+                            D3D12_HEAP_TYPE heapType) {
     if (m_initialized) {
         Shutdown();
     }
@@ -16,6 +17,8 @@ bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, D3D12_HEAP_TYPE
     if (size == 0 || !device) {
         return false;
     }
+
+    m_name = name;
 
     CD3DX12_HEAP_PROPERTIES heapProps(heapType);
     auto desc = CD3DX12_RESOURCE_DESC::Buffer(size);
@@ -27,7 +30,8 @@ bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, D3D12_HEAP_TYPE
         return false;
     }
 
-    m_resource->SetName(L"RingBuffer");
+    if (!m_name.empty())
+        m_resource->SetName(m_name.c_str());
 
     hr = m_resource->Map(0, nullptr, &m_mappedData);
     if (FAILED(hr)) {

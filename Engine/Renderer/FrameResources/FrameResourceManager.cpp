@@ -48,10 +48,10 @@ void FrameResourceManager::Initialize(ID3D12Device *device, DescriptorHeapCollec
     // 初始化每帧的环形缓冲区（预分配 16MB 每类型）
     const uint32_t DEFAULT_BUFFER_SIZE = 16 * 1024 * 1024; // 16MB
 
-    m_objectCB.Initialize(device, DEFAULT_BUFFER_SIZE);
-    m_skinning.Initialize(device, DEFAULT_BUFFER_SIZE);
-    m_instance.Initialize(device, DEFAULT_BUFFER_SIZE);
-    m_waterCB.Initialize(device, DEFAULT_BUFFER_SIZE);
+    m_objectCB.Initialize(device, DEFAULT_BUFFER_SIZE, L"FrameResource_ObjectCB");
+    m_skinning.Initialize(device, DEFAULT_BUFFER_SIZE, L"FrameResource_Skinning");
+    m_instance.Initialize(device, DEFAULT_BUFFER_SIZE, L"FrameResource_Instance");
+    m_waterCB.Initialize(device, DEFAULT_BUFFER_SIZE, L"FrameResource_WaterCB");
 
     m_passConstants = {};
     UpdatePassConstants();
@@ -130,7 +130,7 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateWithRetry(RingBuffer &bu
         swprintf_s(msg, L"[WARN] FrameResourceManager: RingBuffer expanding from %u to %u bytes (requested %u)\n",
                    buffer.GetSize(), newSize, size);
         OutputDebugStringW(msg);
-        buffer.Initialize(m_device, newSize);
+        buffer.Initialize(m_device, newSize, buffer.GetName());
 
         if (data) {
             addr = buffer.AllocateUpload(data, size, fence);
