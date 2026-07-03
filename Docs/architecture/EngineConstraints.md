@@ -44,6 +44,21 @@
 - `AnimationStateMachine`（消息 System）响应 `PlayAnimationEvent` / `StopAnimationEvent`
 - Builder 只读 SkinnedComponent，根据 `boneBufferIndex` 标记 InstanceData
 
+## GPU 资源状态管理
+
+- 资源管理器/池（`RenderTargetPool`、`GpuResourceManager`）只负责资源生命周期
+- **管理器不追踪也不重置 GPU resource state**
+- 使用资源的 system 必须在自己管理的命令列表中通过 `ResourceBarrier` 将资源转到所需状态
+- **不能假设资源初始状态为 `COMMON`**：池化资源被释放后可能在任意 GPU 状态，复用时状态不会重置
+- `OnResize`/重建资源的方法必须检查尺寸是否真实变化，避免窗口初始化过程中重复重建
+
+### ResourceBarrier 规则
+
+1. 每个 system 独立管理其使用的所有资源的屏障
+2. system 不能假定上一个 system 留下了什么状态——它必须自己处理
+3. 推荐模式：`COMMON → 目标状态 → 工作 → COMMON`，保证帧间状态一致
+4. 如果有多条 code path（如 blur PSO 未就绪时提前返回），**所有路径都必须做屏障回退**
+
 ## 组件与渲染项的关系
 
 - **组件**：持久化存储，ECS Registry 管理生命周期
