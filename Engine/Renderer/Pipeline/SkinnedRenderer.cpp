@@ -23,10 +23,23 @@ void SkinnedRenderer::Initialize() {
         OutputDebugStringW(L"[ERROR] SkinnedRenderer::Initialize - DeviceContext not set!\n");
         return;
     }
-    LoadShaders();
-    CreateRootSignature();
-    CreatePSOs();
-    OutputDebugStringW(L"[INFO] SkinnedRenderer initialized\n");
+
+    // 编译蒙皮顶点着色器（G-buffer PSO 使用）
+    {
+        UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
+        Microsoft::WRL::ComPtr<ID3DBlob> errors;
+        HRESULT hr = D3DCompileFromFile(L"Shaders/skinned.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                                        "VS", "vs_5_1", compileFlags, 0, &m_vsBlob, &errors);
+        if (FAILED(hr)) {
+            if (errors) OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+            ThrowIfFailed(hr);
+        }
+    }
+
+    LoadGBufferShader();
+    CreateGBufferRootSignature();
+    CreateGBufferPSO();
+    OutputDebugStringW(L"[INFO] SkinnedRenderer initialized (GBuffer only)\n");
 }
 
 void SkinnedRenderer::OnResize(uint32_t width, uint32_t height) {
@@ -36,116 +49,75 @@ void SkinnedRenderer::OnResize(uint32_t width, uint32_t height) {
 
 void SkinnedRenderer::Update(float deltaTime) { (void)deltaTime; }
 
-void SkinnedRenderer::EndFrame() {}
-
 // ========================================================================
-// 着色器加载
+// G-buffer 支持
 // ========================================================================
 
-void SkinnedRenderer::LoadShaders() {
+void SkinnedRenderer::LoadGBufferShader() {
     UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
-
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
-
-    HRESULT hr = D3DCompileFromFile(L"Shaders/skinned.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
-                                    compileFlags, 0, &m_vsBlob, &errors);
+    HRESULT hr = D3DCompileFromFile(L"Shaders/skinned.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                                    "PS_GBuffer", "ps_5_1", compileFlags, 0, &m_psGBufferBlob, &errors);
     if (FAILED(hr)) {
-        if (errors) {
-            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
-        }
-        ThrowIfFailed(hr);
-    }
-
-    errors = nullptr;
-    hr = D3DCompileFromFile(L"Shaders/skinned.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1",
-                            compileFlags, 0, &m_psBlob, &errors);
-    if (FAILED(hr)) {
-        if (errors) {
-            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
-        }
+        if (errors) OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         ThrowIfFailed(hr);
     }
 }
 
-// ========================================================================
-// 根签名
-//   slot 0: b1  cbPass             (CBV, ALL)
-//   slot 1: b2  cbLights           (CBV, PS)
-//   slot 2: t0,space1  MaterialData StructuredBuffer (SRV, PS)
-//   slot 3: t0           Texture2D[] 纹理数组 (SRV, PS)
-//   slot 4: t12,space1  InstanceData StructuredBuffer (SRV, VS)
-//   slot 5: t13,space1  BoneTransforms StructuredBuffer (SRV, VS)
-//   slot 6: t10         环境贴图 TextureCube (SRV, PS)
-// ========================================================================
-
-void SkinnedRenderer::CreateRootSignature() {
+void SkinnedRenderer::CreateGBufferRootSignature() {
     auto device = m_context->GetDevice();
-
-    CD3DX12_ROOT_PARAMETER slotRootParameter[7];
-
-    // slot 0: b1 cbPass
-    slotRootParameter[0].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
-    // slot 1: b2 cbLights
-    slotRootParameter[1].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_PIXEL);
-
-    // slot 2: t0,space1 MaterialData StructuredBuffer (描述符表)
-    CD3DX12_DESCRIPTOR_RANGE materialRange;
-    materialRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1);
-    slotRootParameter[2].InitAsDescriptorTable(1, &materialRange, D3D12_SHADER_VISIBILITY_PIXEL);
-
-    // slot 3: t0 纹理数组 (描述符表)
+    // 保持与前向根签名相同的槽位索引，便于 DrawItems 复用
+    //   slot 0: b1 cbPass
+    //   slot 1: (未使用, 占位保持索引对齐)
+    //   slot 2: t0,space1 MaterialData SRV
+    //   slot 3: t0,space2 Texture heap
+    //   slot 4: t12,space1 InstanceData SRV
+    //   slot 5: t13,space1 BoneTransforms SRV
+    CD3DX12_ROOT_PARAMETER params[6];
+    params[0].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
+    CD3DX12_DESCRIPTOR_RANGE dummyRange;
+    dummyRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0);
+    params[1].InitAsDescriptorTable(1, &dummyRange, D3D12_SHADER_VISIBILITY_PIXEL);
+    CD3DX12_DESCRIPTOR_RANGE matRange;
+    matRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1);
+    params[2].InitAsDescriptorTable(1, &matRange, D3D12_SHADER_VISIBILITY_PIXEL);
     CD3DX12_DESCRIPTOR_RANGE texRange;
     texRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 2);
-    slotRootParameter[3].InitAsDescriptorTable(1, &texRange, D3D12_SHADER_VISIBILITY_PIXEL);
+    params[3].InitAsDescriptorTable(1, &texRange, D3D12_SHADER_VISIBILITY_PIXEL);
+    params[4].InitAsShaderResourceView(12, 1, D3D12_SHADER_VISIBILITY_VERTEX);
+    params[5].InitAsShaderResourceView(13, 1, D3D12_SHADER_VISIBILITY_VERTEX);
 
-    // slot 4: t12,space1 InstanceData SRV
-    slotRootParameter[4].InitAsShaderResourceView(12, 1, D3D12_SHADER_VISIBILITY_VERTEX);
-    // slot 5: t13,space1 BoneTransforms SRV
-    slotRootParameter[5].InitAsShaderResourceView(13, 1, D3D12_SHADER_VISIBILITY_VERTEX);
+    CD3DX12_STATIC_SAMPLER_DESC samplers[3];
+    samplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    samplers[1].Init(1, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    samplers[2].Init(2, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, 0.0f, 8);
 
-    // slot 6: t10 环境贴图 (描述符表)
-    CD3DX12_DESCRIPTOR_RANGE envRange;
-    envRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0);
-    slotRootParameter[6].InitAsDescriptorTable(1, &envRange, D3D12_SHADER_VISIBILITY_PIXEL);
-
-    // 静态采样器
-    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[4];
-    staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
-    staticSamplers[1].Init(1, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
-    staticSamplers[2].Init(2, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-                           D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, 0.0f, 8);
-    staticSamplers[3].Init(10, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(7, slotRootParameter, 4, staticSamplers,
-                                            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-    Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
-    Microsoft::WRL::ComPtr<ID3DBlob> errorBlob = nullptr;
-    HRESULT hr =
-        D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRootSig, &errorBlob);
-    if (errorBlob) {
-        OutputDebugStringA(reinterpret_cast<const char *>(errorBlob->GetBufferPointer()));
-    }
-    ThrowIfFailed(hr);
-    ThrowIfFailed(device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(),
-                                              serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
+    CD3DX12_ROOT_SIGNATURE_DESC rsDesc(6, params, 3, samplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    Microsoft::WRL::ComPtr<ID3DBlob> sig, err;
+    D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err);
+    if (err) OutputDebugStringA(reinterpret_cast<const char *>(err->GetBufferPointer()));
+    device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(), IID_PPV_ARGS(&m_gbufferRootSignature));
 }
 
-// ========================================================================
-// PSO 创建 — 两个变体：不透明 / 透明
-// ========================================================================
-
-void SkinnedRenderer::CreatePSOs() {
-    if (!m_rootSignature || !m_vsBlob || !m_psBlob)
-        return;
-
+void SkinnedRenderer::CreateGBufferPSO() {
     auto device = m_context->GetDevice();
-
-    // 输入布局：M3dVertex (64 bytes, 含骨骼权重/索引)
-    // .m3d 存储顺序: Pos(0) | TangentU(12) | Normal(24) | TexC(36) | BoneWeights(44) | BoneIndices(60)
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_gbufferRootSignature.Get();
+    psoDesc.VS = {m_vsBlob->GetBufferPointer(), m_vsBlob->GetBufferSize()};
+    psoDesc.PS = {m_psGBufferBlob->GetBufferPointer(), m_psGBufferBlob->GetBufferSize()};
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 4;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc.Count = 1;
+    // Input layout: PosL(12) + TangentU(12) + NormalL(12) + TexC(8) + BoneWeights(16) + BoneIndices(16)
     D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
@@ -154,105 +126,33 @@ void SkinnedRenderer::CreatePSOs() {
         {"BLENDWEIGHTS", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 44, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"BLENDINDICES", 0, DXGI_FORMAT_R8G8B8A8_UINT, 0, 60, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
     };
-
-    // --- PSO 公共部分 ---
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = {inputLayout, _countof(inputLayout)};
-    psoDesc.pRootSignature = m_rootSignature.Get();
-    psoDesc.VS = {reinterpret_cast<BYTE *>(m_vsBlob->GetBufferPointer()), m_vsBlob->GetBufferSize()};
-    psoDesc.PS = {reinterpret_cast<BYTE *>(m_psBlob->GetBufferPointer()), m_psBlob->GetBufferSize()};
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    psoDesc.RasterizerState.FrontCounterClockwise = TRUE; // .m3d 模型使用逆时针绕序（OpenGL 习惯）
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = m_context->GetBackBufferFormat();
-    psoDesc.DSVFormat = m_context->GetDepthStencilFormat();
-    psoDesc.SampleDesc.Count = m_context->Is4xMsaaEnabled() ? 4 : 1;
-    psoDesc.SampleDesc.Quality = m_context->Is4xMsaaEnabled() ? (m_context->Get4xMsaaQuality() - 1) : 0;
-
-    // --- 变体 1：不透明蒙皮 ---
-    {
-        D3D12_DEPTH_STENCIL_DESC ds = {};
-        ds.DepthEnable = TRUE;
-        ds.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-        ds.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-        ds.StencilEnable = FALSE;
-
-        D3D12_BLEND_DESC blend = {};
-        blend.RenderTarget[0].BlendEnable = FALSE;
-        blend.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
-        psoDesc.DepthStencilState = ds;
-        psoDesc.BlendState = blend;
-
-        HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_psoOpaque));
-        if (FAILED(hr)) {
-            OutputDebugStringW(L"[ERROR] SkinnedRenderer: Failed to create opaque PSO\n");
-        }
-    }
-
-    // --- 变体 2：透明蒙皮 ---
-    {
-        D3D12_DEPTH_STENCIL_DESC ds = {};
-        ds.DepthEnable = TRUE;
-        ds.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // 透明不写深度
-        ds.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-        ds.StencilEnable = FALSE;
-
-        D3D12_BLEND_DESC blend = {};
-        blend.RenderTarget[0].BlendEnable = TRUE;
-        blend.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-        blend.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-        blend.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-        blend.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-        blend.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
-        blend.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blend.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
-        psoDesc.DepthStencilState = ds;
-        psoDesc.BlendState = blend;
-
-        HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_psoTransparent));
-        if (FAILED(hr)) {
-            OutputDebugStringW(L"[ERROR] SkinnedRenderer: Failed to create transparent PSO\n");
-        }
-    }
+    psoDesc.InputLayout = {inputLayout, 6};
+    device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_gbufferPSO));
+    OutputDebugStringW(L"[INFO] SkinnedRenderer: GBuffer PSO created\n");
 }
 
 // ========================================================================
-// BeginFrame — 绑定根签名 + 全局资源（一次设置，持续到 EndFrame）
+// G-buffer 渲染
 // ========================================================================
 
-void SkinnedRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
-                                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
-                                 D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) {
-    if (!m_rootSignature)
-        return;
-
-    cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
-
-    // slot 0: cbPass
+void SkinnedRenderer::BeginFrameGBuffer(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
+                                        D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
+                                        D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart) {
+    if (!m_gbufferRootSignature) return;
+    cmdList.Get()->SetGraphicsRootSignature(m_gbufferRootSignature.Get());
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, passConstantsAddress);
-    // slot 1: cbLights
-    cmdList.Get()->SetGraphicsRootConstantBufferView(1, lightCBAddress);
-
-    // slot 2: MaterialData SRV
-    if (materialBufferSRV.ptr != 0) {
+    // slot 1: dummy（占位）
+    if (materialBufferSRV.ptr != 0)
         cmdList.Get()->SetGraphicsRootDescriptorTable(2, materialBufferSRV);
-    }
-
-    // slot 3: 纹理数组
-    if (textureHeapStart.ptr != 0) {
+    if (textureHeapStart.ptr != 0)
         cmdList.Get()->SetGraphicsRootDescriptorTable(3, textureHeapStart);
-    }
-
-    // slot 6: 环境贴图
-    if (envMapSRV.ptr != 0) {
-        cmdList.Get()->SetGraphicsRootDescriptorTable(6, envMapSRV);
-    }
 }
+
+void SkinnedRenderer::DrawGBuffer(CommandList &cmdList, const TRenderQueue<SkinnedRenderItem> &queue) {
+    DrawItems(cmdList, queue, m_gbufferPSO.Get());
+}
+
+void SkinnedRenderer::EndFrameGBuffer() {}
 
 // ========================================================================
 // DrawItems — 内部：遍历队列，设置 PSO + 逐实例数据 + 绘制
@@ -302,14 +202,6 @@ void SkinnedRenderer::DrawItems(CommandList &cmdList, const TRenderQueue<Skinned
         cmdList.Get()->DrawIndexedInstanced(item.indexCount > 0 ? item.indexCount : mesh->indexCount,
                                             item.instanceCount, item.startIndex, item.startVertex, 0);
     }
-}
-
-void SkinnedRenderer::DrawOpaque(CommandList &cmdList, const TRenderQueue<SkinnedRenderItem> &queue) {
-    DrawItems(cmdList, queue, m_psoOpaque.Get());
-}
-
-void SkinnedRenderer::DrawTransparent(CommandList &cmdList, const TRenderQueue<SkinnedRenderItem> &queue) {
-    DrawItems(cmdList, queue, m_psoTransparent.Get());
 }
 
 } // namespace DX12Engine::Renderer

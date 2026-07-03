@@ -103,98 +103,59 @@ float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, floa
     return mul(normalT, float3x3(T, B, N));
 }
 
-float4 PS(VertexOut pin) : SV_Target
-{
-    uint matIndex = gInstanceData[pin.InstanceIndex].MaterialIndex;
-    uint receiveShadow = gInstanceData[pin.InstanceIndex].ReceiveShadow;
-    uint probeIndex = gInstanceData[pin.InstanceIndex].ProbeIndex;
+// ========================================================================
+// PS_GBuffer — G-buffer MRT 输出（复用 VS）
+// SV_Target0: Albedo       (R8G8B8A8_UNORM)
+// SV_Target1: Normal       (R16G16B16A16_FLOAT) — 世界空间法线
+// SV_Target2: Material     (R8G8B8A8_UNORM) — R=Metallic, G=Roughness, B=AO
+// SV_Target3: WorldPos     (R16G16B16A16_FLOAT)
+// ========================================================================
+struct GBufferOutput {
+    float4 Albedo   : SV_Target0;
+    float4 Normal   : SV_Target1;
+    float4 Material : SV_Target2;
+    float4 WorldPos : SV_Target3;
+};
 
+GBufferOutput PS_GBuffer(VertexOut pin) {
+    GBufferOutput output = (GBufferOutput)0.0f;
+
+    uint matIndex = gInstanceData[pin.InstanceIndex].MaterialIndex;
     MaterialData matData = gMaterialData[matIndex];
 
     float4 texColor = 1.0f;
-    [flatten] if (matData.BaseColorTexIndex != 0xFFFFFFFF)
-    {
-        texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord);
+    [flatten] if (matData.BaseColorTexIndex != 0xFFFFFFFF) {
+        texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
     }
     float3 albedo = matData.BaseColor.rgb * texColor.rgb;
     float metallic = matData.Metallic;
     float roughness = matData.Roughness;
     float ao = matData.Ambient;
-    float3 emissive = matData.Emissive.rgb * matData.Emissive.w;
 
-    // PBR 贴图采样（替代固定值）
-    [flatten] if (matData.MetallicRoughnessTexIndex != 0xFFFFFFFF)
-    {
-        float2 mr = gTextureMaps[matData.MetallicRoughnessTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord).rg;
+    [flatten] if (matData.MetallicRoughnessTexIndex != 0xFFFFFFFF) {
+        float2 mr = gTextureMaps[matData.MetallicRoughnessTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord).rg;
         metallic = mr.r;
         roughness = mr.g;
     }
-    [flatten] if (matData.OcclusionTexIndex != 0xFFFFFFFF)
-    {
-        ao = gTextureMaps[matData.OcclusionTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord).r;
+    [flatten] if (matData.OcclusionTexIndex != 0xFFFFFFFF) {
+        ao = gTextureMaps[matData.OcclusionTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord).r;
     }
 
+    // 法线贴图 TBN 变换
     float3 N = normalize(pin.WorldNormal);
-    float4 normalSample = float4(0.5f, 0.5f, 1.0f, 1.0f);
-    // 法线贴图：如果有有效的 NormalTexIndex，采样并变换到世界空间
-    [flatten] if (matData.NormalTexIndex != 0xFFFFFFFF)
-    {
-        normalSample = gTextureMaps[matData.NormalTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
-        // 法线强度调制：NormalStrength=0 时不扰动，=1 时完全扰动
+    [flatten] if (matData.NormalTexIndex != 0xFFFFFFFF) {
+        float4 normalSample = gTextureMaps[matData.NormalTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
         normalSample.rgb = lerp(float3(0.5f, 0.5f, 1.0f), normalSample.rgb, matData.NormalStrength);
         N = NormalSampleToWorldSpace(normalSample.rgb, N, normalize(pin.WorldTangent));
     }
-    float3 V = normalize(gCameraPos - pin.WorldPos);
 
-    // 法线贴图 Alpha 通道调制粗糙度（砖缝更光滑 → 高光更强，增强凹凸感）
-    float roughnessMod = 1.0f - normalSample.a;
-    roughness = saturate(roughness + roughnessMod * 0.3f);
+    output.Albedo = float4(albedo, 1.0f);
+    output.Normal = float4(N * 0.5f + 0.5f, 1.0f);
+    output.Material = float4(metallic, roughness, ao,
+                             (gInstanceData[pin.InstanceIndex].ProbeIndex != 0xFFFFFFFF)
+                                 ? (gInstanceData[pin.InstanceIndex].ProbeIndex + 1) / 255.0f
+                                 : 0.0f);
+    output.WorldPos = float4(pin.WorldPos, 1.0f);
 
-    Material mat;
-    mat.BaseColor = float4(albedo, matData.BaseColor.a);
-    mat.Metallic = metallic;
-    mat.Roughness = roughness;
-    mat.Ambient = ao;
-    mat.Emissive = float4(emissive, 1.0f);
-    mat.Alpha = matData.Alpha;
-    mat.AlphaCutoff = matData.AlphaCutoff;
-
-    // 环境光（采样 SSAO Map — 屏幕空间投影 UV）
-    float2 ssaoUV = pin.SsaoPosH.xy / pin.SsaoPosH.w;
-    ssaoUV = ssaoUV * float2(0.5f, -0.5f) + 0.5f;
-    float ssao = gSsaoMap.SampleLevel(gsamPointClamp, ssaoUV, 0.0f).r;
-    float3 ambient = gAmbientLight.xyz * gAmbientLight.w * albedo * ao * ssao;
-
-    // 直接光照（带阴影）
-    float3 directLight = 0;
-    for (uint i = 0; i < gNumDirLights; ++i)
-    {
-        float3 lightContrib = ComputeDirectionalLight(gLights[i], mat, N, V);
-
-        // 方向光阴影采样
-        if (gLights[i].ShadowMapIndex >= 0 && receiveShadow)
-        {
-            float shadow = SampleDirShadow((uint)gLights[i].ShadowMapIndex, pin.WorldPos, N, gLights[i].Direction.xyz);
-            lightContrib *= shadow;
-        }
-
-        directLight += lightContrib;
-    }
-    for (uint j = gNumDirLights; j < gNumDirLights + gNumPointLights; ++j)
-        directLight += ComputePointLight(gLights[j], mat, pin.WorldPos, N, V);
-    for (uint k = gNumDirLights + gNumPointLights; k < gNumDirLights + gNumPointLights + gNumSpotLights; ++k)
-        directLight += ComputeSpotLight(gLights[k], mat, pin.WorldPos, N, V);
-
-    // 环境反射（动态反射探针）
-    float3 reflectDir = reflect(-V, N);
-    float3 reflection = ComputeProbeReflection(reflectDir, albedo, metallic, roughness, N, V, probeIndex);
-    // 无动态探针时回退到静态天空盒环境贴图
-    if (probeIndex == 0xFFFFFFFF && reflection.r + reflection.g + reflection.b < 0.001f)
-    {
-        reflection = ComputeEnvironmentReflection(reflectDir, albedo, metallic, roughness, N, V);
-    }
-
-    float3 litColor = ambient + directLight + reflection + emissive;
-
-    return float4(litColor, mat.BaseColor.a);
+    return output;
 }

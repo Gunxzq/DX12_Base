@@ -87,7 +87,7 @@ VSOutput VS(VSInput vin, uint instanceId : SV_InstanceID)
 }
 
 // ========================================================================
-// PS — 纹理化漫反射光照（支持 BaseColor + Normal 贴图）
+// 材质数据与纹理资源（PS_GBuffer 共用）
 // ========================================================================
 struct MaterialData
 {
@@ -123,7 +123,6 @@ SamplerState gsamAnisotropicWrap : register(s2);
 float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, float3 tangentW)
 {
     float3 normalT = 2.0f * normalMapSample - 1.0f;
-    // BC5 法线贴图只存 R/G，重建 Z
     float lenSq = dot(normalT.xy, normalT.xy);
     normalT.z = sqrt(max(0.0f, 1.0f - lenSq));
     float3 N = unitNormalW;
@@ -132,32 +131,52 @@ float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, floa
     return mul(normalT, float3x3(T, B, N));
 }
 
-float4 PS(VSOutput pin) : SV_Target
-{
+// ========================================================================
+// PS_GBuffer — G-buffer MRT 输出（复用蒙皮 VS）
+// ========================================================================
+struct GBufferOutput {
+    float4 Albedo   : SV_Target0;
+    float4 Normal   : SV_Target1;
+    float4 Material : SV_Target2;
+    float4 WorldPos : SV_Target3;
+};
+
+GBufferOutput PS_GBuffer(VSOutput pin) {
+    GBufferOutput output = (GBufferOutput)0.0f;
+
     MaterialData mat = gMaterialData[pin.MatIdx];
 
-    // BaseColor = 材质固有色 * 漫反射贴图
+    // BaseColor
     float3 baseColor = mat.BaseColor.rgb;
     if (mat.BaseColorTextureIndex != 0xFFFFFFFF)
-    {
         baseColor *= gTextureMaps[mat.BaseColorTextureIndex].Sample(gsamLinearWrap, pin.TexC).rgb;
-    }
+    float3 albedo = baseColor;
+    float metallic = mat.Metallic;
+    float roughness = mat.Roughness;
+    float ao = mat.Ambient;
 
-    // 法线贴图
+    // MetallicRoughness 贴图
+    if (mat.MetallicRoughnessTextureIndex != 0xFFFFFFFF) {
+        float2 mr = gTextureMaps[mat.MetallicRoughnessTextureIndex].Sample(gsamAnisotropicWrap, pin.TexC).rg;
+        metallic = mr.r;
+        roughness = mr.g;
+    }
+    // Occlusion 贴图
+    if (mat.OcclusionTextureIndex != 0xFFFFFFFF)
+        ao = gTextureMaps[mat.OcclusionTextureIndex].Sample(gsamAnisotropicWrap, pin.TexC).r;
+
+    // 法线 TBN 变换
     float3 N = normalize(pin.NormalW);
-    if (mat.NormalTextureIndex != 0xFFFFFFFF)
-    {
+    if (mat.NormalTextureIndex != 0xFFFFFFFF) {
         float4 normalSample = gTextureMaps[mat.NormalTextureIndex].Sample(gsamAnisotropicWrap, pin.TexC);
-        // 法线强度调制
         float3 nm = lerp(float3(0.5f, 0.5f, 1.0f), normalSample.rgb, mat.NormalStrength);
         float3 tangentW = normalize(pin.TangentW);
         N = NormalSampleToWorldSpace(nm, N, tangentW);
     }
 
-    // 简单漫反射光照
-    float3 L = normalize(float3(0.0, -1.0, -1.0));
-    float NdotL = max(0, dot(N, -L));
-    float3 ambient = 0.1f * baseColor;
-    float3 diffuse = NdotL * baseColor;
-    return float4(ambient + diffuse, mat.Alpha);
+    output.Albedo = float4(albedo, 1.0f);
+    output.Normal = float4(N * 0.5f + 0.5f, 1.0f);
+    output.Material = float4(metallic, roughness, ao, 0.0f); // probeIndex 暂为 0
+    output.WorldPos = float4(pin.PosW, 1.0f);
+    return output;
 }

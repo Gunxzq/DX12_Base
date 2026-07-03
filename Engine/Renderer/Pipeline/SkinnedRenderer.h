@@ -30,7 +30,7 @@ public:
     void Initialize() override;
     void OnResize(uint32_t width, uint32_t height) override;
     void Update(float deltaTime) override;
-    void EndFrame() override;
+    void EndFrame() override {}
 
     // ========================================================================
     // 依赖注入
@@ -39,26 +39,21 @@ public:
     void SetMaterialManager(Resource::MaterialManager *mgr) { m_materialManager = mgr; }
 
     // ========================================================================
-    // 不透明蒙皮绘制（Opaque phase 调用）
+    // G-buffer 蒙皮绘制（延迟渲染 Opaque phase）
     // ========================================================================
-    void BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
-                    D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
-                    D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {});
-
-    void DrawOpaque(CommandList &cmdList, const TRenderQueue<SkinnedRenderItem> &queue);
-
-    // ========================================================================
-    // 透明蒙皮绘制（Transparent phase 调用）
-    // ========================================================================
-    void DrawTransparent(CommandList &cmdList, const TRenderQueue<SkinnedRenderItem> &queue);
+    void BeginFrameGBuffer(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
+                           D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
+                           D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart);
+    void DrawGBuffer(CommandList &cmdList, const TRenderQueue<SkinnedRenderItem> &queue);
+    void EndFrameGBuffer();
 
 private:
     // ========================================================================
     // 内部初始化
     // ========================================================================
-    void CreateRootSignature();
-    void CreatePSOs();
-    void LoadShaders();
+    void LoadGBufferShader();
+    void CreateGBufferRootSignature();
+    void CreateGBufferPSO();
 
     void DrawItems(CommandList &cmdList, const TRenderQueue<SkinnedRenderItem> &queue, ID3D12PipelineState *pso);
 
@@ -67,17 +62,16 @@ private:
     // ========================================================================
     D3D12DeviceContext *m_context = nullptr;
 
-    // 根签名 & PSO（两个变体）
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_psoOpaque;      // 不透明蒙皮 PSO
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_psoTransparent; // 透明蒙皮 PSO
+    // G-buffer 根签名 & PSO
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_gbufferRootSignature;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_gbufferPSO;
 
     Resource::GeometryResourceManager *m_geometryManager = nullptr;
     Resource::MaterialManager *m_materialManager = nullptr;
 
     // 着色器字节码
-    Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob; // 蒙皮顶点着色器
-    Microsoft::WRL::ComPtr<ID3DBlob> m_psBlob; // 像素着色器
+    Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;         // 蒙皮顶点着色器（G-buffer PSO 复用）
+    Microsoft::WRL::ComPtr<ID3DBlob> m_psGBufferBlob;  // G-buffer 像素着色器
 };
 
 } // namespace DX12Engine::Renderer
