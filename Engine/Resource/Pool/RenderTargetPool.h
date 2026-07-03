@@ -28,6 +28,7 @@ public:
     ID3D12Resource *GetResource(RenderTargetHandle handle) const;
     D3D12_CPU_DESCRIPTOR_HANDLE GetRtvHandle(RenderTargetHandle handle) const;
     D3D12_CPU_DESCRIPTOR_HANDLE GetSrvHandle(RenderTargetHandle handle) const;
+    D3D12_GPU_DESCRIPTOR_HANDLE GetSrvGpuHandle(RenderTargetHandle handle) const;
 
     void Reclaim(uint64_t completedFence);
     void PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames);

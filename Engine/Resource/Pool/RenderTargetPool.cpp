@@ -339,4 +339,18 @@ D3D12_CPU_DESCRIPTOR_HANDLE RenderTargetPool::GetSrvHandle(RenderTargetHandle ha
     return m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, entry.srvSlot);
 }
 
+D3D12_GPU_DESCRIPTOR_HANDLE RenderTargetPool::GetSrvGpuHandle(RenderTargetHandle handle) const {
+    if (!handle.IsValid() || handle.poolIndex >= m_pool.size()) {
+        return {};
+    }
+    const auto &entry = m_pool[handle.poolIndex];
+    if (entry.generation != handle.generation) {
+        return {};
+    }
+    if (entry.srvSlot == UINT32_MAX) {
+        return {};
+    }
+    return m_descriptorHeaps->GetGpuHandle(PartitionType::Buffer, entry.srvSlot);
+}
+
 } // namespace DX12Engine::Resource
