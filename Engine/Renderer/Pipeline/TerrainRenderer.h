@@ -52,6 +52,12 @@ public:
     void DrawTerrain(CommandList &cmdList, const TerrainRenderItem &item);
 
     // ========================================================================
+    // G-buffer 地形绘制（延迟渲染）
+    // ========================================================================
+    void BeginFrameGBuffer(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress);
+    void DrawTerrainGBuffer(CommandList &cmdList, const TerrainRenderItem &item);
+
+    // ========================================================================
     // PSO 设置
     // ========================================================================
     void SetPSO(CommandList &cmdList) const;
@@ -61,8 +67,10 @@ private:
     // 内部初始化
     // ========================================================================
     void LoadShaders();
+    void LoadGBufferShader();
     void CreateRootSignature();
     void CreatePSO();
+    void CreateGBufferPSO();
 
     // ========================================================================
     // 辅助方法
@@ -88,7 +96,11 @@ private:
     Microsoft::WRL::ComPtr<ID3DBlob> m_vs;  // Vertex Shader
     Microsoft::WRL::ComPtr<ID3DBlob> m_hs;  // Hull Shader
     Microsoft::WRL::ComPtr<ID3DBlob> m_ds;  // Domain Shader
-    Microsoft::WRL::ComPtr<ID3DBlob> m_ps;  // Pixel Shader
+    Microsoft::WRL::ComPtr<ID3DBlob> m_ps;  // 前向 Pixel Shader
+    Microsoft::WRL::ComPtr<ID3DBlob> m_psGBuffer; // G-buffer Pixel Shader
+
+    // G-buffer PSO
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_gbufferPSO;
 };
 
 } // namespace DX12Engine::Renderer

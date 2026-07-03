@@ -361,7 +361,7 @@ float4 PS(DomainOutput pin) : SV_Target
 
     float3 albedo = texColor.rgb;
     float metallic = 0.0f;
-    float roughness = 0.6f;
+    float roughness = 0.9f; // 雪原高粗糙度
     float ao = 0.5f;
     float3 emissive = float3(0, 0, 0);
 
@@ -418,4 +418,41 @@ float4 PS(DomainOutput pin) : SV_Target
     float3 litColor = ambient + directLight + reflection + emissive;
 
     return float4(litColor, 1.0f);
+}
+
+// ========================================================================
+// PS_GBuffer — 地形 G-buffer MRT 输出（复用 Domain Shader）
+// ========================================================================
+struct GBufferOutput {
+    float4 Albedo   : SV_Target0;
+    float4 Normal   : SV_Target1;
+    float4 Material : SV_Target2;
+    float4 WorldPos : SV_Target3;
+};
+
+GBufferOutput PS_GBuffer(DomainOutput pin) {
+    GBufferOutput output = (GBufferOutput)0.0f;
+
+    float4 texColor = gTerrainTextures[gAlbedoMapIndex].Sample(gSamplerLinearWrap, pin.TexCoord);
+    float3 albedo = texColor.rgb;
+    float metallic = 0.0f;
+    float roughness = 0.9f; // 雪原高粗糙度
+    float ao = 0.5f;
+
+    // 法线（含法线贴图 TBN 变换）
+    float3 N = normalize(pin.WorldNormal);
+    if (gNormalMapIndex != 0xFFFFFFFF) {
+        float3 normalMap = gTerrainTextures[gNormalMapIndex].Sample(gSamplerLinearWrap, pin.TexCoord).xyz;
+        float3 normalT = 2.0f * normalMap - 1.0f;
+        float3 T = normalize(pin.WorldTangent - N * dot(pin.WorldTangent, N));
+        float3 B = cross(N, T);
+        float3x3 TBN = float3x3(T, B, N);
+        N = normalize(mul(normalT, TBN));
+    }
+
+    output.Albedo = float4(albedo, 1.0f);
+    output.Normal = float4(N * 0.5f + 0.5f, 1.0f);
+    output.Material = float4(metallic, roughness, ao, 0.0f);
+    output.WorldPos = float4(pin.WorldPos, 1.0f);
+    return output;
 }

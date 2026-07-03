@@ -25,10 +25,12 @@ void TerrainRenderer::Initialize() {
     }
 
     LoadShaders();
+    LoadGBufferShader();
     CreateRootSignature();
     CreatePSO();
+    CreateGBufferPSO();
 
-    OutputDebugStringW(L"[INFO] TerrainRenderer initialized successfully\n");
+    OutputDebugStringW(L"[INFO] TerrainRenderer initialized (forward + GBuffer)\n");
 }
 
 void TerrainRenderer::OnResize(uint32_t width, uint32_t height) {
@@ -299,6 +301,85 @@ void TerrainRenderer::CreatePSO() {
     OutputDebugStringW(L"[INFO] Terrain PSO created successfully\n");
 }
 
+// ========================================================================
+// G-buffer 支持
+// ========================================================================
+
+void TerrainRenderer::LoadGBufferShader() {
+    UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
+    Microsoft::WRL::ComPtr<ID3DBlob> errors;
+    HRESULT hr = D3DCompileFromFile(L"Shaders/Terrain.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                                    "PS_GBuffer", "ps_5_1", compileFlags, 0, &m_psGBuffer, &errors);
+    if (FAILED(hr)) {
+        if (errors) OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+        throw std::runtime_error("TerrainRenderer: Failed to compile PS_GBuffer");
+    }
+}
+
+void TerrainRenderer::CreateGBufferPSO() {
+    auto device = m_context->GetDevice();
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout = {inputLayout, _countof(inputLayout)};
+    psoDesc.pRootSignature = m_rootSignature.Get();
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
+    psoDesc.NumRenderTargets = 4;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    psoDesc.DSVFormat = m_context->GetDepthStencilFormat();
+    psoDesc.SampleDesc.Count = m_context->Is4xMsaaEnabled() ? 4 : 1;
+    psoDesc.SampleDesc.Quality = m_context->Is4xMsaaEnabled() ? (m_context->Get4xMsaaQuality() - 1) : 0;
+    D3D12_DEPTH_STENCIL_DESC dsDesc = {};
+    dsDesc.DepthEnable = TRUE;
+    dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    dsDesc.StencilEnable = FALSE;
+    psoDesc.DepthStencilState = dsDesc;
+    psoDesc.VS = {m_vs->GetBufferPointer(), m_vs->GetBufferSize()};
+    psoDesc.HS = {m_hs->GetBufferPointer(), m_hs->GetBufferSize()};
+    psoDesc.DS = {m_ds->GetBufferPointer(), m_ds->GetBufferSize()};
+    psoDesc.PS = {m_psGBuffer->GetBufferPointer(), m_psGBuffer->GetBufferSize()};
+    device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_gbufferPSO));
+    OutputDebugStringW(L"[INFO] TerrainRenderer: GBuffer PSO created\n");
+}
+
+void TerrainRenderer::BeginFrameGBuffer(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress) {
+    cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
+    cmdList.Get()->SetGraphicsRootConstantBufferView(1, passConstantsAddress);
+}
+
+void TerrainRenderer::DrawTerrainGBuffer(CommandList &cmdList, const TerrainRenderItem &item) {
+    if (!m_geometryManager) return;
+    const PatchMesh *mesh = m_geometryManager->GetGeometry<PatchMesh>(item.geometryHandle);
+    if (!mesh || !mesh->isGpuReady) return;
+
+    auto &gpuMgr = GpuResourceManager::GetInstance();
+    ID3D12Resource *vb = gpuMgr.GetResource(mesh->vertexBufferHandle);
+    ID3D12Resource *ib = gpuMgr.GetResource(mesh->indexBufferHandle);
+    if (!vb || !ib) return;
+
+    D3D12_VERTEX_BUFFER_VIEW vbView = {vb->GetGPUVirtualAddress(),
+                                       (UINT)(mesh->vertexCount * mesh->vertexStride), mesh->vertexStride};
+    D3D12_INDEX_BUFFER_VIEW ibView = {ib->GetGPUVirtualAddress(),
+                                      (UINT)(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2)),
+                                      mesh->indexFormat};
+    cmdList.Get()->IASetPrimitiveTopology(mesh->GetPrimitiveTopology());
+    cmdList.Get()->IASetVertexBuffers(0, 1, &vbView);
+    cmdList.Get()->IASetIndexBuffer(&ibView);
+    cmdList.Get()->SetPipelineState(m_gbufferPSO.Get());
+    cmdList.Get()->SetGraphicsRootConstantBufferView(0, item.objectCBAddress);
+    cmdList.Get()->SetGraphicsRootDescriptorTable(4, item.texTableSRV);
+    cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
+}
 // ============================================================================
 // 辅助方法
 // ============================================================================
