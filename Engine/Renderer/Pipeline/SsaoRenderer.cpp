@@ -17,15 +17,16 @@ static constexpr uint32_t kSampleCount = 14;
 
 // SSAO 常量缓冲布局（匹配 Ssao.hlsl cbuffer cbSsao）
 struct alignas(256) SsaoCBData {
+    DirectX::XMFLOAT4X4 View;            // 64 — 视图矩阵（法线 World→View）
     DirectX::XMFLOAT4X4 Proj;            // 64
     DirectX::XMFLOAT4X4 InvProj;         // 64
     DirectX::XMFLOAT4X4 ProjTex;         // 64
     DirectX::XMFLOAT4 OffsetVectors[14]; // 224
     // 以下 4 个 float 共占 16 字节（1 个 float4 register）
-    float OcclusionRadius;               // 4
-    float OcclusionFadeStart;            // 4
-    float OcclusionFadeEnd;              // 4
-    float SurfaceEpsilon;                // 4
+    float OcclusionRadius;    // 4
+    float OcclusionFadeStart; // 4
+    float OcclusionFadeEnd;   // 4
+    float SurfaceEpsilon;     // 4
     // pad 到 16 字节倍数（总计 448 = 28 × float4）
     float Pad[4];
 };
@@ -91,7 +92,6 @@ void SsaoRenderer::Shutdown() {
 
     m_ssaoPSO.Reset();
     m_blurPSO.Reset();
-    m_normalPSO.Reset();
     m_randomVectorMapSRV = {};
 
     if (m_ssaoCBMapped && m_ssaoCB) {
@@ -118,8 +118,8 @@ void SsaoRenderer::Execute(CommandList &cmdList, ID3D12PipelineState *aoPSO, ID3
                            D3D12_GPU_DESCRIPTOR_HANDLE depthSRV, D3D12_GPU_DESCRIPTOR_HANDLE normalSRV,
                            D3D12_GPU_DESCRIPTOR_HANDLE ambientSRV, D3D12_CPU_DESCRIPTOR_HANDLE ambientRTV,
                            D3D12_GPU_DESCRIPTOR_HANDLE ambient1SRV, D3D12_CPU_DESCRIPTOR_HANDLE ambient1RTV,
-                           ID3D12Resource *ambientRes0, ID3D12Resource *ambientRes1,
-                           const DirectX::XMFLOAT4X4 &viewProj) {
+                           ID3D12Resource *ambientRes0, ID3D12Resource *ambientRes1, const DirectX::XMFLOAT4X4 &view,
+                           const DirectX::XMFLOAT4X4 &proj) {
     if (!m_initialized)
         return;
 
@@ -129,15 +129,16 @@ void SsaoRenderer::Execute(CommandList &cmdList, ID3D12PipelineState *aoPSO, ID3
     if (m_ssaoCBMapped) {
         auto *cb = static_cast<SsaoCBData *>(m_ssaoCBMapped);
 
-        XMStoreFloat4x4(&cb->Proj, XMLoadFloat4x4(&viewProj));
-        XMStoreFloat4x4(&cb->InvProj, XMMatrixInverse(nullptr, XMLoadFloat4x4(&viewProj)));
+        XMStoreFloat4x4(&cb->View, XMLoadFloat4x4(&view));
+        XMStoreFloat4x4(&cb->Proj, XMLoadFloat4x4(&proj));
+        XMStoreFloat4x4(&cb->InvProj, XMMatrixInverse(nullptr, XMLoadFloat4x4(&proj)));
         XMMATRIX texTransform = XMMatrixScaling(0.5f, -0.5f, 1.0f) * XMMatrixTranslation(0.5f, 0.5f, 0.0f);
-        XMStoreFloat4x4(&cb->ProjTex, XMLoadFloat4x4(&viewProj) * texTransform);
+        XMStoreFloat4x4(&cb->ProjTex, XMLoadFloat4x4(&proj) * texTransform);
         memcpy(cb->OffsetVectors, kOffsetVectors, sizeof(kOffsetVectors));
-        cb->OcclusionRadius = 0.5f;
-        cb->OcclusionFadeStart = 0.2f;
-        cb->OcclusionFadeEnd = 2.0f;
-        cb->SurfaceEpsilon = 0.05f;
+        cb->OcclusionRadius = 0.6f;    // 略微增大（原 0.5）
+        cb->OcclusionFadeStart = 0.3f; // 适中衰减起始
+        cb->OcclusionFadeEnd = 2.5f;   // 适度延长
+        cb->SurfaceEpsilon = 0.05f;    // 恢复标准容差
         cb->Pad[0] = cb->Pad[1] = cb->Pad[2] = cb->Pad[3] = 0.0f;
     }
 
@@ -168,6 +169,9 @@ void SsaoRenderer::Execute(CommandList &cmdList, ID3D12PipelineState *aoPSO, ID3
     // 3. 垂直模糊：读 ambientRT1 → 写 ambientRT0（最终结果）
     native->OMSetRenderTargets(1, &ambientRTV, TRUE, nullptr);
     BlurAO(cmdList, blurPSO, false, ambient1SRV);
+
+    // 垂直模糊结束，ambientRT1 回归 RENDER_TARGET（供外层屏障统一管理）
+    barrier(ambientRes1, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
 }
 
 void SsaoRenderer::Resize(uint32_t width, uint32_t height) {
@@ -250,23 +254,6 @@ void SsaoRenderer::BuildRootSignatures() {
         device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(),
                                     IID_PPV_ARGS(&m_blurRootSig));
     }
-
-    // ── 法线绘制根签名 ──
-    //   RootCBV(b0): ViewProj 矩阵
-    //   RootSRV(t0, space1): InstanceData
-    {
-        CD3DX12_ROOT_PARAMETER params[2];
-        params[0].InitAsConstantBufferView(0);
-        params[1].InitAsShaderResourceView(0, 1); // t0, space1
-
-        CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc;
-        rootSigDesc.Init(2, params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-        Microsoft::WRL::ComPtr<ID3DBlob> serialized, error;
-        D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &serialized, &error);
-        device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(),
-                                    IID_PPV_ARGS(&m_normalRootSig));
-    }
 }
 
 // ========================================================================
@@ -337,68 +324,11 @@ void SsaoRenderer::CreatePipelines() {
     psoDesc.VS = {vsBlur->GetBufferPointer(), vsBlur->GetBufferSize()};
     psoDesc.PS = {psBlur->GetBufferPointer(), psBlur->GetBufferSize()};
     device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_blurPSO));
-
-    // 创建法线绘制 PSO（DrawNormals.hlsl）
-    {
-        Microsoft::WRL::ComPtr<ID3DBlob> vsNorm, psNorm, errNorm;
-        UINT flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-
-        D3DCompileFromFile(L"Shaders/DrawNormals.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
-                           flags, 0, &vsNorm, &errNorm);
-        D3DCompileFromFile(L"Shaders/DrawNormals.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1",
-                           flags, 0, &psNorm, &errNorm);
-
-        D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        };
-
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC npso = {};
-        npso.InputLayout = {inputLayout, 3};
-        npso.pRootSignature = m_normalRootSig.Get();
-        npso.VS = {vsNorm->GetBufferPointer(), vsNorm->GetBufferSize()};
-        npso.PS = {psNorm->GetBufferPointer(), psNorm->GetBufferSize()};
-        npso.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        npso.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        npso.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-        npso.DepthStencilState.DepthEnable = TRUE;
-        npso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-        npso.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-        npso.SampleMask = UINT_MAX;
-        npso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        npso.NumRenderTargets = 1;
-        npso.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        npso.DSVFormat = m_deviceContext->GetDepthStencilFormat();
-        npso.SampleDesc.Count = 1;
-        npso.SampleDesc.Quality = 0;
-        device->CreateGraphicsPipelineState(&npso, IID_PPV_ARGS(&m_normalPSO));
-    }
-}
-
-// ========================================================================
-// 内部：法线绘制（设置 RTV/DSV + 清除，几何体绘制由 System 完成）
-// ========================================================================
-
-void SsaoRenderer::DrawNormals(CommandList &cmdList, D3D12_CPU_DESCRIPTOR_HANDLE normalRTV,
-                               D3D12_CPU_DESCRIPTOR_HANDLE depthDSV) {
-    if (!m_normalRootSig)
-        return;
-    auto *native = cmdList.Get();
-
-    // 设置法线 RT + 深度缓冲为渲染目标
-    native->OMSetRenderTargets(1, &normalRTV, TRUE, &depthDSV);
-
-    // 清除法线 RT
-    const float clearColor[4] = {0.0f, 0.0f, 1.0f, 0.0f};
-    native->ClearRenderTargetView(normalRTV, clearColor, 0, nullptr);
-
-    // 设置法线 PSO + 根签名（几何体绘制由 System 在调用返回后执行）
-    // 注意：System 需在返回后设置 ViewProj CBV + 遍历绘制场景物体
 }
 
 // ========================================================================
 // 内部：SSAO 计算
+// ========================================================================
 
 void SsaoRenderer::ComputeAO(CommandList &cmdList, ID3D12PipelineState *aoPSO, D3D12_GPU_DESCRIPTOR_HANDLE depthSRV,
                              D3D12_GPU_DESCRIPTOR_HANDLE normalSRV) {

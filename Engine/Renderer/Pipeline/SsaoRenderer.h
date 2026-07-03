@@ -44,13 +44,11 @@ public:
                  D3D12_GPU_DESCRIPTOR_HANDLE ambientSRV, D3D12_CPU_DESCRIPTOR_HANDLE ambientRTV,
                  D3D12_GPU_DESCRIPTOR_HANDLE ambient1SRV, D3D12_CPU_DESCRIPTOR_HANDLE ambient1RTV,
                  ID3D12Resource *ambientRes0, ID3D12Resource *ambientRes1,
-                 const DirectX::XMFLOAT4X4 &viewProj);
+                 const DirectX::XMFLOAT4X4 &view, const DirectX::XMFLOAT4X4 &proj);
 
     // 公开 PSO 访问 + 随机纹理 SRV 注入
     ID3D12PipelineState *GetSSAOPipeline() const { return m_ssaoPSO.Get(); }
     ID3D12PipelineState *GetBlurPipeline() const { return m_blurPSO.Get(); }
-    ID3D12PipelineState *GetNormalPipeline() const { return m_normalPSO.Get(); }
-    ID3D12RootSignature *GetNormalRootSig() const { return m_normalRootSig.Get(); }
     void SetRandomVectorSRV(D3D12_GPU_DESCRIPTOR_HANDLE srv) { m_randomVectorMapSRV = srv; }
 
     void Resize(uint32_t width, uint32_t height);
@@ -61,7 +59,6 @@ private:
     void CreatePipelines();
     void ComputeAO(CommandList &cmdList, ID3D12PipelineState *aoPSO, D3D12_GPU_DESCRIPTOR_HANDLE depthSRV,
                    D3D12_GPU_DESCRIPTOR_HANDLE normalSRV);
-    void DrawNormals(CommandList &cmdList, D3D12_CPU_DESCRIPTOR_HANDLE normalRTV, D3D12_CPU_DESCRIPTOR_HANDLE depthDSV);
     void BlurAO(CommandList &cmdList, ID3D12PipelineState *blurPSO, bool horizontal,
                 D3D12_GPU_DESCRIPTOR_HANDLE srcSRV);
 
@@ -78,7 +75,6 @@ private:
     // 根签名
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_aoRootSig;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_blurRootSig;
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_normalRootSig;
 
     // SSAO 常量缓冲
     Microsoft::WRL::ComPtr<ID3D12Resource> m_ssaoCB;
@@ -87,7 +83,6 @@ private:
     // SSAO PSO
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_ssaoPSO;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_blurPSO;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_normalPSO;
 };
 
 } // namespace DX12Engine::Renderer

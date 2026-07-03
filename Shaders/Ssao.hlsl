@@ -6,6 +6,7 @@
 
 cbuffer cbSsao : register(b0)
 {
+    row_major float4x4 gView;
     row_major float4x4 gProj;
     row_major float4x4 gInvProj;
     row_major float4x4 gProjTex;
@@ -84,7 +85,10 @@ float4 PS(VertexOut pin) : SV_Target
     // q: 采样点位置
     // r: 实际遮挡点
 
-    float3 n = normalize(gNormalMap.SampleLevel(gsamPointClamp, pin.TexC, 0.0f).xyz);
+    // 从 G-buffer 读取法线（编码 N*0.5+0.5，世界空间）
+    float3 n_world = gNormalMap.SampleLevel(gsamPointClamp, pin.TexC, 0.0f).xyz * 2.0f - 1.0f;
+    // 变换到视空间（SSAO 在视空间计算）
+    float3 n = normalize(mul(n_world, (float3x3)gView));
     float pz = gDepthMap.SampleLevel(gsamDepthMap, pin.TexC, 0.0f).r;
     pz = NdcDepthToViewDepth(pz);
 
