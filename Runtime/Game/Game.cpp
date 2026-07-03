@@ -100,8 +100,7 @@ bool Game::Initialize() {
     // 上传 SSAO 随机向量纹理（命令管理器就绪后，与其他纹理上传在同一阶段）
     AmbientOcclusionManager::GetInstance().BuildRandomVectorTexture();
 
-    // 初始化 AO RT 资源状态（COMMON → PIXEL_SHADER_RESOURCE，匹配 SSAO System 的入口屏障）
-    AmbientOcclusionManager::GetInstance().InitializeResourceStates();
+    // (InitializeResourceStates 已废弃——SSAO System 外层屏障 COMMON → RT 自动处理状态)
 
     // 连接 CullingSystem/VisibleRaycaster 引用，必须在 Initialize 之前完成
     // 因为 Initialize → RegisterPickingSystems() 需要这些指针非空
@@ -258,6 +257,8 @@ void Game::RegisterEngineSystems() {
                                       if (m_opaqueRenderer) {
                                           m_opaqueRenderer->OnResize(width, height);
                                       }
+                                      // G-buffer RT 尺寸跟随窗口缩放
+                                      m_world.OnResize(width, height);
                                       // SSAO RT 尺寸跟随窗口缩放
                                       auto &aoMgr = DX12Engine::Renderer::AmbientOcclusionManager::GetInstance();
                                       if (aoMgr.IsInitialized()) {

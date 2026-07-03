@@ -3,6 +3,8 @@
 #include "Async/TerrainLoadTask.h"
 #include "ECS/Core/Entity.h"
 #include "Math/BoundingVolume.h"
+#include "Renderer/ApplicationRenderTargets.h"
+#include "Renderer/Pipeline/LightingRenderer.h"
 #include "Renderer/Pipeline/ReflectionProbeRenderer.h"
 #include "Renderer/Pipeline/SkinnedRenderer.h"
 #include "Renderer/RenderItemBuilder/BillboardRenderItemBuilder.h"
@@ -15,6 +17,7 @@
 #include "Resource/AssetLoader/Loader/M3dLoader.h"
 #include "Resource/AssetLoader/Loader/TerrainLoader.h"
 #include "Resource/Manager/SkeletonManager.h"
+#include "Resource/Struct/DescriptorHandle.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/MaterialHandle.h"
 #include "Resource/Struct/ResourceHandle.h"
@@ -57,6 +60,7 @@ public:
     GameWorld &operator=(GameWorld &&) noexcept = default;
 
     void Initialize(DX12Engine::Boot::GameContext *context, DX12Engine::Renderer::OpaqueRenderer *renderer);
+    void OnResize(uint32_t width, uint32_t height);
     void Clear();
 
     DX12Engine::ECS::Registry *GetRegistry() const { return m_registry; }
@@ -122,13 +126,16 @@ public:
     void Update();
 
 private:
-    void RegisterRotationSystem();
     void RegisterClearSystem();
-    void RegisterCubeRenderSystem();
     void RegisterSkyboxSystem();
     void RegisterWaterRenderSystem();
     void RegisterBillboardRenderSystem();
     void RegisterTerrainRenderSystem();
+    void RegisterGBufferPass();
+    void RegisterLightingPass();
+
+    // 光照 Pass 渲染器（延迟渲染）
+    std::unique_ptr<DX12Engine::Renderer::LightingRenderer> m_lightingRenderer;
 
     // 注册地形异步加载响应 System
     // 架构：后台线程完成所有 GPU 资源创建 + 上传，主线程只注册句柄 + 创建 ECS 实体
@@ -160,6 +167,10 @@ private:
     // 构建器和渲染队列（统一实例化模式）
     std::unique_ptr<DX12Engine::Renderer::OpaqueRenderItemBuilder> m_opaqueBuilder;
     DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::OpaqueRenderItem> m_opaqueQueue;
+
+    // G-buffer 由 OpaqueRenderer 的 G-buffer 通道完成
+    // 视口帧缓冲管理器（G-buffer RT 的统一分配与重建）
+    std::unique_ptr<DX12Engine::Renderer::ApplicationRenderTargets> m_appRTs;
 
     std::unique_ptr<DX12Engine::Renderer::TransparentRenderItemBuilder> m_transparentBuilder;
     DX12Engine::Renderer::TRenderQueue<DX12Engine::Renderer::TransparentRenderItem> m_transparentQueue;

@@ -104,7 +104,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
         whiteDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
         whiteDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-        GpuResourceHandle whiteTexHandle = gpuMgr.CreateTexture2D(device, whiteDesc, D3D12_RESOURCE_STATE_COMMON);
+        GpuResourceHandle whiteTexHandle = gpuMgr.CreateTexture2D(device, whiteDesc, L"WhiteTexture", D3D12_RESOURCE_STATE_COMMON);
         if (whiteTexHandle.IsValid()) {
             uint32_t whiteSrvSlot = m_context->DescriptorHeaps->Allocate(PartitionType::Texture);
             if (whiteSrvSlot != UINT32_MAX) {
@@ -122,7 +122,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
 
                 UINT64 uploadSize = GetRequiredIntermediateSize(gpuMgr.GetResource(whiteTexHandle), 0, 1);
                 GpuResourceHandle uploadBuf =
-                    gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                    gpuMgr.CreateBuffer(device, uploadSize, L"WhiteTexture_Upload", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
                 auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
                     gpuMgr.GetResource(whiteTexHandle), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -193,6 +193,27 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_skinnedRenderer->SetMaterialManager(m_context->MaterialMgr);
     m_skinnedRenderer->Initialize();
 
+    // G-buffer 写入由 OpaqueRenderer 的 G-buffer 通道完成
+    // 初始化延迟光照渲染器
+    m_lightingRenderer = std::make_unique<DX12Engine::Renderer::LightingRenderer>();
+    m_lightingRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_lightingRenderer->Initialize();
+
+    // 初始化视口帧缓冲（G-buffer RT）
+    m_appRTs = std::make_unique<DX12Engine::Renderer::ApplicationRenderTargets>();
+    {
+        auto *device = m_context->DeviceContext->GetDevice();
+        auto *heaps = m_context->DescriptorHeaps;
+        uint32_t w = m_context->DeviceContext->GetViewport().Width;
+        uint32_t h = m_context->DeviceContext->GetViewport().Height;
+        m_appRTs->Initialize(device, heaps, w, h);
+    }
+
+    RegisterGBufferPass();
+    RegisterLightingPass();
+    // 天空盒（主渲染最后阶段，提交到 PostProcess）
+    RegisterSkyboxSystem();
+    // [GBuffer 调试] 注释其他渲染 Pass，避免干扰
     RegisterClearSystem();
     RegisterShadowRenderSystem();
     RegisterSsaoSystem();
@@ -232,6 +253,13 @@ void GameWorld::Clear() {
         DestroyEntityWithCleanup(entity);
     }
     m_stressEntities.clear();
+}
+
+void GameWorld::OnResize(uint32_t width, uint32_t height) {
+    if (m_appRTs) {
+        m_appRTs->OnResize(width, height);
+        OutputDebugStringW(L"[INFO] G-buffer RTs resized\n");
+    }
 }
 
 void GameWorld::Update() {

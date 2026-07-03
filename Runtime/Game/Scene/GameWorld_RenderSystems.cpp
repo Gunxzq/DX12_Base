@@ -23,9 +23,11 @@
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Manager/MaterialManager.h"
+#include "Resource/Pool/RenderTargetPool.h"
 #include "Resource/Texture/TextureManager.h"
 #include "Scheduler/FrameDriver.h"
 #include <DirectXMath.h>
+#include <d3dcompiler.h>
 
 using namespace DirectX;
 using namespace DX12Engine;
@@ -38,95 +40,197 @@ using namespace DX12Engine::Scheduler;
 // GameWorld — 渲染 System 注册
 // ========================================================================
 
-void GameWorld::RegisterRotationSystem() {
-    // 已注释，保留空实现
-}
-
-void GameWorld::RegisterCubeRenderSystem() {
+void GameWorld::RegisterLightingPass() {
     SystemRegistry::Register(
-        {.name = "CubeRenderSystem",
+        {.name = "LightingPass",
          .func =
-             [this](Registry &registry, const MessageContext &ctx) {
-                 if (m_opaqueQueue.Empty()) {
-                     m_context->Logging->Debug("[CubeRender] Opaque queue is empty, skipping draw");
+             [this](Registry &, const MessageContext &) {
+                 if (!m_lightingRenderer)
                      return;
-                 }
 
-                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
-                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
-                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-
+                 uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+                 auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+                 auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+                 auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
                  auto backBuffer = m_context->GetBackBuffer();
 
-                 D3D12_RESOURCE_BARRIER beginBarrier = {};
-                 beginBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                 beginBarrier.Transition.pResource = backBuffer;
-                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 beginBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
+                 // 屏障：G-buffer RTs COMMON → PIXEL_SHADER_RESOURCE
+                 auto &rtPool = RenderTargetPool::GetInstance();
+                 auto barrierToSRV = [&](ID3D12Resource *res) {
+                     auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_COMMON,
+                                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                     cmd.Get()->ResourceBarrier(1, &b);
+                 };
+                 barrierToSRV(m_appRTs->GetGBufferAlbedoResource());
+                 barrierToSRV(m_appRTs->GetGBufferNormalResource());
+                 barrierToSRV(m_appRTs->GetGBufferMaterialResource());
+                 barrierToSRV(m_appRTs->GetGBufferWorldPosResource());
 
-                 const auto &viewport = m_context->DeviceContext->GetViewport();
-                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
-                 cmdList.Get()->RSSetViewports(1, &viewport);
-                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
+                 // 屏障：交换链 PRESENT → RENDER_TARGET
+                 D3D12_RESOURCE_BARRIER bbBarrier = {};
+                 bbBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                 bbBarrier.Transition.pResource = backBuffer;
+                 bbBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+                 bbBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 bbBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                 cmd.Get()->ResourceBarrier(1, &bbBarrier);
 
-                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
-                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
-                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+                 // 视口和 RT
+                 const auto &vp = m_context->DeviceContext->GetViewport();
+                 const auto &sr = m_context->DeviceContext->GetScissorRect();
+                 cmd.Get()->RSSetViewports(1, &vp);
+                 cmd.Get()->RSSetScissorRects(1, &sr);
+                 auto rtv = m_context->DeviceContext->GetCurrentBackBufferView();
+                 cmd.Get()->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
 
-                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
-                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
+                 // 设置描述符堆
+                 ID3D12DescriptorHeap *heaps[] = {
+                     m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
+                 cmd.Get()->SetDescriptorHeaps(1, heaps);
 
-                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
+                 // 渲染
+                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};
+                 if (m_skyboxTextureHandle.IsValid()) {
+                     envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
+                 }
+                 D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV = m_context->ReflectionProbeMgr->GetProbeCubemapArraySRV();
 
                  auto &lightMgr = LightManager::GetInstance();
                  D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV = lightMgr.GetShadowDataSRV();
                  D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = lightMgr.GetShadowMapSRV();
 
-                 ID3D12DescriptorHeap *descriptorHeaps[] = {
+                 m_lightingRenderer->BeginFrame(cmd, m_context->FrameResourceManager->GetPassCBAddress(),
+                                                LightManager::GetInstance().GetLightCBAddress(),
+                                                m_appRTs->GetGBufferAlbedoSRV(), m_appRTs->GetGBufferNormalSRV(),
+                                                m_appRTs->GetGBufferMaterialSRV(), m_appRTs->GetGBufferWorldPosSRV(),
+                                                AmbientOcclusionManager::GetInstance().GetAmbientMapSRV(), envMapSRV,
+                                                cubemapArraySRV, shadowDataSRV, shadowMapSRV);
+                 m_lightingRenderer->Draw(cmd);
+                 m_lightingRenderer->EndFrame();
+
+                 // 屏障：G-buffer RTs PIXEL_SHADER_RESOURCE → COMMON
+                 auto barrierToCommon = [&](ID3D12Resource *res) {
+                     auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                                   D3D12_RESOURCE_STATE_COMMON);
+                     cmd.Get()->ResourceBarrier(1, &b);
+                 };
+                 barrierToCommon(m_appRTs->GetGBufferAlbedoResource());
+                 barrierToCommon(m_appRTs->GetGBufferNormalResource());
+                 barrierToCommon(m_appRTs->GetGBufferMaterialResource());
+                 barrierToCommon(m_appRTs->GetGBufferWorldPosResource());
+
+                 // 屏障：交换链 RENDER_TARGET → PRESENT
+                 bbBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                 bbBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+                 cmd.Get()->ResourceBarrier(1, &bbBarrier);
+
+                 cmd.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Lighting, cmdH);
+                 uint64_t seq = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Render,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::Lighting,
+         .alwaysRun = true});
+}
+
+void GameWorld::RegisterGBufferPass() {
+    SystemRegistry::Register(
+        {.name = "OpaqueRenderSystem",
+         .func =
+             [this](Registry &, const MessageContext &) {
+                 if (!m_renderer || m_opaqueQueue.Empty())
+                     return;
+
+                 // G-buffer RT 必须已分配
+                 if (!m_appRTs || !m_appRTs->IsInitialized())
+                     return;
+
+                 auto &rtPool = RenderTargetPool::GetInstance();
+
+                 uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+                 auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+                 auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+                 auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+
+                 D3D12_CPU_DESCRIPTOR_HANDLE rtvs[4] = {
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferAlbedo()),
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferNormal()),
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferMaterial()),
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferWorldPos()),
+                 };
+
+                 // 资源屏障：COMMON → RENDER_TARGET
+                 auto barrierRT = [&](ID3D12Resource *res) {
+                     auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_COMMON,
+                                                                   D3D12_RESOURCE_STATE_RENDER_TARGET);
+                     cmd.Get()->ResourceBarrier(1, &b);
+                 };
+                 barrierRT(m_appRTs->GetGBufferAlbedoResource());
+                 barrierRT(m_appRTs->GetGBufferNormalResource());
+                 barrierRT(m_appRTs->GetGBufferMaterialResource());
+                 barrierRT(m_appRTs->GetGBufferWorldPosResource());
+
+                 // 设置视口
+                 const auto &vp = m_context->DeviceContext->GetViewport();
+                 const auto &sr = m_context->DeviceContext->GetScissorRect();
+                 cmd.Get()->RSSetViewports(1, &vp);
+                 cmd.Get()->RSSetScissorRects(1, &sr);
+
+                 // 设置描述符堆
+                 ID3D12DescriptorHeap *heaps[] = {
                      m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
+                 cmd.Get()->SetDescriptorHeaps(1, heaps);
 
-                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+                 // 绑定 4 个 G-buffer RT + 主深度缓冲
+                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
+                 cmd.Get()->OMSetRenderTargets(4, rtvs, FALSE, &dsvHandle);
 
-                 D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV = m_context->ReflectionProbeMgr->GetProbeCubemapArraySRV();
+                 // 清除 RT 和深度缓冲
+                 const float clearColor[4] = {0, 0, 0, 0};
+                 cmd.Get()->ClearRenderTargetView(rtvs[0], clearColor, 0, nullptr);
+                 cmd.Get()->ClearRenderTargetView(rtvs[1], clearColor, 0, nullptr);
+                 cmd.Get()->ClearRenderTargetView(rtvs[2], clearColor, 0, nullptr);
+                 cmd.Get()->ClearRenderTargetView(rtvs[3], clearColor, 0, nullptr);
+                 cmd.Get()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-                 D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
+                 // G-buffer 渲染（使用 OpaqueRenderer 的 G-buffer 通道）
+                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
+                 D3D12_GPU_DESCRIPTOR_HANDLE matSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
+                 D3D12_GPU_DESCRIPTOR_HANDLE texHeapStart =
                      m_context->DescriptorHeaps->GetPartitionGpuHandle(PartitionType::Texture, 0);
 
-                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};
-                 if (m_skyboxTextureHandle.IsValid()) {
-                     envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
-                 }
-
-                 D3D12_GPU_DESCRIPTOR_HANDLE aoMapSRV = AmbientOcclusionManager::GetInstance().GetAmbientMapSRV();
-
-                 m_renderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
-                                        shadowMapSRV, cubemapArraySRV, textureHeapStart, envMapSRV, aoMapSRV);
+                 m_renderer->BeginFrameGBuffer(cmd, passCBAddr, matSRV, texHeapStart);
 
                  for (const auto &item : m_opaqueQueue) {
                      if (!item.IsValid())
                          continue;
-                     m_renderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer, item.instanceCount,
-                                               item.startIndex, item.startVertex, item.indexCount);
+                     m_renderer->DrawInstancedGBuffer(cmd, item.geometryHandle, item.instanceBuffer, item.instanceCount,
+                                                      item.startIndex, item.startVertex, item.indexCount);
                  }
 
-                 m_renderer->EndFrame();
+                 m_renderer->EndFrameGBuffer();
 
-                 D3D12_RESOURCE_BARRIER endBarrier = {};
-                 endBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                 endBarrier.Transition.pResource = backBuffer;
-                 endBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 endBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-                 endBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                 cmdList.Get()->ResourceBarrier(1, &endBarrier);
+                 // 屏障：RENDER_TARGET → COMMON（为下帧准备）
+                 auto barrierBack = [&](ID3D12Resource *res) {
+                     auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                                   D3D12_RESOURCE_STATE_COMMON);
+                     cmd.Get()->ResourceBarrier(1, &b);
+                 };
+                 barrierBack(m_appRTs->GetGBufferAlbedoResource());
+                 barrierBack(m_appRTs->GetGBufferNormalResource());
+                 barrierBack(m_appRTs->GetGBufferMaterialResource());
+                 barrierBack(m_appRTs->GetGBufferWorldPosResource());
 
-                 cmdList.Close();
-                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdListHandle);
-                 uint64_t sequence = m_context->GetNextSequence();
-                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+                 cmd.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdH);
+
+                 uint64_t seq = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Render,
@@ -140,64 +244,70 @@ void GameWorld::RegisterSkinnedOpaqueRenderSystem() {
         {.name = "SkinnedOpaqueRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
-                 if (!m_skinnedRenderer || m_skinnedQueue.Empty()) {
+                 if (!m_skinnedRenderer || m_skinnedQueue.Empty() || !m_appRTs)
                      return;
-                 }
 
-                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-                 auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
                  auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
                  auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
-                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+                 auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+                 auto *nativeCL = cmd.Get();
 
-                 auto backBuffer = m_context->GetBackBuffer();
+                 // 屏障：G-buffer RTs COMMON → RENDER_TARGET
+                 auto &rtPool = RenderTargetPool::GetInstance();
+                 auto barrierRT = [&](ID3D12Resource *res) {
+                     auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_COMMON,
+                                                                   D3D12_RESOURCE_STATE_RENDER_TARGET);
+                     nativeCL->ResourceBarrier(1, &b);
+                 };
+                 barrierRT(rtPool.GetResource(m_appRTs->GetGBufferAlbedo()));
+                 barrierRT(rtPool.GetResource(m_appRTs->GetGBufferNormal()));
+                 barrierRT(rtPool.GetResource(m_appRTs->GetGBufferMaterial()));
+                 barrierRT(rtPool.GetResource(m_appRTs->GetGBufferWorldPos()));
 
-                 D3D12_RESOURCE_BARRIER beginBarrier = {};
-                 beginBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                 beginBarrier.Transition.pResource = backBuffer;
-                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 beginBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
-
-                 const auto &viewport = m_context->DeviceContext->GetViewport();
-                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
-                 cmdList.Get()->RSSetViewports(1, &viewport);
-                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
-
-                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
                  auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
-                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
+                 // 设置视口 + 描述符堆
+                 const auto &vp = m_context->DeviceContext->GetViewport();
+                 const auto &sr = m_context->DeviceContext->GetScissorRect();
+                 nativeCL->RSSetViewports(1, &vp);
+                 nativeCL->RSSetScissorRects(1, &sr);
                  ID3D12DescriptorHeap *heaps[] = {
                      m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
-                 cmdList.Get()->SetDescriptorHeaps(1, heaps);
+                 nativeCL->SetDescriptorHeaps(1, heaps);
 
+                 // 绑定 G-buffer RTs
+                 D3D12_CPU_DESCRIPTOR_HANDLE rtvs[4] = {
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferAlbedo()),
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferNormal()),
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferMaterial()),
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferWorldPos()),
+                 };
+                 nativeCL->OMSetRenderTargets(4, rtvs, FALSE, &dsvHandle);
+
+                 // G-buffer 渲染
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
-                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
-                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
-                 D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
+                 D3D12_GPU_DESCRIPTOR_HANDLE matSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
+                 D3D12_GPU_DESCRIPTOR_HANDLE texHeapStart =
                      m_context->DescriptorHeaps->GetPartitionGpuHandle(PartitionType::Texture, 0);
 
-                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};
-                 if (m_skyboxTextureHandle.IsValid()) {
-                     envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
-                 }
+                 m_skinnedRenderer->BeginFrameGBuffer(cmd, passCBAddr, matSRV, texHeapStart);
+                 m_skinnedRenderer->DrawGBuffer(cmd, m_skinnedQueue);
+                 m_skinnedRenderer->EndFrameGBuffer();
 
-                 m_skinnedRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, textureHeapStart,
-                                               envMapSRV);
-                 m_skinnedRenderer->DrawOpaque(cmdList, m_skinnedQueue);
-                 m_skinnedRenderer->EndFrame();
+                 // 屏障：G-buffer RTs RENDER_TARGET → COMMON（为下帧/后续 Pass 准备）
+                 auto barrierBack = [&](ID3D12Resource *res) {
+                     auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                                   D3D12_RESOURCE_STATE_COMMON);
+                     nativeCL->ResourceBarrier(1, &b);
+                 };
+                 barrierBack(rtPool.GetResource(m_appRTs->GetGBufferAlbedo()));
+                 barrierBack(rtPool.GetResource(m_appRTs->GetGBufferNormal()));
+                 barrierBack(rtPool.GetResource(m_appRTs->GetGBufferMaterial()));
+                 barrierBack(rtPool.GetResource(m_appRTs->GetGBufferWorldPos()));
 
-                 D3D12_RESOURCE_BARRIER endBarrier = {};
-                 endBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                 endBarrier.Transition.pResource = backBuffer;
-                 endBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 endBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-                 endBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                 cmdList.Get()->ResourceBarrier(1, &endBarrier);
-
-                 cmdList.Close();
+                 cmd.Close();
                  m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdH);
 
                  uint64_t seq = m_context->GetNextSequence();
@@ -472,70 +582,72 @@ void GameWorld::RegisterTerrainRenderSystem() {
         {.name = "TerrainRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
-                 if (m_terrainQueue.Empty()) {
+                 if (m_terrainQueue.Empty() || !m_appRTs) {
                      return;
                  }
 
-                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
-                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
-                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+                 uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+                 auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+                 auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+                 auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+                 auto *nativeCL = cmd.Get();
 
-                 auto backBuffer = m_context->GetBackBuffer();
-                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
+                 // 屏障：G-buffer RTs COMMON → RENDER_TARGET
+                 auto &rtPool = RenderTargetPool::GetInstance();
+                 auto barrierRT = [&](ID3D12Resource *res) {
+                     auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_COMMON,
+                                                                   D3D12_RESOURCE_STATE_RENDER_TARGET);
+                     nativeCL->ResourceBarrier(1, &b);
+                 };
+                 barrierRT(rtPool.GetResource(m_appRTs->GetGBufferAlbedo()));
+                 barrierRT(rtPool.GetResource(m_appRTs->GetGBufferNormal()));
+                 barrierRT(rtPool.GetResource(m_appRTs->GetGBufferMaterial()));
+                 barrierRT(rtPool.GetResource(m_appRTs->GetGBufferWorldPos()));
+
                  auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
+                 const auto &vp = m_context->DeviceContext->GetViewport();
+                 const auto &sr = m_context->DeviceContext->GetScissorRect();
+                 nativeCL->RSSetViewports(1, &vp);
+                 nativeCL->RSSetScissorRects(1, &sr);
 
-                 D3D12_RESOURCE_BARRIER beginBarrier = {};
-                 beginBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                 beginBarrier.Transition.pResource = backBuffer;
-                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 beginBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
-
-                 const auto &viewport = m_context->DeviceContext->GetViewport();
-                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
-                 cmdList.Get()->RSSetViewports(1, &viewport);
-                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
-                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-                 ID3D12DescriptorHeap *descriptorHeaps[] = {
+                 ID3D12DescriptorHeap *heaps[] = {
                      m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
-                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
+                 nativeCL->SetDescriptorHeaps(1, heaps);
+
+                 // 绑定 G-buffer RTs
+                 D3D12_CPU_DESCRIPTOR_HANDLE rtvs[4] = {
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferAlbedo()),
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferNormal()),
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferMaterial()),
+                     rtPool.GetRtvHandle(m_appRTs->GetGBufferWorldPos()),
+                 };
+                 nativeCL->OMSetRenderTargets(4, rtvs, FALSE, &dsvHandle);
 
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
-                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
-                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
-
-                 auto &lightMgr = LightManager::GetInstance();
-                 D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV = lightMgr.GetShadowDataSRV();
-                 D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = lightMgr.GetShadowMapSRV();
-
-                 m_terrainRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, shadowDataSRV,
-                                               shadowMapSRV);
+                 m_terrainRenderer->BeginFrameGBuffer(cmd, passCBAddr);
 
                  for (const auto &item : m_terrainQueue.GetItems()) {
                      if (!item.IsValid())
                          continue;
-                     m_terrainRenderer->DrawTerrain(cmdList, item);
+                     m_terrainRenderer->DrawTerrainGBuffer(cmd, item);
                  }
 
-                 m_terrainRenderer->EndFrame();
+                 // 屏障：G-buffer RTs RENDER_TARGET → COMMON（为下帧/后续 Pass 准备）
+                 auto barrierBack = [&](ID3D12Resource *res) {
+                     auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                                   D3D12_RESOURCE_STATE_COMMON);
+                     nativeCL->ResourceBarrier(1, &b);
+                 };
+                 barrierBack(rtPool.GetResource(m_appRTs->GetGBufferAlbedo()));
+                 barrierBack(rtPool.GetResource(m_appRTs->GetGBufferNormal()));
+                 barrierBack(rtPool.GetResource(m_appRTs->GetGBufferMaterial()));
+                 barrierBack(rtPool.GetResource(m_appRTs->GetGBufferWorldPos()));
 
-                 D3D12_RESOURCE_BARRIER endBarrier = {};
-                 endBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                 endBarrier.Transition.pResource = backBuffer;
-                 endBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 endBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-                 endBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                 cmdList.Get()->ResourceBarrier(1, &endBarrier);
-
-                 cmdList.Close();
-                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdListHandle);
-
-                 uint64_t sequence = m_context->GetNextSequence();
-                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+                 cmd.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Opaque, cmdH);
+                 uint64_t seq = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Render,
@@ -673,7 +785,7 @@ void GameWorld::RegisterSsaoSystem() {
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
                  auto &aoMgr = AmbientOcclusionManager::GetInstance();
-                 if (!aoMgr.IsInitialized())
+                 if (!aoMgr.IsInitialized() || !m_appRTs)
                      return;
 
                  uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
@@ -681,92 +793,48 @@ void GameWorld::RegisterSsaoSystem() {
                  auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
                  auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
                  auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+                 auto *nativeCL = cmdList.Get();
 
-                 D3D12_GPU_DESCRIPTOR_HANDLE depthSRV = aoMgr.GetPrivateDepthSRV();
+                 // 从 G-buffer 读取法线 + 主深度缓冲
+                 D3D12_GPU_DESCRIPTOR_HANDLE depthSRV = m_context->DeviceContext->GetDepthSRV();
+                 D3D12_GPU_DESCRIPTOR_HANDLE normalSRV = m_appRTs->GetGBufferNormalSRV();
+                 ID3D12Resource *depthRes = m_context->DeviceContext->GetSwapChainManager().GetDepthStencilBuffer();
 
-                 auto *normalRes = aoMgr.GetNormalResource();
                  auto *ambient0 = aoMgr.GetAmbientResource0();
                  auto *ambient1 = aoMgr.GetAmbientResource1();
                  auto barrier = [&](ID3D12Resource *res, D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to) {
                      if (!res)
                          return;
                      auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, from, to);
-                     cmdList.Get()->ResourceBarrier(1, &b);
+                     nativeCL->ResourceBarrier(1, &b);
                  };
-                 barrier(normalRes, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
-                 barrier(ambient0, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
-                 barrier(ambient1, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-                 D3D12_CPU_DESCRIPTOR_HANDLE normalRTV = aoMgr.GetNormalMapRTV();
-                 D3D12_CPU_DESCRIPTOR_HANDLE depthDSV = aoMgr.GetPrivateDepthDSV();
-                 auto *nativeCL = cmdList.Get();
+                 // 屏障：主深度 DEPTH_WRITE → PIXEL_SHADER_RESOURCE
+                 barrier(depthRes, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                 // 屏障：G-buffer 法线 COMMON → PIXEL_SHADER_RESOURCE
+                 barrier(m_appRTs->GetGBufferNormalResource(), D3D12_RESOURCE_STATE_COMMON,
+                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                 // 屏障：AO 环境贴图 COMMON → RENDER_TARGET（RenderTargetPool 初始状态为 COMMON）
+                 barrier(ambient0, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                 barrier(ambient1, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-                 {
-                     const auto &viewport = m_context->DeviceContext->GetViewport();
-                     const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
-                     nativeCL->RSSetViewports(1, &viewport);
-                     nativeCL->RSSetScissorRects(1, &scissorRect);
-                 }
-
-                 const float clearBlue[] = {0.0f, 0.0f, 1.0f, 0.0f};
-                 nativeCL->ClearRenderTargetView(normalRTV, clearBlue, 0, nullptr);
-                 nativeCL->ClearDepthStencilView(depthDSV, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0,
-                                                 0, nullptr);
-                 nativeCL->OMSetRenderTargets(1, &normalRTV, TRUE, &depthDSV);
-
-                 if (ID3D12PipelineState *normPSO = aoMgr.GetNormalPipeline()) {
-                     nativeCL->SetPipelineState(normPSO);
-                     nativeCL->SetGraphicsRootSignature(aoMgr.GetNormalRootSig());
-
-                     D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_context->FrameResourceManager->GetPassCBAddress();
-                     nativeCL->SetGraphicsRootConstantBufferView(0, cbAddr);
-
-                     auto &gpuMgr = GpuResourceManager::GetInstance();
-                     for (const auto &item : m_opaqueQueue) {
-                         if (!item.IsValid())
-                             continue;
-                         const TriangleMesh *mesh =
-                             m_context->GeometryResourceManager->GetGeometry<TriangleMesh>(item.geometryHandle);
-                         if (!mesh || !mesh->isGpuReady)
-                             continue;
-
-                         ID3D12Resource *vb = gpuMgr.GetResource(mesh->vertexBufferHandle);
-                         ID3D12Resource *ib = gpuMgr.GetResource(mesh->indexBufferHandle);
-                         if (!vb || !ib)
-                             continue;
-
-                         D3D12_VERTEX_BUFFER_VIEW vbv = {vb->GetGPUVirtualAddress(),
-                                                         (UINT)(mesh->vertexCount * mesh->vertexStride),
-                                                         mesh->vertexStride};
-                         D3D12_INDEX_BUFFER_VIEW ibv = {
-                             ib->GetGPUVirtualAddress(),
-                             (UINT)(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2)),
-                             mesh->indexFormat};
-                         nativeCL->IASetVertexBuffers(0, 1, &vbv);
-                         nativeCL->IASetIndexBuffer(&ibv);
-                         nativeCL->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-                         nativeCL->SetGraphicsRootShaderResourceView(1, item.instanceBuffer);
-                         nativeCL->DrawIndexedInstanced(mesh->indexCount, item.instanceCount, 0, 0, 0);
-                     }
-                 }
-
-                 barrier(normalRes, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-                 ID3D12Resource *privateDepthRes = aoMgr.GetPrivateDepthResource();
-                 if (privateDepthRes) {
-                     barrier(privateDepthRes, D3D12_RESOURCE_STATE_DEPTH_WRITE,
-                             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                 }
+                 // 设置视口（新命令列表需要）
+                 const auto &vp = m_context->DeviceContext->GetViewport();
+                 const auto &sr = m_context->DeviceContext->GetScissorRect();
+                 nativeCL->RSSetViewports(1, &vp);
+                 nativeCL->RSSetScissorRects(1, &sr);
 
                  const auto &passCB = m_context->FrameResourceManager->GetPassConstants();
-                 aoMgr.Execute(cmdList.Get(), depthSRV, passCB.Proj);
+                 aoMgr.Execute(nativeCL, depthSRV, normalSRV, passCB.View, passCB.Proj);
 
-                 if (privateDepthRes) {
-                     barrier(privateDepthRes, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                             D3D12_RESOURCE_STATE_DEPTH_WRITE);
-                 }
-
-                 barrier(ambient0, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                 // 屏障：AO 环境贴图 RENDER_TARGET → COMMON（回到 RenderTargetPool 初始状态）
+                 barrier(ambient0, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COMMON);
+                 barrier(ambient1, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COMMON);
+                 // 屏障：G-buffer 法线 PIXEL_SHADER_RESOURCE → COMMON
+                 barrier(m_appRTs->GetGBufferNormalResource(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                         D3D12_RESOURCE_STATE_COMMON);
+                 // 屏障：主深度 PIXEL_SHADER_RESOURCE → DEPTH_WRITE
+                 barrier(depthRes, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 
                  cmdList.Close();
                  m_context->FrameDriver->SubmitRenderCommand(RenderPhase::DynamicAOcclusion, cmdListHandle);

@@ -1,13 +1,16 @@
-#include "GameWorld.h"
+#include "Async/BackgroundExecutor.h"
+#include "Async/ResourceTransitionTask.h"
+#include "Async/TerrainLoadTask.h"
 #include "Boot/GameContext.h"
-#include "Common/d3dUtil.h"
 #include "Common/ThrowHelper.h"
+#include "Common/d3dUtil.h"
 #include "ECS/Core/Components.h"
 #include "ECS/Core/Registry.h"
 #include "Event/EventRegistry.h"
 #include "Event/EventTypes.h"
 #include "Event/MessageDispatcher.h"
 #include "Framework/SystemRegistry.h"
+#include "GameWorld.h"
 #include "Math/HashTypes.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
@@ -24,9 +27,6 @@
 #include "Resource/Manager/SkeletonManager.h"
 #include "Resource/Material/MaterialResource.h"
 #include "Resource/Texture/TextureManager.h"
-#include "Async/BackgroundExecutor.h"
-#include "Async/TerrainLoadTask.h"
-#include "Async/ResourceTransitionTask.h"
 #include <DirectXMath.h>
 #include <algorithm>
 #include <string>
@@ -90,7 +90,8 @@ void GameWorld::LoadSoldierCharacter() {
                 m_context->Logging->Warn("[Soldier] Failed to load: {}", filename);
                 return;
             }
-            auto gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+            auto gpuHandle =
+                gpuMgr.CreateTexture2D(device, ddsInfo.desc, L"Soldier_Texture", D3D12_RESOURCE_STATE_COMMON);
             if (!gpuHandle.IsValid())
                 return;
             uint32_t srvSlot = descriptorHeaps->Allocate(PartitionType::Texture);
@@ -122,7 +123,9 @@ void GameWorld::LoadSoldierCharacter() {
         auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
         auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
 
-        struct UploadBuf { GpuResourceHandle handle; };
+        struct UploadBuf {
+            GpuResourceHandle handle;
+        };
         std::vector<UploadBuf> uploadBufs;
         uploadBufs.reserve(allUploads.size());
 
@@ -130,7 +133,8 @@ void GameWorld::LoadSoldierCharacter() {
             UINT64 uploadSize = GetRequiredIntermediateSize(gpuMgr.GetResource(pt.gpuHandle), 0,
                                                             static_cast<UINT>(pt.ddsInfo.subresources.size()));
             GpuResourceHandle uploadBuf =
-                gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                gpuMgr.CreateBuffer(device, uploadSize, L"Soldier_Texture_Upload", D3D12_HEAP_TYPE_UPLOAD,
+                                    D3D12_RESOURCE_STATE_GENERIC_READ);
             if (!uploadBuf.IsValid()) {
                 m_context->Logging->Error("[Soldier] Failed to create upload buffer");
                 continue;
@@ -144,9 +148,9 @@ void GameWorld::LoadSoldierCharacter() {
             UpdateSubresources(cmd.Get(), gpuMgr.GetResource(pt.gpuHandle), gpuMgr.GetResource(uploadBuf), 0, 0,
                                static_cast<UINT>(pt.ddsInfo.subresources.size()), pt.ddsInfo.subresources.data());
 
-            auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(
-                gpuMgr.GetResource(pt.gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            auto barrier2 =
+                CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(pt.gpuHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
             cmd.Get()->ResourceBarrier(1, &barrier2);
         }
 
@@ -183,7 +187,8 @@ void GameWorld::LoadSoldierCharacter() {
     size_t fullVbSize = meshData.vertices.size() * sizeof(Resource::M3dVertex);
     size_t fullIbSize = meshData.indices.size() * sizeof(uint32_t);
 
-    auto fullVbHandle = gpuMgr.CreateBuffer(device, fullVbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto fullVbHandle = gpuMgr.CreateBuffer(device, fullVbSize, L"Soldier_VB", D3D12_HEAP_TYPE_UPLOAD,
+                                            D3D12_RESOURCE_STATE_GENERIC_READ);
     if (auto *res = gpuMgr.GetResource(fullVbHandle)) {
         void *mapped = nullptr;
         CD3DX12_RANGE readRange(0, 0);
@@ -192,7 +197,8 @@ void GameWorld::LoadSoldierCharacter() {
         res->Unmap(0, nullptr);
     }
 
-    auto fullIbHandle = gpuMgr.CreateBuffer(device, fullIbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto fullIbHandle = gpuMgr.CreateBuffer(device, fullIbSize, L"Soldier_IB", D3D12_HEAP_TYPE_UPLOAD,
+                                            D3D12_RESOURCE_STATE_GENERIC_READ);
     if (auto *res = gpuMgr.GetResource(fullIbHandle)) {
         void *mapped = nullptr;
         CD3DX12_RANGE readRange(0, 0);
@@ -290,7 +296,8 @@ void GameWorld::LoadTestTexture() {
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Device *device = m_context->DeviceContext->GetDevice();
-    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+    GpuResourceHandle gpuHandle =
+        gpuMgr.CreateTexture2D(device, ddsInfo.desc, L"Test_Texture", D3D12_RESOURCE_STATE_COMMON);
 
     if (!gpuHandle.IsValid()) {
         OutputDebugStringW(L"[ERROR] Failed to create GPU texture\n");
@@ -326,11 +333,11 @@ void GameWorld::LoadTestTexture() {
     auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
     std::vector<D3D12_SUBRESOURCE_DATA> subresources = ddsInfo.subresources;
-    UINT64 requiredSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
-                                                      static_cast<UINT>(subresources.size()));
+    UINT64 requiredSize =
+        GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
 
-    GpuResourceHandle uploadHandle =
-        gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    GpuResourceHandle uploadHandle = gpuMgr.CreateBuffer(device, requiredSize, L"Test_Texture_Upload",
+                                                         D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
     auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
                                                          D3D12_RESOURCE_STATE_COPY_DEST);
@@ -368,7 +375,8 @@ void GameWorld::LoadBrickTextures() {
             return false;
         }
 
-        GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+        GpuResourceHandle gpuHandle =
+            gpuMgr.CreateTexture2D(device, ddsInfo.desc, L"Bricks_Texture", D3D12_RESOURCE_STATE_COMMON);
         if (!gpuHandle.IsValid())
             return false;
 
@@ -396,10 +404,10 @@ void GameWorld::LoadBrickTextures() {
         auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
 
         auto subresources = ddsInfo.subresources;
-        UINT64 uploadSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
-                                                        static_cast<UINT>(subresources.size()));
-        GpuResourceHandle uploadBuf = gpuMgr.CreateBuffer(device, uploadSize, D3D12_HEAP_TYPE_UPLOAD,
-                                                          D3D12_RESOURCE_STATE_GENERIC_READ);
+        UINT64 uploadSize =
+            GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
+        GpuResourceHandle uploadBuf = gpuMgr.CreateBuffer(device, uploadSize, L"Bricks_Texture_Upload",
+                                                          D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
         auto b1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
                                                        D3D12_RESOURCE_STATE_COPY_DEST);
@@ -548,15 +556,15 @@ void GameWorld::CreateMaterials() {
 
     size_t bufferSize = gpuData.size() * sizeof(MaterialConstants);
 
-    GpuResourceHandle bufferHandle =
-        gpuMgr.CreateBuffer(device, bufferSize, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON);
+    GpuResourceHandle bufferHandle = gpuMgr.CreateBuffer(device, bufferSize, L"Material_Buffer",
+                                                         D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON);
     if (!bufferHandle.IsValid()) {
         m_context->Logging->Error("[GameWorld] Failed to create material GPU buffer");
         return;
     }
 
-    GpuResourceHandle uploadHandle =
-        gpuMgr.CreateBuffer(device, bufferSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    GpuResourceHandle uploadHandle = gpuMgr.CreateBuffer(device, bufferSize, L"Material_Buffer_Upload",
+                                                         D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     if (!uploadHandle.IsValid()) {
         m_context->Logging->Error("[GameWorld] Failed to create material upload buffer");
         gpuMgr.Release(bufferHandle, 0);
@@ -579,8 +587,9 @@ void GameWorld::CreateMaterials() {
                                                          D3D12_RESOURCE_STATE_COPY_DEST);
     cmdList.Get()->ResourceBarrier(1, &barrier1);
     cmdList.Get()->CopyResource(gpuMgr.GetResource(bufferHandle), uploadResource);
-    auto barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(bufferHandle), D3D12_RESOURCE_STATE_COPY_DEST,
-                                                         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    auto barrier2 =
+        CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(bufferHandle), D3D12_RESOURCE_STATE_COPY_DEST,
+                                             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     cmdList.Get()->ResourceBarrier(1, &barrier2);
     cmdList.Close();
 
@@ -630,7 +639,8 @@ void GameWorld::LoadWaterTexture() {
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Device *device = m_context->DeviceContext->GetDevice();
-    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+    GpuResourceHandle gpuHandle =
+        gpuMgr.CreateTexture2D(device, ddsInfo.desc, L"Water_Texture", D3D12_RESOURCE_STATE_COMMON);
 
     if (!gpuHandle.IsValid()) {
         m_context->Logging->Error("[GameWorld] Failed to create water GPU texture");
@@ -669,11 +679,11 @@ void GameWorld::LoadWaterTexture() {
     auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
     std::vector<D3D12_SUBRESOURCE_DATA> subresources = ddsInfo.subresources;
-    UINT64 requiredSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
-                                                      static_cast<UINT>(subresources.size()));
+    UINT64 requiredSize =
+        GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
 
-    GpuResourceHandle uploadHandle =
-        gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    GpuResourceHandle uploadHandle = gpuMgr.CreateBuffer(device, requiredSize, L"Water_Texture_Upload",
+                                                         D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
     auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
                                                          D3D12_RESOURCE_STATE_COPY_DEST);
@@ -714,7 +724,8 @@ void GameWorld::LoadBillboardTextures() {
     uint32_t arraySize = static_cast<uint32_t>(desc.DepthOrArraySize);
     m_billboardTotalSlices = arraySize;
 
-    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, desc, D3D12_RESOURCE_STATE_COMMON);
+    GpuResourceHandle gpuHandle =
+        gpuMgr.CreateTexture2D(device, desc, L"Billboard_TextureArray", D3D12_RESOURCE_STATE_COMMON);
     if (!gpuHandle.IsValid()) {
         m_context->Logging->Error("[GameWorld] Failed to create billboard Texture2DArray");
         return;
@@ -751,10 +762,10 @@ void GameWorld::LoadBillboardTextures() {
                                                          D3D12_RESOURCE_STATE_COPY_DEST);
     cmdList.Get()->ResourceBarrier(1, &barrier1);
 
-    UINT64 requiredSize = GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0,
-                                                      static_cast<UINT>(ddsInfo.subresources.size()));
-    GpuResourceHandle uploadHandle =
-        gpuMgr.CreateBuffer(device, requiredSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    UINT64 requiredSize =
+        GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(ddsInfo.subresources.size()));
+    GpuResourceHandle uploadHandle = gpuMgr.CreateBuffer(device, requiredSize, L"Billboard_Upload",
+                                                         D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
     UpdateSubresources(cmdList.Get(), gpuMgr.GetResource(gpuHandle), gpuMgr.GetResource(uploadHandle), 0, 0,
                        static_cast<UINT>(ddsInfo.subresources.size()), ddsInfo.subresources.data());
