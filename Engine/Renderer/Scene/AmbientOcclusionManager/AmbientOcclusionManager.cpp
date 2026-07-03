@@ -84,13 +84,10 @@ void AmbientOcclusionManager::Shutdown() {
         pso = nullptr;
     }
 
-    m_normalSRV = {};
     m_ambientSRV = {};
     m_ambientRTV = {};
     m_ambient1SRV = {};
     m_ambient1RTV = {};
-    m_privateDepthDSV = {};
-    m_privateDepthSRV = {};
     m_bakingEnabled = false;
     m_device = nullptr;
     m_descriptorHeaps = nullptr;
@@ -107,21 +104,6 @@ void AmbientOcclusionManager::BuildResources(uint32_t width, uint32_t height) {
 
     auto &rtvPool = RenderTargetPool::GetInstance();
 
-    // 法线贴图
-    {
-        RenderTargetDesc desc;
-        desc.width = width;
-        desc.height = height;
-        desc.format = kNormalMapFormat;
-        desc.flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-        desc.clearValue = {kNormalMapFormat, {0.0f, 0.0f, 1.0f, 0.0f}};
-        m_normalRT = rtvPool.Allocate(desc);
-        if (m_normalRT.IsValid()) {
-            m_normalSRV = rtvPool.GetSrvHandle(m_normalRT);
-            m_normalRTV = rtvPool.GetRtvHandle(m_normalRT);
-        }
-    }
-
     // AO Map 0（用于 ComputeAO 输出 + 最终结果）
     {
         RenderTargetDesc desc;
@@ -134,6 +116,8 @@ void AmbientOcclusionManager::BuildResources(uint32_t width, uint32_t height) {
         if (m_ambientRT0.IsValid()) {
             m_ambientSRV = rtvPool.GetSrvHandle(m_ambientRT0);
             m_ambientRTV = rtvPool.GetRtvHandle(m_ambientRT0);
+            if (ID3D12Resource *r = rtvPool.GetResource(m_ambientRT0))
+                r->SetName(L"SSAO_Ambient0");
         }
     }
 
@@ -149,40 +133,18 @@ void AmbientOcclusionManager::BuildResources(uint32_t width, uint32_t height) {
         if (m_ambientRT1.IsValid()) {
             m_ambient1SRV = rtvPool.GetSrvHandle(m_ambientRT1);
             m_ambient1RTV = rtvPool.GetRtvHandle(m_ambientRT1);
+            if (ID3D12Resource *r = rtvPool.GetResource(m_ambientRT1))
+                r->SetName(L"SSAO_Ambient1");
         }
     }
 
-    // 私有深度缓冲（DrawNormals 写入，不污染主 DSV）
-    {
-        auto &dsPool = DepthStencilPool::GetInstance();
-        DXGI_FORMAT depthFormat = DXGI_FORMAT_D32_FLOAT;
-        DepthStencilDesc dsDesc;
-        dsDesc.width = width;
-        dsDesc.height = height;
-        dsDesc.format = depthFormat;
-        dsDesc.flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-        dsDesc.clearValue = {depthFormat, {1.0f, 0}};
-        m_privateDepth = dsPool.Allocate(dsDesc);
-        if (m_privateDepth.IsValid()) {
-            m_privateDepthDSV = dsPool.GetDsvHandle(m_privateDepth);
-            m_privateDepthSRV = dsPool.GetSrvHandle(m_privateDepth);
-
-            WCHAR buf[256];
-            swprintf_s(buf, L"[SSAO] PrivateDepth: poolSize=%u allocCount=%u dsvSRV.ptr=0x%llx srvSRV.ptr=0x%llx\n",
-                       dsPool.GetPoolSize(), dsPool.GetAllocatedCount(), m_privateDepthDSV.ptr, m_privateDepthSRV.ptr);
-            OutputDebugStringW(buf);
-        } else {
-            OutputDebugStringW(L"[SSAO] WARNING: PrivateDepth allocation FAILED!\n");
-        }
-    }
+    m_renderWidth = width;
+    m_renderHeight = height;
+    // 屏障用
 }
 
 void AmbientOcclusionManager::ReleaseResources() {
     auto &rtvPool = RenderTargetPool::GetInstance();
-    if (m_normalRT.IsValid()) {
-        rtvPool.Free(m_normalRT, UINT64_MAX);
-        m_normalRT = {};
-    }
     if (m_ambientRT0.IsValid()) {
         rtvPool.Free(m_ambientRT0, UINT64_MAX);
         m_ambientRT0 = {};
@@ -190,11 +152,6 @@ void AmbientOcclusionManager::ReleaseResources() {
     if (m_ambientRT1.IsValid()) {
         rtvPool.Free(m_ambientRT1, UINT64_MAX);
         m_ambientRT1 = {};
-    }
-    if (m_privateDepth.IsValid()) {
-        auto &dsPool = DepthStencilPool::GetInstance();
-        dsPool.Free(m_privateDepth, UINT64_MAX);
-        m_privateDepth = {};
     }
 }
 
@@ -307,43 +264,6 @@ void AmbientOcclusionManager::BuildRandomVectorTexture() {
 }
 
 // ========================================================================
-// AO RT 初始状态过渡（在命令管理器就绪后调用，与 BuildRandomVectorTexture 同一阶段）
-// ========================================================================
-
-void AmbientOcclusionManager::InitializeResourceStates() {
-    if (!m_deviceContext)
-        return;
-    auto *res0 = GetAmbientResource0();
-    auto *res1 = GetAmbientResource1();
-    auto *resN = GetNormalResource();
-    if (!res0 && !res1 && !resN)
-        return;
-
-    auto &cmdMgr = m_deviceContext->GetCommandManager();
-    auto allocH = cmdMgr.AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(0);
-    auto *alloc = cmdMgr.GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
-    auto cmdH = cmdMgr.AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
-    auto cmdL = cmdMgr.GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
-    auto transition = [&](ID3D12Resource *res) {
-        if (!res)
-            return;
-        auto b = CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_COMMON,
-                                                      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        cmdL.Get()->ResourceBarrier(1, &b);
-    };
-    transition(resN);
-    transition(res0);
-    transition(res1);
-
-    cmdL.Close();
-    cmdMgr.Submit(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdL);
-    cmdMgr.Flush(D3D12_COMMAND_LIST_TYPE_DIRECT);
-    auto seq = cmdMgr.GetNextSequence();
-    cmdMgr.ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
-    cmdMgr.ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
-}
-
-// ========================================================================
 // CPU SRV → GPU SRV（供 SsaoRenderer 绑定使用）
 // ========================================================================
 
@@ -398,10 +318,6 @@ void AmbientOcclusionManager::SetAlgorithmPSO(AoAlgorithm algo, ID3D12PipelineSt
 
 // ---- 资源屏障辅助 ----
 
-ID3D12Resource *AmbientOcclusionManager::GetNormalResource() const {
-    return m_normalRT.IsValid() ? RenderTargetPool::GetInstance().GetResource(m_normalRT) : nullptr;
-}
-
 ID3D12Resource *AmbientOcclusionManager::GetAmbientResource0() const {
     return m_ambientRT0.IsValid() ? RenderTargetPool::GetInstance().GetResource(m_ambientRT0) : nullptr;
 }
@@ -410,16 +326,13 @@ ID3D12Resource *AmbientOcclusionManager::GetAmbientResource1() const {
     return m_ambientRT1.IsValid() ? RenderTargetPool::GetInstance().GetResource(m_ambientRT1) : nullptr;
 }
 
-ID3D12Resource *AmbientOcclusionManager::GetPrivateDepthResource() const {
-    return m_privateDepth.IsValid() ? DepthStencilPool::GetInstance().GetResource(m_privateDepth) : nullptr;
-}
-
 // ========================================================================
 // AO 计算入口
 // ========================================================================
 
 void AmbientOcclusionManager::Execute(ID3D12GraphicsCommandList *cmdList, D3D12_GPU_DESCRIPTOR_HANDLE depthSRV,
-                                      const DirectX::XMFLOAT4X4 &viewProj) {
+                                      D3D12_GPU_DESCRIPTOR_HANDLE normalSRV, const DirectX::XMFLOAT4X4 &view,
+                                      const DirectX::XMFLOAT4X4 &proj) {
     if (!m_initialized || !cmdList)
         return;
 
@@ -432,14 +345,15 @@ void AmbientOcclusionManager::Execute(ID3D12GraphicsCommandList *cmdList, D3D12_
 
     // 执行 SSAO 管线
     m_ssaoRenderer.Execute(wrappedCmdList, aoPSO, blurPSO, depthSRV,
-                           GetNormalMapSRV(),     // normalSRV
+                           normalSRV,             // normalSRV（来自 G-buffer）
                            GetAmbientMapSRV(),    // ambientSRV
                            GetAmbientMapRTV(),    // ambientRTV
                            GetAmbientMap1SRV(),   // ambient1SRV
                            GetAmbientMap1RTV(),   // ambient1RTV
                            GetAmbientResource0(), // ambientRes0
                            GetAmbientResource1(), // ambientRes1
-                           viewProj);             // viewProj
+                           view,                  // view 矩阵（法线 World→View）
+                           proj);                 // proj 矩阵
 }
 
 // ========================================================================
@@ -458,6 +372,8 @@ void AmbientOcclusionManager::BakeStaticAO(uint32_t regionX, uint32_t regionY, u
 
 void AmbientOcclusionManager::OnResize(uint32_t width, uint32_t height) {
     if (!m_initialized || width == 0 || height == 0)
+        return;
+    if (m_renderWidth == width && m_renderHeight == height)
         return;
     ReleaseResources();
     BuildResources(width, height);

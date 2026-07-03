@@ -49,9 +49,8 @@ public:
                     uint32_t renderHeight);
     void Shutdown();
 
-    // 随机向量纹理 + AO RT 初始状态上传（命令管理器就绪后调用）
+    // 随机向量纹理上传（命令管理器就绪后调用）
     void BuildRandomVectorTexture();
-    void InitializeResourceStates();
 
     // ---- 算法切换 ----
     void SetAlgorithm(AoAlgorithm algo);
@@ -65,14 +64,13 @@ public:
 
     // ---- AO 计算入口 ----
     void Execute(ID3D12GraphicsCommandList *cmdList, D3D12_GPU_DESCRIPTOR_HANDLE depthSRV,
-                 const DirectX::XMFLOAT4X4 &viewProj);
+                 D3D12_GPU_DESCRIPTOR_HANDLE normalSRV, const DirectX::XMFLOAT4X4 &view,
+                 const DirectX::XMFLOAT4X4 &proj);
 
     // ---- 窗口缩放 ----
     void OnResize(uint32_t width, uint32_t height);
 
     // ---- 资源访问（给 SsaoRenderer 使用） ----
-    D3D12_GPU_DESCRIPTOR_HANDLE GetNormalMapSRV() const { return CpuSrvToGpu(m_normalSRV); }
-    D3D12_CPU_DESCRIPTOR_HANDLE GetNormalMapRTV() const { return m_normalRTV; }
     D3D12_GPU_DESCRIPTOR_HANDLE GetAmbientMapSRV() const {
         if (!m_enabled)
             return m_fallbackWhiteSRV;
@@ -82,24 +80,17 @@ public:
     D3D12_GPU_DESCRIPTOR_HANDLE GetAmbientMap1SRV() const { return CpuSrvToGpu(m_ambient1SRV); }
     D3D12_CPU_DESCRIPTOR_HANDLE GetAmbientMap1RTV() const { return m_ambient1RTV; }
 
-    // ---- 私有深度缓冲（供 DrawNormals 写入，不污染主 DSV） ----
-    ID3D12Resource *GetPrivateDepthResource() const;
-    D3D12_CPU_DESCRIPTOR_HANDLE GetPrivateDepthDSV() const { return m_privateDepthDSV; }
-    D3D12_GPU_DESCRIPTOR_HANDLE GetPrivateDepthSRV() const { return CpuSrvToGpu(m_privateDepthSRV); }
-
-    // ---- SSAO 开关 ----
+    // ---- 资源指针（屏障用） ----
     void SetEnabled(bool enabled) { m_enabled = enabled; }
     bool IsEnabled() const { return m_enabled; }
     void SetFallbackWhiteSRV(D3D12_GPU_DESCRIPTOR_HANDLE srv) { m_fallbackWhiteSRV = srv; }
 
     // ---- 资源屏障辅助（供 System 管理状态转换） ----
-    ID3D12Resource *GetNormalResource() const;
     ID3D12Resource *GetAmbientResource0() const;
     ID3D12Resource *GetAmbientResource1() const;
 
     // ---- 法线绘制 PSO/根签名（供 System 绘制场景几何体） ----
-    ID3D12PipelineState *GetNormalPipeline() const { return m_ssaoRenderer.GetNormalPipeline(); }
-    ID3D12RootSignature *GetNormalRootSig() const { return m_ssaoRenderer.GetNormalRootSig(); }
+    // （已废弃：AO 从 G-buffer 读取法线，不再自行绘制）
 
     // ---- 静态烘培（仅编辑器模式） ----
     bool IsBakingEnabled() const { return m_bakingEnabled; }
@@ -128,13 +119,14 @@ private:
     ID3D12PipelineState *m_algorithmPSOs[static_cast<uint32_t>(AoAlgorithm::Count)] = {};
 
     // RTV 池资源（主线程分配）
-    Resource::RenderTargetHandle m_normalRT;
     Resource::RenderTargetHandle m_ambientRT0;
     Resource::RenderTargetHandle m_ambientRT1;
 
+    // 当前分辨率（OnResize 防重复重建）
+    uint32_t m_renderWidth = 0;
+    uint32_t m_renderHeight = 0;
+
     // 缓存的 SRV/RTV handle
-    D3D12_CPU_DESCRIPTOR_HANDLE m_normalSRV = {};
-    D3D12_CPU_DESCRIPTOR_HANDLE m_normalRTV = {};
     D3D12_CPU_DESCRIPTOR_HANDLE m_ambientSRV = {};
     D3D12_CPU_DESCRIPTOR_HANDLE m_ambientRTV = {};
     D3D12_CPU_DESCRIPTOR_HANDLE m_ambient1SRV = {};
@@ -142,11 +134,6 @@ private:
 
     // SSAO 渲染器（内部录制全屏四边形命令）
     SsaoRenderer m_ssaoRenderer;
-
-    // 私有深度缓冲（DrawNormals 写入，不共享主 DSV）
-    Resource::DepthStencilHandle m_privateDepth;
-    D3D12_CPU_DESCRIPTOR_HANDLE m_privateDepthDSV = {};
-    D3D12_CPU_DESCRIPTOR_HANDLE m_privateDepthSRV = {};
 
     // 随机向量纹理资源（必须在管理器生命周期内保持存活）
     Microsoft::WRL::ComPtr<ID3D12Resource> m_randomVectorTexture;
