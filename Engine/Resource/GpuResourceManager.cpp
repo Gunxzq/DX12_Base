@@ -38,7 +38,8 @@ void GpuResourceManager::Shutdown() {
     m_initialized = false;
 }
 
-GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t size, D3D12_HEAP_TYPE heapType,
+GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t size, const std::wstring &name,
+                                                   D3D12_HEAP_TYPE heapType,
                                                    D3D12_RESOURCE_STATES initialState) {
     if (!m_initialized || !device) {
         return GpuResourceHandle::Invalid();
@@ -65,7 +66,11 @@ GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t 
     m_handlePool.SetDataPtr(handle, resource);
     m_handlePool.SetState(handle, GpuResourceState::Ready);
 
-    // 4. 更新内存统计
+    // 4. 设置调试名称
+    if (!name.empty())
+        resource->SetName(name.c_str());
+
+    // 5. 更新内存统计
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_totalMemoryUsage += size;
@@ -75,6 +80,7 @@ GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t 
 }
 
 GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
+                                                      const std::wstring &name,
                                                       D3D12_RESOURCE_STATES initialState) {
     if (!m_initialized || !device) {
         return GpuResourceHandle::Invalid();
@@ -101,6 +107,10 @@ GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, cons
     m_handlePool.SetDataPtr(handle, resource);
     m_handlePool.SetState(handle, GpuResourceState::Ready);
 
+    // 设置调试名称
+    if (!name.empty())
+        resource->SetName(name.c_str());
+
     // 获取真实内存大小
     D3D12_RESOURCE_ALLOCATION_INFO allocationInfo = device->GetResourceAllocationInfo(0, 1, &desc);
     size_t memSize = allocationInfo.SizeInBytes;
@@ -115,6 +125,7 @@ GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, cons
 
 GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
                                                       const D3D12_CLEAR_VALUE &clearValue,
+                                                      const std::wstring &name,
                                                       D3D12_RESOURCE_STATES initialState) {
     if (!m_initialized || !device) {
         return GpuResourceHandle::Invalid();
@@ -139,6 +150,10 @@ GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, cons
 
     m_handlePool.SetDataPtr(handle, resource);
     m_handlePool.SetState(handle, GpuResourceState::Ready);
+
+    // 设置调试名称
+    if (!name.empty())
+        resource->SetName(name.c_str());
 
     D3D12_RESOURCE_ALLOCATION_INFO allocationInfo = device->GetResourceAllocationInfo(0, 1, &desc);
     size_t memSize = allocationInfo.SizeInBytes;

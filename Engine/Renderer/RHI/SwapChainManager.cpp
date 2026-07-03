@@ -114,6 +114,7 @@ void SwapChainManager::CreateRenderTargetViews(ID3D12Device *device) {
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHeapHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
     for (UINT i = 0; i < m_backBuffers.size(); i++) {
         device->CreateRenderTargetView(m_backBuffers[i].Get(), &rtvDesc, rtvHeapHandle);
+        m_backBuffers[i]->SetName((L"BackBuffer_" + std::to_wstring(i)).c_str());
         rtvHeapHandle.Offset(1, m_rtvDescriptorSize);
     }
 }
@@ -150,6 +151,7 @@ void SwapChainManager::CreateDepthStencilView(ID3D12Device *device) {
     ThrowIfFailed(device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &depthStencilDesc,
                                                   D3D12_RESOURCE_STATE_DEPTH_WRITE, &optClear,
                                                   IID_PPV_ARGS(&m_depthStencilBuffer)));
+    m_depthStencilBuffer->SetName(L"Main_DepthBuffer");
 
     // Create DSV
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};

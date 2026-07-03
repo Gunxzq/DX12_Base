@@ -4,7 +4,8 @@
 
 template <typename T> class UploadBuffer {
 public:
-    UploadBuffer(ID3D12Device *device, UINT elementCount, bool isConstantBuffer) : mIsConstantBuffer(isConstantBuffer) {
+    UploadBuffer(ID3D12Device *device, UINT elementCount, bool isConstantBuffer,
+                 const std::wstring &name = L"") : mIsConstantBuffer(isConstantBuffer) {
         mElementByteSize = sizeof(T);
 
         // Constant buffer elements need to be multiples of 256 bytes.
@@ -21,6 +22,9 @@ public:
             device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE,
                                             &CD3DX12_RESOURCE_DESC::Buffer(mElementByteSize * elementCount),
                                             D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mUploadBuffer)));
+
+        if (!name.empty())
+            mUploadBuffer->SetName(name.c_str());
 
         ThrowIfFailed(mUploadBuffer->Map(0, nullptr, reinterpret_cast<void **>(&mMappedData)));
 

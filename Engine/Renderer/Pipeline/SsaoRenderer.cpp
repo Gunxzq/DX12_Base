@@ -79,6 +79,7 @@ void SsaoRenderer::Initialize() {
         device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
                                         nullptr, IID_PPV_ARGS(&m_ssaoCB));
         if (m_ssaoCB) {
+            m_ssaoCB->SetName(L"SsaoCB");
             m_ssaoCB->Map(0, nullptr, &m_ssaoCBMapped);
         }
     }

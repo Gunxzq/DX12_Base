@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace DX12Engine::Resource {
 
@@ -53,6 +54,7 @@ struct RenderTargetDesc {
     DXGI_SAMPLE_DESC sampleDesc = {1, 0};
     D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
     D3D12_CLEAR_VALUE clearValue = {};
+    std::wstring name;  // 调试名称（RenderDoc 识别）
 };
 
 // -----------------------------------------------------------------
@@ -65,6 +67,7 @@ struct DepthStencilDesc {
     DXGI_SAMPLE_DESC sampleDesc = {1, 0};
     D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
     D3D12_CLEAR_VALUE clearValue = {};
+    std::wstring name;  // 调试名称（RenderDoc 识别）
 };
 
 } // namespace DX12Engine::Resource

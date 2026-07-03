@@ -41,7 +41,7 @@ void ApplicationRenderTargets::OnResize(uint32_t width, uint32_t height) {
 void ApplicationRenderTargets::AllocateGBuffer(uint32_t width, uint32_t height) {
     auto &rtPool = Resource::RenderTargetPool::GetInstance();
 
-    auto makeDesc = [&](DXGI_FORMAT fmt) {
+    auto makeDesc = [&](DXGI_FORMAT fmt, const std::wstring &name) {
         Resource::RenderTargetDesc d;
         d.width = width;
         d.height = height;
@@ -51,22 +51,14 @@ void ApplicationRenderTargets::AllocateGBuffer(uint32_t width, uint32_t height) 
         d.clearValue.Color[1] = 0.0f;
         d.clearValue.Color[2] = 0.0f;
         d.clearValue.Color[3] = 0.0f;
+        d.name = name;
         return d;
     };
 
-    m_gbuffer.albedo = rtPool.Allocate(makeDesc(DXGI_FORMAT_R8G8B8A8_UNORM));
-    m_gbuffer.normal = rtPool.Allocate(makeDesc(DXGI_FORMAT_R16G16B16A16_FLOAT));
-    m_gbuffer.material = rtPool.Allocate(makeDesc(DXGI_FORMAT_R8G8B8A8_UNORM));
-    m_gbuffer.worldPos = rtPool.Allocate(makeDesc(DXGI_FORMAT_R16G16B16A16_FLOAT));
-
-    auto setName = [&](const Resource::RenderTargetHandle &h, const wchar_t *n) {
-        if (ID3D12Resource *r = rtPool.GetResource(h))
-            r->SetName(n);
-    };
-    setName(m_gbuffer.albedo, L"Gbuffer_Albedo");
-    setName(m_gbuffer.normal, L"Gbuffer_Normal");
-    setName(m_gbuffer.material, L"Gbuffer_Material");
-    setName(m_gbuffer.worldPos, L"Gbuffer_WorldPos");
+    m_gbuffer.albedo = rtPool.Allocate(makeDesc(DXGI_FORMAT_R8G8B8A8_UNORM, L"Gbuffer_Albedo"));
+    m_gbuffer.normal = rtPool.Allocate(makeDesc(DXGI_FORMAT_R16G16B16A16_FLOAT, L"Gbuffer_Normal"));
+    m_gbuffer.material = rtPool.Allocate(makeDesc(DXGI_FORMAT_R8G8B8A8_UNORM, L"Gbuffer_Material"));
+    m_gbuffer.worldPos = rtPool.Allocate(makeDesc(DXGI_FORMAT_R16G16B16A16_FLOAT, L"Gbuffer_WorldPos"));
 }
 
 void ApplicationRenderTargets::FreeGBuffer() {

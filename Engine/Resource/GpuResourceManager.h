@@ -3,6 +3,7 @@
 #include "Struct/ResourceHandle.h"
 #include <d3d12.h>
 #include <mutex>
+#include <string>
 #include <vector>
 #include <wrl/client.h>
 
@@ -21,14 +22,17 @@ public:
     void Shutdown();
 
     GpuResourceHandle CreateBuffer(ID3D12Device *device, size_t size,
+                                   const std::wstring &name,
                                    D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_DEFAULT,
                                    D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
 
     GpuResourceHandle CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
+                                      const std::wstring &name,
                                       D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
 
     GpuResourceHandle CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
                                       const D3D12_CLEAR_VALUE &clearValue,
+                                      const std::wstring &name,
                                       D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON);
     ID3D12Resource *GetResource(GpuResourceHandle handle) const;
 

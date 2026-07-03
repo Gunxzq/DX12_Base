@@ -39,7 +39,8 @@ public:
     static ComPtr<ID3DBlob> LoadBinary(const std::wstring &filename);
     static ComPtr<ID3D12Resource> CreateDefaultBuffer(ID3D12Device *device, ID3D12GraphicsCommandList *cmdList,
                                                       const void *initData, UINT64 byteSize,
-                                                      ComPtr<ID3D12Resource> &uploadBuffer);
+                                                      ComPtr<ID3D12Resource> &uploadBuffer,
+                                                      const std::wstring &name = L"");
     static ComPtr<ID3DBlob> CompileShader(const std::wstring &filename, const D3D_SHADER_MACRO *defines,
                                           const std::string &entrypoint, const std::string &target);
 
@@ -52,7 +53,8 @@ public:
      * @return HRESULT 创建结果
      */
     static HRESULT CreateUploadBuffer(ID3D12Device *device, UINT64 byteSize, D3D12_RESOURCE_STATES resourceState,
-                                      ID3D12Resource **outResource);
+                                      ID3D12Resource **outResource,
+                                      const std::wstring &name = L"");
 
     /**
      * @brief 创建默认堆资源（Default Heap Resource）
@@ -63,5 +65,6 @@ public:
      * @return HRESULT 创建结果
      */
     static HRESULT CreateDefaultBuffer(ID3D12Device *device, UINT64 byteSize, D3D12_RESOURCE_STATES resourceState,
-                                       ID3D12Resource **outResource);
+                                       ID3D12Resource **outResource,
+                                       const std::wstring &name = L"");
 };

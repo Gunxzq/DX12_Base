@@ -120,6 +120,7 @@ uint32_t ReflectionProbeManager::AddProbe(const DirectX::XMFLOAT3 &position, flo
         clearValue.Format = DXGI_FORMAT_D32_FLOAT;
         clearValue.DepthStencil.Depth = 1.0f;
         depthDesc.clearValue = clearValue;
+        depthDesc.name = L"Probe_Depth";
 
         D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
         dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
@@ -334,6 +335,7 @@ ProbeRuntimeResources ReflectionProbeManager::AllocateCubemapResource(uint32_t r
     clearValue.Color[2] = 0.3f;
     clearValue.Color[3] = 1.0f;
     rtDesc.clearValue = clearValue;
+    rtDesc.name = L"Probe_Cubemap";
 
     D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
     rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;

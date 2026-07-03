@@ -58,7 +58,7 @@ void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *de
     {
         size_t dirSize = MAX_LIGHTS * sizeof(DirLightShadowConstants);
         m_dirShadowDataBufferHandle = GpuResourceManager::GetInstance().CreateBuffer(
-            device, dirSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+            device, dirSize, L"ShadowData_Buffer", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
         // 分配 SRV 槽位：t11 (DirShadowData)
         m_shadowDataSrvBaseSlot = descriptorHeaps->Allocate(PartitionType::Buffer);
@@ -689,7 +689,7 @@ void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint3
     clearValue.Format = DXGI_FORMAT_D32_FLOAT;
     clearValue.DepthStencil.Depth = 1.0f;
 
-    m_dirShadow.textureHandle = gpuMgr.CreateTexture2D(m_device, desc, clearValue,
+    m_dirShadow.textureHandle = gpuMgr.CreateTexture2D(m_device, desc, clearValue, L"ShadowMap_Depth",
                                                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
                                                            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     if (!m_dirShadow.textureHandle.IsValid()) {

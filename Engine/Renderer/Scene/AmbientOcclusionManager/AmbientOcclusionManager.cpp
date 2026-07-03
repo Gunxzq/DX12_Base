@@ -112,12 +112,11 @@ void AmbientOcclusionManager::BuildResources(uint32_t width, uint32_t height) {
         desc.format = kAmbientMapFormat;
         desc.flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
         desc.clearValue = {kAmbientMapFormat, {1.0f, 0.0f, 0.0f, 0.0f}};
+        desc.name = L"SSAO_Ambient0";
         m_ambientRT0 = rtvPool.Allocate(desc);
         if (m_ambientRT0.IsValid()) {
             m_ambientSRV = rtvPool.GetSrvHandle(m_ambientRT0);
             m_ambientRTV = rtvPool.GetRtvHandle(m_ambientRT0);
-            if (ID3D12Resource *r = rtvPool.GetResource(m_ambientRT0))
-                r->SetName(L"SSAO_Ambient0");
         }
     }
 
@@ -129,12 +128,11 @@ void AmbientOcclusionManager::BuildResources(uint32_t width, uint32_t height) {
         desc.format = kAmbientMapFormat;
         desc.flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
         desc.clearValue = {kAmbientMapFormat, {1.0f, 0.0f, 0.0f, 0.0f}};
+        desc.name = L"SSAO_Ambient1";
         m_ambientRT1 = rtvPool.Allocate(desc);
         if (m_ambientRT1.IsValid()) {
             m_ambient1SRV = rtvPool.GetSrvHandle(m_ambientRT1);
             m_ambient1RTV = rtvPool.GetRtvHandle(m_ambientRT1);
-            if (ID3D12Resource *r = rtvPool.GetResource(m_ambientRT1))
-                r->SetName(L"SSAO_Ambient1");
         }
     }
 
@@ -199,6 +197,7 @@ void AmbientOcclusionManager::BuildRandomVectorTexture() {
                                         nullptr, IID_PPV_ARGS(&m_randomVectorTexture));
     if (FAILED(hr))
         return;
+    m_randomVectorTexture->SetName(L"SSAO_RandomVector");
 
     // 上传
     D3D12_SUBRESOURCE_DATA subData = {};
@@ -212,6 +211,8 @@ void AmbientOcclusionManager::BuildRandomVectorTexture() {
     auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadSize);
     device->CreateCommittedResource(&uploadHeapProps, D3D12_HEAP_FLAG_NONE, &uploadDesc,
                                     D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&uploadBuf));
+    if (uploadBuf)
+        uploadBuf->SetName(L"SSAO_RandomVector_Upload");
 
     // 使用命令管理器标准路径上传
     auto allocHandle = cmdMgr.AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(0);

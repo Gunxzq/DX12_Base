@@ -119,6 +119,10 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
         return UINT32_MAX;
     }
 
+    // 设置调试名称
+    if (!desc.name.empty())
+        resource->SetName(desc.name.c_str());
+
     uint32_t dsvSlot = m_descriptorHeaps->Allocate(PartitionType::Dsv);
     if (dsvSlot == UINT32_MAX) {
         return UINT32_MAX;

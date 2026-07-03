@@ -29,6 +29,7 @@ void FrameResourceManager::CreatePassCB(ID3D12Device *device) {
         m_passCBResource.Reset();
         return;
     }
+    m_passCBResource->SetName(L"PassCB");
 
     m_passCBAddress = m_passCBResource->GetGPUVirtualAddress();
 }
@@ -203,12 +204,14 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocatePersistentInternal(const
     auto desc = CD3DX12_RESOURCE_DESC::Buffer(alignedSize);
 
     PersistentAllocation alloc;
-    HRESULT hr = m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                   IID_PPV_ARGS(&alloc.resource));
+    HRESULT hr =
+        m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                          nullptr, IID_PPV_ARGS(&alloc.resource));
     if (FAILED(hr)) {
         return 0;
     }
+
+    alloc.resource->SetName(L"PersistentAlloc_Upload");
 
     hr = alloc.resource->Map(0, nullptr, &alloc.mappedData);
     if (FAILED(hr)) {

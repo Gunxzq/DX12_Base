@@ -231,7 +231,7 @@ private:
         auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
 
         size_t vbSize = data->vertices.size() * sizeof(GeometryGenerator::Vertex);
-        auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+        auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, L"Terrain_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
         if (auto *vbRes = gpuMgr.GetResource(vbHandle)) {
             void *mapped = nullptr;
             vbRes->Map(0, nullptr, &mapped);
@@ -246,7 +246,7 @@ private:
         }
 
         size_t ibSize = data->indices.size() * sizeof(uint32_t);
-        auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+        auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, L"Terrain_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
         if (auto *ibRes = gpuMgr.GetResource(ibHandle)) {
             void *mapped = nullptr;
             ibRes->Map(0, nullptr, &mapped);
@@ -285,7 +285,7 @@ private:
             return result;
         }
 
-        auto gpuHandle = gpuMgr.CreateTexture2D(device, result.ddsInfo.desc, D3D12_RESOURCE_STATE_COMMON);
+        auto gpuHandle = gpuMgr.CreateTexture2D(device, result.ddsInfo.desc, L"Terrain_Texture", D3D12_RESOURCE_STATE_COMMON);
         if (!gpuHandle.IsValid()) {
             logger->Error("[TerrainLoadTask] Failed to create GPU texture for: {}",
                           std::string(path.begin(), path.end()));
@@ -369,7 +369,7 @@ private:
             logger->Info("[TerrainLoadTask] Creating upload buffer: size={} bytes", totalUploadSize);
 
             Resource::GpuResourceHandle uploadHandle =
-                gpuMgr.CreateBuffer(device, totalUploadSize, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                gpuMgr.CreateBuffer(device, totalUploadSize, L"Terrain_Upload", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
             ID3D12Resource *uploadResource = gpuMgr.GetResource(uploadHandle);
 
             // ================================================================

@@ -27,6 +27,8 @@ bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, D3D12_HEAP_TYPE
         return false;
     }
 
+    m_resource->SetName(L"RingBuffer");
+
     hr = m_resource->Map(0, nullptr, &m_mappedData);
     if (FAILED(hr)) {
         m_resource.Reset();
