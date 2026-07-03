@@ -9,8 +9,9 @@ namespace DX12Engine {
 namespace Scheduler {
 enum class RenderPhase : uint8_t {
     // 用户阶段
-    PrePass,           // 阴影、深度、遮挡剔除
-    DynamicAOcclusion, // 动态屏幕空间环境光遮蔽（PrePass 之后，Opaque 之前）
+    PrePass,           // 阴影、深度、遮挡剔除 + G-buffer
+    DynamicAOcclusion, // 动态屏幕空间环境光遮蔽（PrePass 之后，Lighting 之前）
+    Lighting,          // 延迟光照 Pass（读取 G-buffer + SSAO，输出到交换链）
     Opaque,            // 不透明物体 + 地形（资源状态一致，合并在同一阶段）
     Transparent,       // 透明物体
     Billboard,         // 公告牌渲染（独立阶段，避免与透明物体屏障冲突）
