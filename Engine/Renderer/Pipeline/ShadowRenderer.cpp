@@ -32,7 +32,10 @@ void ShadowRenderer::Initialize() {
     LoadPointGSShaders();
     CreatePointGSPSO();
 
-    OutputDebugStringW(L"[INFO] ShadowRenderer initialized (directional + point)\n");
+    LoadSpotShaders();
+    CreateSpotPSO();
+
+    OutputDebugStringW(L"[INFO] ShadowRenderer initialized (directional + point + spot)\n");
 }
 
 void ShadowRenderer::Shutdown() {
@@ -48,6 +51,9 @@ void ShadowRenderer::Shutdown() {
     m_pointGSVSBlob.Reset();
     m_pointGSGSBlob.Reset();
     m_pointGSPSBlob.Reset();
+
+    m_spotPSO.Reset();
+    m_spotVSBlob.Reset();
 
     m_inPass = false;
     m_context = nullptr;
@@ -245,15 +251,17 @@ void ShadowRenderer::CreateRootSignature() {
     //   slot 0: b0 cbShadowObject   (CBV — VS) 点光源单面/GS 路径使用 gWorld
     //   slot 1: b1 cbDirShadow / cbPointShadow (CBV — VS+GS) 光源 VP 矩阵
     //   slot 2: t12,space1          (SRV — VS) StructuredBuffer<InstanceData>
+    //   slot 3: b2                  (root constant — VS) gShadowLightIndex
     // ========================================================================
-    CD3DX12_ROOT_PARAMETER slotRootParameter[3];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[4];
 
     slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_VERTEX); // b0
     slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);    // b1: GS 也需读取
     slotRootParameter[2].InitAsShaderResourceView(
         12, 1, D3D12_SHADER_VISIBILITY_VERTEX); // t12,space1: InstanceData StructuredBuffer
+    slotRootParameter[3].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_VERTEX); // b2: gShadowLightIndex
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(3, slotRootParameter, 0, nullptr,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(4, slotRootParameter, 0, nullptr,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -286,7 +294,7 @@ void ShadowRenderer::CreatePSO() {
     rasterizerDesc.DepthBias = 100;
     rasterizerDesc.DepthBiasClamp = 0.0f;
     rasterizerDesc.SlopeScaledDepthBias = 10.0f;
-    rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
+    rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // 阴影贴图：不剔除背面，避免视角依赖的深度缺失
 
     D3D12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 
@@ -349,7 +357,7 @@ void ShadowRenderer::CreatePointInstancedPSO() {
     rasterDesc.DepthBias = 100;
     rasterDesc.DepthBiasClamp = 0.0f;
     rasterDesc.SlopeScaledDepthBias = 5.0f;
-    rasterDesc.CullMode = D3D12_CULL_MODE_BACK;
+    rasterDesc.CullMode = D3D12_CULL_MODE_NONE;
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = {inputLayout, _countof(inputLayout)};
@@ -442,6 +450,59 @@ void ShadowRenderer::CreatePointGSPSO() {
     psoDesc.SampleDesc.Quality = 0;
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pointGSPSO)));
     OutputDebugStringW(L"[INFO] ShadowRenderer: Point GS PSO created\n");
+}
+
+// ========================================================================
+// 聚光灯阴影着色器加载（实例化，单面，复用方向光根签名）
+// ========================================================================
+
+void ShadowRenderer::LoadSpotShaders() {
+    UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    compileFlags |= D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
+    Microsoft::WRL::ComPtr<ID3DBlob> errors;
+
+    HRESULT hr = D3DCompileFromFile(L"Shaders/Shadow.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                                    "SpotShadowVS_Instanced", "vs_5_1", compileFlags, 0, &m_spotVSBlob, &errors);
+    if (FAILED(hr)) {
+        if (errors)
+            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+        throw std::runtime_error("ShadowRenderer: Failed to compile SpotShadowVS_Instanced");
+    }
+    // 复用 ShadowPS + 方向光根签名
+}
+
+void ShadowRenderer::CreateSpotPSO() {
+    auto device = m_context->GetDevice();
+
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+    D3D12_DEPTH_STENCIL_DESC dsDesc = {};
+    dsDesc.DepthEnable = TRUE;
+    dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    dsDesc.StencilEnable = FALSE;
+    D3D12_RASTERIZER_DESC rasterDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    rasterDesc.DepthBias = 100;
+    rasterDesc.DepthBiasClamp = 0.0f;
+    rasterDesc.SlopeScaledDepthBias = 10.0f;
+    rasterDesc.CullMode = D3D12_CULL_MODE_NONE;
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout = {inputLayout, _countof(inputLayout)};
+    psoDesc.pRootSignature = m_rootSignature.Get();
+    psoDesc.VS = {m_spotVSBlob->GetBufferPointer(), m_spotVSBlob->GetBufferSize()};
+    psoDesc.PS = {m_psBlob->GetBufferPointer(), m_psBlob->GetBufferSize()};
+    psoDesc.RasterizerState = rasterDesc;
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = dsDesc;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 0;
+    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleDesc.Quality = 0;
+    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_spotPSO)));
+    OutputDebugStringW(L"[INFO] ShadowRenderer: Spot PSO created\n");
 }
 
 } // namespace DX12Engine::Renderer

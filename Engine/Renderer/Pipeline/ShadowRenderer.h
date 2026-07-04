@@ -87,6 +87,7 @@ public:
     ID3D12RootSignature *GetRootSignature() const { return m_rootSignature.Get(); }
     ID3D12PipelineState *GetPointInstancedPSO() const { return m_pointInstancedPSO.Get(); }
     ID3D12PipelineState *GetPointGSPSO() const { return m_pointGSPSO.Get(); }
+    ID3D12PipelineState *GetSpotPSO() const { return m_spotPSO.Get(); }
 
     // 内部状态访问（供 PointShadowRenderSystem 使用）
     bool IsInPass() const { return m_inPass; }
@@ -115,6 +116,8 @@ private:
     void CreatePointInstancedPSO();
     void LoadPointGSShaders();
     void CreatePointGSPSO();
+    void LoadSpotShaders();
+    void CreateSpotPSO();
 
     // ========================================================================
     // 成员变量
@@ -137,6 +140,10 @@ private:
     Microsoft::WRL::ComPtr<ID3DBlob> m_pointGSVSBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> m_pointGSGSBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> m_pointGSPSBlob;
+
+    // 聚光灯阴影（实例化）
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_spotPSO;
+    Microsoft::WRL::ComPtr<ID3DBlob> m_spotVSBlob;
 
     // 当前 Pass 状态
     bool m_inPass = false;
