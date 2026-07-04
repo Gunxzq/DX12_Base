@@ -50,21 +50,18 @@ SamplerState gEnvSampler : register(s10);
 // 动态反射探针 Cubemap Array
 TextureCubeArray gReflectionCubemapArray : register(t15);
 
-// Schlick 菲涅尔近似
-float3 FresnelSchlick2(float cosTheta, float3 F0)
+// 环境反射（延迟渲染专用，支持反射探针 Cubemap Array 与天空盒回退）
+float3 ComputeEnvironmentReflectionDeferred(float3 reflectDir, float3 albedo, float metallic, float roughness, float3 N, float3 V, uint probeIndex)
 {
-    return F0 + (1.0f - F0) * pow(1.0f - cosTheta, 5.0f);
-}
-
-// 环境反射计算
-float3 ComputeEnvironmentReflection2(float3 reflectDir, float3 albedo, float metallic, float roughness, float3 N, float3 V)
-{
-    float3 reflection = gEnvMap.Sample(gEnvSampler, reflectDir).rgb;
+    float3 reflection = 0;
+    if (probeIndex > 0)
+        reflection = gReflectionCubemapArray.Sample(gEnvSampler, float4(reflectDir, probeIndex - 1)).rgb;
+    else
+        reflection = gEnvMap.Sample(gEnvSampler, reflectDir).rgb;
     float3 F0 = lerp(0.04f, albedo, metallic);
     float NdotV = max(dot(N, V), 0.0f);
-    float3 fresnel = FresnelSchlick2(NdotV, F0);
-    float strength = 1.0f - roughness * 0.5f;
-    return reflection * fresnel * strength;
+    float3 fresnel = F0 + (1.0f - F0) * pow(1.0f - NdotV, 5.0f);
+    return reflection * fresnel * (1.0f - roughness * 0.5f);
 }
 
 struct QuadOut
@@ -82,28 +79,6 @@ QuadOut VS(uint vertexID : SV_VertexID)
     return v;
 }
 
-float3 ComputeDirectionalLight2(Light light, float3 albedo, float metallic, float roughness, float3 N, float3 V)
-{
-    float3 L = -light.Direction;
-    float NdotL = max(dot(N, L), 0.0f);
-    float3 H = normalize(V + L);
-    float NdotH = max(dot(N, H), 0.0f);
-    float NdotV = max(dot(N, V), 0.0f);
-    float3 radiance = light.Strength;
-    float3 F0 = lerp(0.04f, albedo, metallic);
-    float3 F = F0 + (1.0f - F0) * pow(1.0f - NdotH, 5.0f);
-    float a = roughness * roughness;
-    float a2 = a * a;
-    float NdotH2 = NdotH * NdotH;
-    float D = a2 / (3.14159f * (NdotH2 * (a2 - 1.0f) + 1.0f) * (NdotH2 * (a2 - 1.0f) + 1.0f));
-    float k = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;
-    float G = (NdotV / (NdotV * (1.0f - k) + k)) * (NdotL / (NdotL * (1.0f - k) + k));
-    float3 specular = D * G * F / (4.0f * max(NdotV, 0.01f) * max(NdotL, 0.01f) + 0.0001f);
-    float3 kD = (1.0f - F) * (1.0f - metallic);
-    float3 diffuse = kD * albedo / 3.14159f;
-    return (diffuse + specular) * radiance * NdotL;
-}
-
 float4 PS(QuadOut pin) : SV_Target
 {
     float3 albedo = gAlbedoRT.Sample(gSamplerPointClamp, pin.UV).rgb;
@@ -117,34 +92,56 @@ float4 PS(QuadOut pin) : SV_Target
     float3 direct = 0;
     for (uint i = 0; i < gNumDirLights; ++i)
     {
-        float3 lightContrib = ComputeDirectionalLight2(gLights[i], albedo, metallic, roughness, N, V);
-        // 方向光阴影（光源有 ShadowMapIndex 且有效时采样）
-        if (gLights[i].ShadowMapIndex < 255)
+        float3 lightContrib = ComputeDirectionalLightDeferred(gLights[i], albedo, metallic, roughness, N, V);
+        // 方向光阴影（光源有 ShadowMapIndex 且投射阴影时采样）
+        if (gLights[i].ShadowMapIndex < 255 && gLights[i].CastShadow > 0.5f)
         {
             lightContrib *= SampleDirShadow(gLights[i].ShadowMapIndex, worldPos, N, gLights[i].Direction.xyz);
         }
         direct += lightContrib;
     }
 
+    // 点光源
+    for (uint j = 0; j < gNumPointLights; ++j)
+    {
+        uint idx = gNumDirLights + j;
+        Light ptLight = gLights[idx];
+        // 点光源使用 Position 计算 L 向量，不能用 Direction（默认值为 0）
+        float3 L = ptLight.Position.xyz - worldPos;
+        float dist = length(L);
+        L /= dist;
+        float atten = saturate((ptLight.FalloffEnd - dist) / (ptLight.FalloffEnd - ptLight.FalloffStart));
+        if (atten <= 0.0f)
+            continue;
+
+        float NdotL = max(dot(N, L), 0.0f);
+        float3 H = normalize(V + L);
+        float NdotH = max(dot(N, H), 0.0f);
+        float NdotV = max(dot(N, V), 0.0f);
+        float NdotH2 = NdotH * NdotH;
+        float3 radiance = ptLight.Strength * atten;
+        float3 F0 = lerp(0.04f, albedo, metallic);
+        float3 F = F0 + (1.0f - F0) * pow(1.0f - NdotH, 5.0f);
+        float a = roughness * roughness;
+        float a2 = a * a;
+        float D = a2 / (3.14159f * (NdotH2 * (a2 - 1.0f) + 1.0f) * (NdotH2 * (a2 - 1.0f) + 1.0f));
+        float k = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;
+        float G = (NdotV / (NdotV * (1.0f - k) + k)) * (NdotL / (NdotL * (1.0f - k) + k));
+        float3 specular = D * G * F / (4.0f * max(NdotV, 0.01f) * max(NdotL, 0.01f) + 0.0001f);
+        float3 kD = (1.0f - F) * (1.0f - metallic);
+        float3 diffuse = kD * albedo / 3.14159f;
+        float3 lightContrib = (diffuse + specular) * radiance * NdotL;
+        // 点光源阴影（ShadowMapIndex < 255 且投射阴影）
+        if (ptLight.ShadowMapIndex < 255 && ptLight.CastShadow > 0.5f)
+        {
+            lightContrib *= SamplePointShadow(ptLight.ShadowMapIndex, worldPos);
+        }
+        direct += lightContrib;
+    }
+
     // 环境反射（由 G-buffer Material.a 编码的 probeIndex 控制）
-    float3 reflectDir = reflect(-V, N);
-    float3 reflection = 0;
     uint probeIndex = (uint)(mat.a * 255.0f);
-    if (probeIndex > 0)
-    {
-        // 有专用探针 → 采样 Cubemap Array
-        reflection = gReflectionCubemapArray.Sample(gEnvSampler, float4(reflectDir, probeIndex - 1)).rgb;
-    }
-    else
-    {
-        // 无探针 → 回退天空盒环境贴图
-        reflection = gEnvMap.Sample(gEnvSampler, reflectDir).rgb;
-    }
-    // Fresnel 衰减 + 粗糙度衰减
-    float3 F0 = lerp(0.04f, albedo, metallic);
-    float NdotV_ref = max(dot(N, V), 0.0f);
-    float3 fresnel = F0 + (1.0f - F0) * pow(1.0f - NdotV_ref, 5.0f);
-    reflection *= fresnel * (1.0f - roughness * 0.5f);
+    float3 reflection = ComputeEnvironmentReflectionDeferred(reflect(-V, N), albedo, metallic, roughness, N, V, probeIndex);
 
     return float4(ambient + direct + reflection, 1.0f);
 }

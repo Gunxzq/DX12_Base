@@ -87,8 +87,8 @@ void LightingRenderer::CreateRootSignature() {
     //   slot 6: t16 SSAO Map                                (SRV 描述符表)
     //   slot 7: t10 EnvMap                                  (SRV 描述符表)
     //   slot 8: t15 ReflectionCubemapArray                  (SRV 描述符表)
-    //   slot 9: t11,space1 DirShadowData                    (SRV 描述符表)
-    //   slot 10: t14,space1 DirShadowMaps                   (SRV 描述符表, 无界)
+    //   slot 9: t11,space1 ShadowParams                        (SRV 描述符表)
+    //   slot 10: t14,space1 gShadowMaps[]                      (无界纹理数组 SRV)
     CD3DX12_ROOT_PARAMETER params[11];
 
     params[0].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
@@ -99,8 +99,8 @@ void LightingRenderer::CreateRootSignature() {
         rtRanges[i].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, (i < 4) ? 20 + i : 16, 0);
     rtRanges[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0); // t10: EnvMap
     rtRanges[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 15, 0); // t15: Cubemap Array
-    rtRanges[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 11, 1); // t11,space1: DirShadowData
-    rtRanges[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 14, 1); // t14,space1: DirShadowMaps (无界)
+    rtRanges[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 11, 1); // t11,space1: ShadowParams
+    rtRanges[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 14, 1); // t14,space1: gShadowMaps[] (无界)
     for (uint32_t i = 0; i < 9; ++i)
         params[2 + i].InitAsDescriptorTable(1, &rtRanges[i], D3D12_SHADER_VISIBILITY_PIXEL);
 
@@ -213,11 +213,11 @@ void LightingRenderer::BeginFrame(CommandList &cmdList,
     if (cubemapArraySrv.ptr != 0)
         cmdList.Get()->SetGraphicsRootDescriptorTable(8, cubemapArraySrv);
 
-    // slot 9: 方向光阴影数据
+    // slot 9: 阴影采样参数 (ShadowParams)
     if (shadowDataSRV.ptr != 0)
         cmdList.Get()->SetGraphicsRootDescriptorTable(9, shadowDataSRV);
 
-    // slot 10: 方向光阴影贴图（无界数组）
+    // slot 10: 阴影贴图无界数组 gShadowMaps[]（方向光/点光源共用）
     if (shadowMapSRV.ptr != 0)
         cmdList.Get()->SetGraphicsRootDescriptorTable(10, shadowMapSRV);
 }
