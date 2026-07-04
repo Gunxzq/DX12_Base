@@ -36,6 +36,8 @@
 36. 可见集射线检测（VisibleRaycaster）受影响需补正：构建器并行化后剔除被拆分到各构建器内部，不再有统一剔除过程，VisibleRaycaster 依赖于 CullingSystem 的剔除结果做射线检测，当前两者脱节导致拾取精度/可用性受影响，后续需要对齐两者的可见集
 37. 方向光阴影 `DirShadowResources` 仍使用 `GpuResourceHandle textureHandle`，与点光源的 `DepthStencilHandle arrayHandle`（DepthStencilPool）不一致，需迁移统一
 38. 材质系统 PBR 扩展后，网格组件持有的 `textureHandle` 应逐步剥离，仅保留纹理索引（`gTextureMaps[]` 无界数组下标），资源生命周期由纹理池统一管理
+39. 阴影 Pass 使用主相机视锥体剔除后的 `m_opaqueQueue`，当相机看向无物体区域时阴影 System 不执行，导致阴影贴图停留在旧帧。标准做法应从光源视锥体做剔除，生成独立的 `m_shadowCasterQueue`
+40. 方向光阴影 `ComputeDirShadowMatrix` 依赖相机视锥体，当前每帧无条件重建（条件为 `m_shadowDirty || !m_dirLights.empty()`）；可优化为仅相机视锥体变化时重建
 
 
 ## 迁移
