@@ -2,7 +2,7 @@
 #include "ECS/Core/Components.h"
 #include "Math/BoundingVolume.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
-#include "Resource/Manager/MaterialManager.h"
+#include "Renderer/Material/MaterialManager.h"
 #include "Resource/Texture/TextureManager.h"
 
 using namespace DX12Engine::ECS;

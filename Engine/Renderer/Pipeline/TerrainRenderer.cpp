@@ -5,7 +5,7 @@
 #include "Resource/Geometry/PatchMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include "Resource/Manager/MaterialManager.h"
+#include "Renderer/Material/MaterialManager.h"
 #include <d3dcompiler.h>
 
 using namespace DirectX;

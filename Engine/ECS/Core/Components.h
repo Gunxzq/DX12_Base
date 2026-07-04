@@ -6,7 +6,7 @@
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/LODMeshHandle.h"
-#include "Resource/Struct/MaterialHandle.h"
+#include "Renderer/Material/MaterialHandle.h"
 #include "Resource/Struct/SkeletonHandle.h"
 #include "Resource/Struct/TextureHandle.h"
 

@@ -1,7 +1,7 @@
 #pragma once
 #include "Common/d3dUtil.h"
 #include "Math/HashTypes.h"
-#include "Resource/Struct/MaterialHandle.h"
+#include "Renderer/Material/MaterialHandle.h"
 #include <cstdint>
 #include <string>
 

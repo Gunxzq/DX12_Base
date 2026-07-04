@@ -19,7 +19,7 @@
 #include "Resource/Manager/SkeletonManager.h"
 #include "Resource/Struct/DescriptorHandle.h"
 #include "Resource/Struct/GeometryHandle.h"
-#include "Resource/Struct/MaterialHandle.h"
+#include "Renderer/Material/MaterialHandle.h"
 #include "Resource/Struct/ResourceHandle.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Scheduler/Task.h"

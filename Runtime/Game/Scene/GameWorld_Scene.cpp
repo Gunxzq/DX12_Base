@@ -21,7 +21,7 @@
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include "Resource/Manager/MaterialManager.h"
+#include "Renderer/Material/MaterialManager.h"
 #include "Resource/Texture/TextureManager.h"
 #include <DirectXMath.h>
 #include <algorithm>

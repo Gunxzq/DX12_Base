@@ -1,7 +1,7 @@
 #include "BillboardRenderItemBuilder.h"
 #include "ECS/Core/Components.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
-#include "Resource/Manager/MaterialManager.h"
+#include "Renderer/Material/MaterialManager.h"
 #include "Resource/Texture/TextureManager.h"
 #include <vector>
 

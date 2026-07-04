@@ -3,8 +3,8 @@
 
 #include "Math/HashTypes.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
-#include "Resource/Material/MaterialResource.h"
-#include "Resource/Struct/MaterialHandle.h"
+#include "Renderer/Material/MaterialResource.h"
+#include "Renderer/Material/MaterialHandle.h"
 #include <unordered_map>
 #include <vector>
 
