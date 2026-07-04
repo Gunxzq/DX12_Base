@@ -3,8 +3,8 @@
 //
 // 功能：
 //   - 方向光阴影 (DirShadowVS / ShadowPS)       : 正交 VP 矩阵
-//   - 点光源阴影 (PointShadowVS / PointShadowGS / ShadowPS) : 立方体 6 面
-//   - 聚光灯阴影 (SpotShadowVS / ShadowPS)       : 透视 VP 矩阵
+//   - 点光源阴影 (PointShadowVS_Instanced / ShadowPS) : 实例化单面
+//   - 点光源阴影 (PointShadowVS_GS / PointShadowGS / ShadowPS_Point) : GS 展开 6 面
 //
 // 输入布局：仅需要 Position
 // 统一实例化模式：方向光 VS 通过 StructuredBuffer<InstanceData> 传入世界矩阵
@@ -143,6 +143,17 @@ VertexOut PointShadowVS(VertexIn vin)
 }
 
 //==============================================================================
+// 点光源阴影 VS（GS 路径，实例化）— 输出世界坐标给 GS，由 GS 完成 VP 变换
+//==============================================================================
+VertexOut PointShadowVS_GS(VertexIn vin, uint instanceID : SV_InstanceID)
+{
+    VertexOut vout;
+    float4 worldPos = mul(float4(vin.PosL, 1.0f), gInstanceData[instanceID].World);
+    vout.PosH = worldPos; // GS 完成 6 面 VP 变换
+    return vout;
+}
+
+//==============================================================================
 // 聚光灯阴影 VS — 使用聚光灯 VP 矩阵
 //==============================================================================
 VertexOut SpotShadowVS(VertexIn vin)
@@ -165,9 +176,20 @@ void ShadowPS(VertexOut pin)
 }
 
 //==============================================================================
-// 阴影 PS (点光源，GS 输出 GeoOut 含 SV_RenderTargetArrayIndex)
+// 阴影 PS (点光源 GS 路径) — 深度自动写入，GeoOut 含 SV_RenderTargetArrayIndex
 //==============================================================================
 void ShadowPS_Point(GeoOut pin)
 {
     // 同 ShadowPS，深度自动写入
+}
+
+//==============================================================================
+// 点光源阴影 VS（实例化，单面）— 从 InstanceData 读 World + b1 为 VP
+//==============================================================================
+VertexOut PointShadowVS_Instanced(VertexIn vin, uint instanceID : SV_InstanceID)
+{
+    VertexOut vout;
+    float4 worldPos = mul(float4(vin.PosL, 1.0f), gInstanceData[instanceID].World);
+    vout.PosH = mul(worldPos, gDirLightViewProj);
+    return vout;
 }

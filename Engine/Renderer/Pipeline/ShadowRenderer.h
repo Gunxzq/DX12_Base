@@ -16,10 +16,6 @@ class D3D12DeviceContext;
 
 // ============================================================================
 // 阴影贴图渲染器 — 继承自 OffscreenRenderer
-//
-// 阴影贴图是一种离屏渲染：输出到深度纹理而非 BackBuffer。
-// BeginOffscreen / EndOffscreen 管理离屏 Pass 的生命周期。
-// 统一实例化模式：方向光阴影 VS 通过 StructuredBuffer<InstanceData> 传入世界矩阵
 // ============================================================================
 class ShadowRenderer : public OffscreenRenderer {
 public:
@@ -74,12 +70,27 @@ public:
 
     // ========================================================================
     // 阴影绘制接口（统一实例化模式，单物体 instanceCount=1）
+    // [TODO] View Instancing：后续将点光源阴影切换到 SV_ViewID 方式，
+    //         m_pointInstancedPSO 改为单个 PSO + D3D12_VIEW_INSTANCING 描述，
+    //         VS 通过 SV_ViewID 选择面 VP 矩阵。与曲面细分兼容。
     // ========================================================================
     void DrawInstanced(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
                        D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount);
 
+    // 支持子网格偏移的实例化绘制
+    void DrawIndexedInstancedSubmesh(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
+                                     D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount,
+                                     uint32_t startIndex, int32_t startVertex, uint32_t indexCount);
+
     // 获取 PSO（供外部调试）
     ID3D12PipelineState *GetPSO() const { return m_pso.Get(); }
+    ID3D12RootSignature *GetRootSignature() const { return m_rootSignature.Get(); }
+    ID3D12PipelineState *GetPointInstancedPSO() const { return m_pointInstancedPSO.Get(); }
+    ID3D12PipelineState *GetPointGSPSO() const { return m_pointGSPSO.Get(); }
+
+    // 内部状态访问（供 PointShadowRenderSystem 使用）
+    bool IsInPass() const { return m_inPass; }
+    void SetInPass(bool v) { m_inPass = v; }
 
     // ========================================================================
     // 便利方法：一站式执行完整阴影 Pass
@@ -100,6 +111,10 @@ private:
     void LoadShaders();
     void CreateRootSignature();
     void CreatePSO();
+    void LoadPointInstancedShaders();
+    void CreatePointInstancedPSO();
+    void LoadPointGSShaders();
+    void CreatePointGSPSO();
 
     // ========================================================================
     // 成员变量
@@ -107,15 +122,21 @@ private:
     D3D12DeviceContext *m_context = nullptr;
     Resource::GeometryResourceManager *m_geometryManager = nullptr;
 
-    // 根签名
+    // 方向光阴影根签名 & PSO
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
-
-    // PSO（统一实例化模式）
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
-
-    // 着色器字节码
     Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> m_psBlob;
+
+    // 点光源阴影（实例化，单面）
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pointInstancedPSO;
+    Microsoft::WRL::ComPtr<ID3DBlob> m_pointInstancedVSBlob;
+
+    // 点光源阴影（GS 展开）
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pointGSPSO;
+    Microsoft::WRL::ComPtr<ID3DBlob> m_pointGSVSBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> m_pointGSGSBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> m_pointGSPSBlob;
 
     // 当前 Pass 状态
     bool m_inPass = false;
