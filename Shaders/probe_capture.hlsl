@@ -138,7 +138,7 @@ float4 PS(GSOutput pin) : SV_Target
     MaterialData matData = gMaterialData[matIndex];
 
     float4 texColor = 1.0f;
-    [flatten] if (matData.BaseColorTexIndex != 0xFFFFFFFF)
+    [branch] if (matData.BaseColorTexIndex != 0xFFFFFFFF)
     {
         texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord);
     }
@@ -149,13 +149,13 @@ float4 PS(GSOutput pin) : SV_Target
     float3 emissive = matData.Emissive.rgb * matData.Emissive.w;
 
     // PBR 贴图采样（替代固定值）
-    [flatten] if (matData.MetallicRoughnessTexIndex != 0xFFFFFFFF)
+    [branch] if (matData.MetallicRoughnessTexIndex != 0xFFFFFFFF)
     {
         float2 mr = gTextureMaps[matData.MetallicRoughnessTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord).rg;
         metallic = mr.r;
         roughness = mr.g;
     }
-    [flatten] if (matData.OcclusionTexIndex != 0xFFFFFFFF)
+    [branch] if (matData.OcclusionTexIndex != 0xFFFFFFFF)
     {
         ao = gTextureMaps[matData.OcclusionTexIndex].Sample(gSamplerLinearWrap, pin.TexCoord).r;
     }
@@ -163,7 +163,7 @@ float4 PS(GSOutput pin) : SV_Target
     float3 N = normalize(pin.WorldNormal);
     float4 normalSample = float4(0.5f, 0.5f, 1.0f, 1.0f);
     // 法线贴图
-    [flatten] if (matData.NormalTexIndex != 0xFFFFFFFF)
+    [branch] if (matData.NormalTexIndex != 0xFFFFFFFF)
     {
         normalSample = gTextureMaps[matData.NormalTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
         normalSample.rgb = lerp(float3(0.5f, 0.5f, 1.0f), normalSample.rgb, matData.NormalStrength);

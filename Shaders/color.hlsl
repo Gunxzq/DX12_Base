@@ -124,7 +124,7 @@ GBufferOutput PS_GBuffer(VertexOut pin) {
     MaterialData matData = gMaterialData[matIndex];
 
     float4 texColor = 1.0f;
-    [flatten] if (matData.BaseColorTexIndex != 0xFFFFFFFF) {
+    [branch] if (matData.BaseColorTexIndex != 0xFFFFFFFF) {
         texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
     }
     float3 albedo = matData.BaseColor.rgb * texColor.rgb;
@@ -132,18 +132,18 @@ GBufferOutput PS_GBuffer(VertexOut pin) {
     float roughness = matData.Roughness;
     float ao = matData.Ambient;
 
-    [flatten] if (matData.MetallicRoughnessTexIndex != 0xFFFFFFFF) {
+    [branch] if (matData.MetallicRoughnessTexIndex != 0xFFFFFFFF) {
         float2 mr = gTextureMaps[matData.MetallicRoughnessTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord).rg;
         metallic = mr.r;
         roughness = mr.g;
     }
-    [flatten] if (matData.OcclusionTexIndex != 0xFFFFFFFF) {
+    [branch] if (matData.OcclusionTexIndex != 0xFFFFFFFF) {
         ao = gTextureMaps[matData.OcclusionTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord).r;
     }
 
     // 法线贴图 TBN 变换
     float3 N = normalize(pin.WorldNormal);
-    [flatten] if (matData.NormalTexIndex != 0xFFFFFFFF) {
+    [branch] if (matData.NormalTexIndex != 0xFFFFFFFF) {
         float4 normalSample = gTextureMaps[matData.NormalTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
         normalSample.rgb = lerp(float3(0.5f, 0.5f, 1.0f), normalSample.rgb, matData.NormalStrength);
         N = NormalSampleToWorldSpace(normalSample.rgb, N, normalize(pin.WorldTangent));
