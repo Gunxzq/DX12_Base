@@ -35,8 +35,7 @@ FRay VisibleRaycaster::ScreenToRay(float screenX, float screenY, uint32_t screen
     return {origin, dir};
 }
 
-void VisibleRaycaster::CollectHits(const FRay &ray,
-                                   std::vector<RaycastHit> &outHits) const {
+void VisibleRaycaster::CollectHits(const FRay &ray, std::vector<RaycastHit> &outHits) const {
     if (!m_registry)
         return;
 
@@ -54,8 +53,6 @@ void VisibleRaycaster::CollectHits(const FRay &ray,
 
         if (auto *mesh = m_registry->TryGetComponent<MeshComponent>(entity)) {
             bounds = &mesh->localBounds;
-        } else if (auto *transMesh = m_registry->TryGetComponent<TransparentMeshComponent>(entity)) {
-            bounds = &transMesh->localBounds;
         } else if (auto *terrain = m_registry->TryGetComponent<TerrainComponent>(entity)) {
             bounds = &terrain->localBounds;
         }

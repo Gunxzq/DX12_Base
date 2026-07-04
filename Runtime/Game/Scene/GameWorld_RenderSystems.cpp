@@ -436,7 +436,7 @@ void GameWorld::RegisterWaterRenderSystem() {
                          envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
                      }
                      m_waterRenderer->DrawWater(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
-                                                item.textureSRV, envMapSRV);
+                                                envMapSRV);
                  }
                  m_waterRenderer->EndFrame();
 

@@ -72,7 +72,7 @@ void WaterRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS p
 
 void WaterRenderer::DrawWater(CommandList &cmdList, Resource::GeometryHandle geometryHandle,
                               const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-                              D3D12_GPU_DESCRIPTOR_HANDLE textureSRV, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) {
+                              D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) {
     if (!m_geometryManager) {
         OutputDebugStringW(L"[ERROR] WaterRenderer::DrawWater - GeometryResourceManager not set!\n");
         return;
@@ -108,7 +108,7 @@ void WaterRenderer::DrawWater(CommandList &cmdList, Resource::GeometryHandle geo
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objectCBAddress);
 
     // 纹理 SRV (slot 5)
-    cmdList.Get()->SetGraphicsRootDescriptorTable(5, textureSRV);
+    cmdList.Get()->SetGraphicsRootDescriptorTable(5, m_waterTextureSRV);
 
     // 环境贴图 SRV (slot 6, t10)
     if (envMapSRV.ptr != 0) {

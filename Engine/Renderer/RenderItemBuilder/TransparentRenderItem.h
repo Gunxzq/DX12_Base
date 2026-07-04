@@ -19,7 +19,6 @@ struct TransparentRenderItem {
 
     // 材质/纹理（GPU 直接使用）
     uint32_t materialIndex;
-    D3D12_GPU_DESCRIPTOR_HANDLE textureSRV;
 
     // 深度值（到相机的距离），用于远到近排序
     float depth = 0.0f;

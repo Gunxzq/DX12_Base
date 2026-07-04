@@ -14,6 +14,7 @@
 #include "Math/HashTypes.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
+#include "Renderer/Pipeline/WaterRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Resource/AssetDataManager.h"
 #include "Resource/AssetLoader/AssetLoader.h"
@@ -262,7 +263,7 @@ void GameWorld::LoadSoldierCharacter() {
         meshComp.lodMeshHandle = fullLodHandle;
         meshComp.localBounds = fullBounds;
         meshComp.materialHandle = matHandles[s];
-        meshComp.textureHandle = loadedDiffuse[s].handle;
+
         meshComp.receivesShadow = true;
         meshComp.indexCount = sub.faceCount * 3;
         meshComp.startIndex = sub.faceStart * 3;
@@ -670,6 +671,7 @@ void GameWorld::LoadWaterTexture() {
     TextureManager *texMgr = m_context->TextureMgr;
     m_waterTextureHandle = texMgr->RegisterTexture(gpuHandle, srvIndex);
     m_waterTextureSrvSlot = srvIndex;
+    m_waterRenderer->SetWaterTextureSRV(texMgr->GetSRV(m_waterTextureHandle));
 
     // 上传纹理
     uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);

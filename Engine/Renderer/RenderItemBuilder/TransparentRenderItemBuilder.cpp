@@ -22,9 +22,9 @@ uint32_t TransparentRenderItemBuilder::Count(ECS::Registry &registry) {
         return 0;
 
     uint32_t count = 0;
-    auto view = registry.view<TransparentMeshComponent, TransformComponent>();
+    auto view = registry.view<MeshComponent, TransformComponent, TransparentTag>();
     for (auto entity : view) {
-        auto &comp = view.get<TransparentMeshComponent>(entity);
+        auto &comp = view.get<MeshComponent>(entity);
         auto &transform = view.get<TransformComponent>(entity);
 
         if (!FrustumCull(comp.localBounds, transform.GetMatrix(), *m_frustum))
@@ -36,7 +36,7 @@ uint32_t TransparentRenderItemBuilder::Count(ECS::Registry &registry) {
             if (lodMesh)
                 geoHandle = PickLOD(*lodMesh, transform.position, m_cameraPos, m_lodSystem->GetLODConfig());
         }
-        if (!geoHandle.IsValid() || !comp.materialHandle.IsValid() || !comp.textureHandle.IsValid())
+        if (!geoHandle.IsValid() || !comp.materialHandle.IsValid())
             continue;
 
         count++;
@@ -51,9 +51,9 @@ void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQu
     if (!m_frustum)
         return;
 
-    auto view = registry.view<TransparentMeshComponent, TransformComponent>();
+    auto view = registry.view<MeshComponent, TransformComponent, TransparentTag>();
     for (auto entity : view) {
-        auto &comp = view.get<TransparentMeshComponent>(entity);
+        auto &comp = view.get<MeshComponent>(entity);
         auto &transform = view.get<TransformComponent>(entity);
 
         if (!FrustumCull(comp.localBounds, transform.GetMatrix(), *m_frustum))
@@ -69,8 +69,7 @@ void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQu
             continue;
 
         MaterialHandle materialHandle = comp.materialHandle;
-        TextureHandle textureHandle = comp.textureHandle;
-        if (!materialHandle.IsValid() || !textureHandle.IsValid())
+        if (!materialHandle.IsValid())
             continue;
 
         float depth = CalculateDepth(transform.position, m_cameraPos);
@@ -93,7 +92,6 @@ void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQu
         item.worldMatrix = world;
         item.objectCBAddress = 0; // FrameSync 回填
         item.materialIndex = objCB.MaterialIndex;
-        item.textureSRV = m_textureManager->GetSRV(textureHandle);
         item.depth = depth;
         item.tempSlot = batchIdx;
 

@@ -56,7 +56,6 @@ void ProbeBuilder::Build(const ProbeCaptureInfo *probes, uint32_t probeCount, EC
 
         struct ProbeBatchEntry {
             std::vector<InstanceData> instances;
-            Resource::TextureHandle textureHandle;
         };
         std::unordered_map<ProbeBatchKey, ProbeBatchEntry, ProbeBatchKeyHash> batches;
 
@@ -117,7 +116,6 @@ void ProbeBuilder::Build(const ProbeCaptureInfo *probes, uint32_t probeCount, EC
 
             ProbeBatchKey key{geoHandle, materialIdx};
             batches[key].instances.push_back(instData);
-            batches[key].textureHandle = meshComp->textureHandle;
         }
 
         for (auto &[key, entry] : batches) {

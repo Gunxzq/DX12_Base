@@ -108,10 +108,8 @@ void GameWorld::CreateGroundPlane() {
     MeshComponent meshComp;
     meshComp.lodMeshHandle = lodHandle;
     meshComp.localBounds = bounds;
-    // [TODO] textureHandle 正在被 PBR 材质系统替代，MeshComponent 中的纹理句柄
-    // 已不被 OpaqueRenderItemBuilder 读取，后续应考虑移除或改为材质覆写机制。
     meshComp.materialHandle = m_brickMaterialHandle;
-    meshComp.textureHandle = m_brickTextureHandle;
+
     meshComp.receivesShadow = true;
     m_registry->AddComponent<MeshComponent>(m_groundPlaneEntity, std::move(meshComp));
     m_registry->AddComponent<OpaqueTag>(m_groundPlaneEntity);
@@ -215,7 +213,7 @@ void GameWorld::CreateTestCube() {
         meshComp.lodMeshHandle = lodHandle;
         meshComp.localBounds = bounds;
         meshComp.materialHandle = m_cubeMaterialHandle;
-        meshComp.textureHandle = m_testTextureHandle;
+    
         m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
         m_registry->AddComponent<OpaqueTag>(entity);
 
@@ -244,7 +242,7 @@ void GameWorld::CreateTestCube() {
         meshComp.lodMeshHandle = lodHandle;
         meshComp.localBounds = bounds;
         meshComp.materialHandle = m_reflectionTestMaterialHandle;
-        meshComp.textureHandle = m_whiteTextureHandle;
+    
         m_registry->AddComponent<MeshComponent>(m_reflectionCubeEntity, std::move(meshComp));
         m_registry->AddComponent<OpaqueTag>(m_reflectionCubeEntity);
 
@@ -336,7 +334,7 @@ void GameWorld::CreateStressTestScene() {
             meshComp.lodMeshHandle = lodHandle;
             meshComp.localBounds = bounds;
             meshComp.materialHandle = m_cubeMaterialHandle;
-            meshComp.textureHandle = m_testTextureHandle;
+        
             meshComp.receivesShadow = true;
             m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
             m_registry->AddComponent<OpaqueTag>(entity);
@@ -414,7 +412,7 @@ void GameWorld::CreateTestCylinder() {
     meshComp.lodMeshHandle = lodHandle;
     meshComp.localBounds = bounds;
     meshComp.materialHandle = m_brickMaterialHandle;
-    meshComp.textureHandle = m_brickTextureHandle;
+
     meshComp.receivesShadow = true;
     m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
     m_registry->AddComponent<OpaqueTag>(entity);
@@ -540,7 +538,7 @@ void GameWorld::CreateTestTorus() {
     meshComp.lodMeshHandle = lodHandle;
     meshComp.localBounds = bounds;
     meshComp.materialHandle = m_brickMaterialHandle;
-    meshComp.textureHandle = m_brickTextureHandle;
+
     meshComp.receivesShadow = true;
     m_registry->AddComponent<MeshComponent>(entity, std::move(meshComp));
     m_registry->AddComponent<OpaqueTag>(entity);
@@ -819,12 +817,12 @@ void GameWorld::CreateWater() {
     XMFLOAT3 scale(1.0f, 1.0f, 1.0f);
     m_registry->AddComponent<TransformComponent>(m_waterEntity, position, rotation, scale);
 
-    TransparentMeshComponent meshComp;
+    MeshComponent meshComp;
     meshComp.lodMeshHandle = lodHandle;
     meshComp.localBounds = bounds;
     meshComp.materialHandle = m_waterMaterialHandle;
-    meshComp.textureHandle = m_waterTextureHandle;
-    m_registry->AddComponent<TransparentMeshComponent>(m_waterEntity, std::move(meshComp));
+    m_registry->AddComponent<MeshComponent>(m_waterEntity, std::move(meshComp));
+    m_registry->AddComponent<TransparentTag>(m_waterEntity);
 
     // [GBuffer 调试] 注释 forward 渲染
     RegisterWaterRenderSystem();
