@@ -258,8 +258,8 @@ void Bootstrap::InitializeModules() {
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing DescriptorHeapCollection...");
 
         std::vector<Resource::DescriptorHeapConfig> heapConfigs = {
-            // CBV_SRV_UAV 堆（大型，GPU 可见；为 TextureSrv 分区预留空间）
-            {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 98304, 0,
+            // CBV_SRV_UAV 堆（大型，GPU 可见；为 Texture/Buffer/Shadow 分区预留空间）
+            {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 131072, 0,
              Resource::DescriptorSlotFlags::EnableExpand | Resource::DescriptorSlotFlags::DelayRelease, true},
 
             // RTV 堆（渲染目标，CPU 可见）
@@ -288,6 +288,12 @@ void Bootstrap::InitializeModules() {
         m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Buffer, 16384,
                                        81920);
         EngineLogger::GetInstance()->Info("[Bootstrap] Buffer partition created: base=16384, size=81920");
+
+        // 创建 Shadow 分区（阴影贴图 SRV，gShadowMaps[] 无界数组使用）
+        // 包含方向光阴影 + 点光源 6×面 + 聚光灯 + 未来 CSM 级联
+        m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Shadow, 98304,
+                                       1024);
+        EngineLogger::GetInstance()->Info("[Bootstrap] Shadow partition created: base=98304, size=1024");
 
         // 初始化主深度缓冲 SRV（供后处理 Pass 只读采样）
         m_deviceContext->InitDepthSRV();
