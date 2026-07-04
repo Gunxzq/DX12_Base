@@ -189,7 +189,7 @@ void TerrainRenderer::CreateRootSignature() {
     //   slot 3: t0,space1 StructuredBuffer<MaterialData> (SRV)
     //   slot 4: t0,space0 地形纹理数组 SRV（高度图、漫反射等）
     //   slot 5: t10,space0 环境贴图 SRV
-    //   slot 6: t11,space1 StructuredBuffer<DirShadowData> (SRV)
+    //   slot 6: t11,space1 StructuredBuffer<ShadowParams> (SRV)
     //   slot 7: t14,space1 Texture2D 阴影贴图 (SRV)
     //   （地形不需要实例化，不包含 slot 8 instanceData）
     // ========================================================================

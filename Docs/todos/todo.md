@@ -34,6 +34,8 @@
 34. 描述符堆需要考虑到场景的切换
 35. 描述符槽分配器增加环形缓冲区（Ring Buffer）模式，替代 FreeList 以消除空洞
 36. 可见集射线检测（VisibleRaycaster）受影响需补正：构建器并行化后剔除被拆分到各构建器内部，不再有统一剔除过程，VisibleRaycaster 依赖于 CullingSystem 的剔除结果做射线检测，当前两者脱节导致拾取精度/可用性受影响，后续需要对齐两者的可见集
+37. 方向光阴影 `DirShadowResources` 仍使用 `GpuResourceHandle textureHandle`，与点光源的 `DepthStencilHandle arrayHandle`（DepthStencilPool）不一致，需迁移统一
+38. 材质系统 PBR 扩展后，网格组件持有的 `textureHandle` 应逐步剥离，仅保留纹理索引（`gTextureMaps[]` 无界数组下标），资源生命周期由纹理池统一管理
 
 
 ## 迁移

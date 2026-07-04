@@ -43,7 +43,24 @@ struct ShadowObjectConstants {
 
 static_assert(sizeof(ShadowObjectConstants) % 16 == 0, "ShadowObjectConstants size mismatch");
 
-// 方向光阴影常量
+// 统一阴影采样参数（与 ShadowSampling.hlsl ShadowParams 严格对齐）
+struct ShadowParams {
+    uint32_t Type;                     // 0=Directional, 1=Point
+    uint32_t ShadowMapIndex;           // gShadowMaps[] 纹理索引
+    float ShadowMapSize;               // PCF 纹素步长
+    float ShadowStrength;              // 阴影强度
+    float Bias;                        // 深度偏移
+    float NormalBias;                  // 法线偏移（点光源=0）
+    float pad1[2];                     // 对齐到 16 字节
+    DirectX::XMFLOAT3 LightPosition;   // 点光源位置（方向光=0）
+    float Range;                       // 点光源衰减范围（方向光=0）
+    DirectX::XMFLOAT4X4 LightViewProj; // 方向光 VP 矩阵（点光源填 0）
+};
+
+static_assert(sizeof(ShadowParams) % 16 == 0, "ShadowParams size mismatch");
+static_assert(sizeof(ShadowParams) == 112, "ShadowParams size must be 112 bytes");
+
+// 方向光阴影常量（供 ShadowRenderer cbuffer b1 使用，布局与 Shadow.hlsl cbDirShadow 严格对齐）
 struct DirLightShadowConstants {
     DirectX::XMFLOAT4X4 LightViewProj; // 正交 VP 矩阵
     float ShadowMapSize;
@@ -56,7 +73,7 @@ struct DirLightShadowConstants {
 
 static_assert(sizeof(DirLightShadowConstants) % 16 == 0, "DirLightShadowConstants size mismatch");
 
-// 点光源阴影常量（立方体阴影）
+// 点光源阴影常量（立方体阴影，供阴影渲染 Pass 使用，非采样）
 struct PointLightShadowConstants {
     DirectX::XMFLOAT4X4 LightViewProj[6]; // 6 个面的 VP 矩阵
     DirectX::XMFLOAT4 LightPosition;

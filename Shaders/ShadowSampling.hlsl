@@ -10,53 +10,26 @@
 // 阴影常量（从 CPU 上传的 StructuredBuffer）
 // ============================================================================
 
-struct DirShadowData
+struct ShadowParams
 {
-    row_major float4x4 LightViewProj; // 与 CPU DirLightShadowConstants row-major 布局一致
-    float ShadowMapSize;
-    float Bias;
-    float NormalBias;
-    float ShadowStrength;
-    uint ShadowMapIndex;
-    float Pad[3];
-};
-
-struct PointShadowData
-{
-    row_major float4x4 LightViewProj[6];
-    float3 LightPosition;
-    float ShadowMapSize;
-    float Bias;
-    float NormalBias;
-    float ShadowStrength;
-    float Range;
-    uint ShadowMapIndex;
-    float Pad[2];
-};
-
-struct SpotShadowData
-{
-    row_major float4x4 LightViewProj;
-    float ShadowMapSize;
-    float Bias;
-    float NormalBias;
-    float ShadowStrength;
-    float SpotPower;
-    uint ShadowMapIndex;
-    float Pad[2];
+    uint Type;                        // 0=Directional, 1=Point (2=Spot 预留)
+    uint ShadowMapIndex;              // gShadowMaps[] 纹理索引
+    float ShadowMapSize;              // PCF 纹素步长
+    float ShadowStrength;             // 阴影强度
+    float Bias;                       // 深度偏移
+    float NormalBias;                 // 法线偏移（点光源=0）
+    float2 Pad1;                      // 对齐到 16 字节边界
+    float3 LightPosition;             // 点光源位置（方向光=0）
+    float Range;                      // 点光源衰减范围（方向光=0）
+    row_major float4x4 LightViewProj; // 方向光 VP 矩阵（点光源填 0）
 };
 
 // ============================================================================
 // 资源绑定
 // ============================================================================
 
-StructuredBuffer<DirShadowData> gDirShadows : register(t11, space1);
-StructuredBuffer<PointShadowData> gPointShadows : register(t12, space1);
-StructuredBuffer<SpotShadowData> gSpotShadows : register(t13, space1);
-
-Texture2D gDirShadowMaps[] : register(t14, space1);
-TextureCubeArray gPointShadowMaps : register(t20, space1);
-Texture2D gSpotShadowMaps[] : register(t26, space1);
+StructuredBuffer<ShadowParams> gShadowParams : register(t11, space1);
+Texture2DArray gShadowMaps[] : register(t14, space1);
 
 // ============================================================================
 // 辅助函数
@@ -75,7 +48,7 @@ float2 ComputeShadowUV(float4 shadowPos)
 // 方向光阴影采样
 float SampleDirShadow(uint shadowIdx, float3 worldPos, float3 normal, float3 lightDir)
 {
-    DirShadowData shadow = gDirShadows[shadowIdx];
+    ShadowParams shadow = gShadowParams[shadowIdx];
 
     // 法线偏移（在变换前应用）
     float3 offsetWorldPos = worldPos + lightDir * shadow.NormalBias;
@@ -110,8 +83,8 @@ float SampleDirShadow(uint shadowIdx, float3 worldPos, float3 normal, float3 lig
         for (int y = -1; y <= 1; ++y)
         {
             float2 offsetUV = uv + float2(x, y) * texelSize;
-            shadowFactor += gDirShadowMaps[shadow.ShadowMapIndex].SampleCmpLevelZero(
-                gShadowSampler, offsetUV, compareDepth);
+            shadowFactor += gShadowMaps[NonUniformResourceIndex(shadow.ShadowMapIndex)].SampleCmpLevelZero(
+                gShadowSampler, float3(offsetUV, 0), compareDepth);
         }
     }
 
@@ -119,72 +92,84 @@ float SampleDirShadow(uint shadowIdx, float3 worldPos, float3 normal, float3 lig
     return lerp(1.0f, shadowFactor, shadow.ShadowStrength);
 }
 
-// // 点光源阴影采样（立方体贴图）
-// float SamplePointShadow(uint shadowIdx, float3 worldPos, float3 lightPos, float range)
-// {
-//     PointShadowData shadow = gPointShadows[shadowIdx];
+// 点光源阴影采样（6 独立面，gShadowMaps[ShadowMapIndex + face]）
+// nearZ 必须与 CPU 端 LightManager::ComputePointShadowMatrices 一致
+static const float kPointShadowNearZ = 1.0f;
 
-//     float3 L = worldPos - lightPos;
-//     float distance = length(L);
-
-//     if (distance >= range)
-//     {
-//         return 1.0f;
-//     }
-
-//     float3 direction = normalize(L);
-
-//     // 采样立方体贴图
-//     float shadowDepth = gPointShadowMaps.SampleLevel(gSamplerLinearClamp, float4(direction, cubeIndex), 0.0f).r;
-//     // 线性化深度比较
-//     float compareDepth = distance / range;
-
-//     float shadowFactor = (compareDepth - shadow.Bias <= shadowDepth) ? 1.0f : 0.0f;
-//     return lerp(1.0f, shadowFactor, shadow.ShadowStrength);
-// }
-
-// 聚光灯阴影采样
-float SampleSpotShadow(uint shadowIdx, float3 worldPos, float3 normal, float3 lightDir)
+float SamplePointShadow(uint index, float3 worldPos)
 {
-    SpotShadowData shadow = gSpotShadows[shadowIdx];
+    ShadowParams shadow = gShadowParams[index];
+    float3 L = worldPos - shadow.LightPosition;
+    float distance = length(L);
 
-    // 变换到光源裁剪空间
-    float4 shadowPos = mul(float4(worldPos, 1.0f), shadow.LightViewProj);
-
-    if (shadowPos.z < 0.0f || shadowPos.z > 1.0f)
-    {
+    if (distance >= shadow.Range)
         return 1.0f;
-    }
 
-    float2 uv = ComputeShadowUV(shadowPos);
+    float3 dir = L / distance;
+    float3 absDir = abs(dir);
 
-    if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f)
+    // 确定 cube 面 + 计算 UV + 获取 view_z（沿面视线方向的距离）
+    uint face;
+    float viewZ;
+    float2 uv;
+
+    [branch] if (absDir.x >= absDir.y && absDir.x >= absDir.z)
     {
-        return 1.0f;
-    }
-
-    // 法线偏移
-    float3 offset = normal * shadow.NormalBias;
-    shadowPos = mul(float4(worldPos + offset, 1.0f), shadow.LightViewProj);
-    uv = ComputeShadowUV(shadowPos);
-
-    float compareDepth = shadowPos.z;
-
-    float shadowFactor = 0.0f;
-    const float texelSize = 1.0f / shadow.ShadowMapSize;
-
-    for (int x = -1; x <= 1; ++x)
-    {
-        for (int y = -1; y <= 1; ++y)
+        viewZ = abs(L.x);
+        if (dir.x >= 0)
         {
-            float2 offsetUV = uv + float2(x, y) * texelSize;
-            shadowFactor += gSpotShadowMaps[shadow.ShadowMapIndex].SampleCmpLevelZero(
-                gShadowSampler, offsetUV, compareDepth);
-        }
+            face = 0;
+            uv = float2(-dir.z, dir.y) / absDir.x;
+        } // +X
+        else
+        {
+            face = 1;
+            uv = float2(dir.z, dir.y) / absDir.x;
+        } // -X
+    }
+    else if (absDir.y >= absDir.z)
+    {
+        viewZ = abs(L.y);
+        if (dir.y >= 0)
+        {
+            face = 2;
+            uv = float2(dir.x, -dir.z) / absDir.y;
+        } // +Y
+        else
+        {
+            face = 3;
+            uv = float2(dir.x, dir.z) / absDir.y;
+        } // -Y
+    }
+    else
+    {
+        viewZ = abs(L.z);
+        if (dir.z >= 0)
+        {
+            face = 4;
+            uv = float2(dir.x, dir.y) / absDir.z;
+        } // +Z
+        else
+        {
+            face = 5;
+            uv = float2(-dir.x, dir.y) / absDir.z;
+        } // -Z
     }
 
-    shadowFactor /= 9.0f;
-    return lerp(1.0f, shadowFactor, shadow.ShadowStrength);
+    // [-1, 1] → [0, 1], flip Y for DX
+    uv = uv * 0.5f + 0.5f;
+    uv.y = 1.0f - uv.y;
+
+    // 计算与阴影贴图存储深度一致的比较值（LH 透视投影公式）
+    float farZ = shadow.Range;
+    float Q = farZ / (farZ - kPointShadowNearZ);
+    float compareDepth = Q * (1.0f - kPointShadowNearZ / viewZ) - shadow.Bias;
+
+    uint shadowIdx = shadow.ShadowMapIndex;
+    float sampled = gShadowMaps[NonUniformResourceIndex(shadowIdx)].SampleCmpLevelZero(
+        gShadowSampler, float3(uv, face), compareDepth);
+
+    return lerp(1.0f, sampled, shadow.ShadowStrength);
 }
 
 #endif // SHADOW_SAMPLING_HLSL
