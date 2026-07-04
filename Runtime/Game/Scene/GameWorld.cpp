@@ -18,6 +18,7 @@
 #include "Renderer/RenderItemBuilder/TerrainRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/TransparentRenderItemBuilder.h"
 #include "Renderer/Scene/AmbientOcclusionManager/AmbientOcclusionManager.h"
+#include "Renderer/Scene/LightManager/LightManager.h"
 #include "Renderer/Scene/TerrainManager/TerrainManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
@@ -104,7 +105,8 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
         whiteDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
         whiteDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-        GpuResourceHandle whiteTexHandle = gpuMgr.CreateTexture2D(device, whiteDesc, L"WhiteTexture", D3D12_RESOURCE_STATE_COMMON);
+        GpuResourceHandle whiteTexHandle =
+            gpuMgr.CreateTexture2D(device, whiteDesc, L"WhiteTexture", D3D12_RESOURCE_STATE_COMMON);
         if (whiteTexHandle.IsValid()) {
             uint32_t whiteSrvSlot = m_context->DescriptorHeaps->Allocate(PartitionType::Texture);
             if (whiteSrvSlot != UINT32_MAX) {
@@ -122,7 +124,8 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
 
                 UINT64 uploadSize = GetRequiredIntermediateSize(gpuMgr.GetResource(whiteTexHandle), 0, 1);
                 GpuResourceHandle uploadBuf =
-                    gpuMgr.CreateBuffer(device, uploadSize, L"WhiteTexture_Upload", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                    gpuMgr.CreateBuffer(device, uploadSize, L"WhiteTexture_Upload", D3D12_HEAP_TYPE_UPLOAD,
+                                        D3D12_RESOURCE_STATE_GENERIC_READ);
 
                 auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
                     gpuMgr.GetResource(whiteTexHandle), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -209,7 +212,8 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
         m_appRTs->Initialize(device, heaps, w, h);
     }
 
-    RegisterGBufferPass();
+    RegisterOpaqueRenderSystem();
+    RegisterPointShadowRenderSystem();
     RegisterLightingPass();
     // 天空盒（主渲染最后阶段，提交到 PostProcess）
     RegisterSkyboxSystem();
@@ -263,6 +267,7 @@ void GameWorld::OnResize(uint32_t width, uint32_t height) {
 }
 
 void GameWorld::Update() {
+
     if (m_backgroundExecutor) {
         m_backgroundExecutor->Tick();
     }

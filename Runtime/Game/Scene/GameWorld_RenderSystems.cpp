@@ -137,7 +137,7 @@ void GameWorld::RegisterLightingPass() {
          .alwaysRun = true});
 }
 
-void GameWorld::RegisterGBufferPass() {
+void GameWorld::RegisterOpaqueRenderSystem() {
     SystemRegistry::Register(
         {.name = "OpaqueRenderSystem",
          .func =
@@ -718,7 +718,7 @@ void GameWorld::RegisterShadowRenderSystem() {
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
                  auto &lightMgr = LightManager::GetInstance();
-                 D3D12_GPU_VIRTUAL_ADDRESS dirShadowAddr = lightMgr.GetDirShadowAddress();
+                 D3D12_GPU_VIRTUAL_ADDRESS dirShadowAddr = lightMgr.GetDirShadowRenderAddress();
                  const auto &shadowRes = lightMgr.GetDirShadowResources();
 
                  if (!lightMgr.HasDirShadow() || !shadowRes.isValid || dirShadowAddr == 0 || m_opaqueQueue.Empty()) {
@@ -731,8 +731,7 @@ void GameWorld::RegisterShadowRenderSystem() {
                  auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
                  auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
-                 auto &gpuMgr = GpuResourceManager::GetInstance();
-                 ID3D12Resource *depthTexture = gpuMgr.GetResource(shadowRes.textureHandle);
+                 ID3D12Resource *depthTexture = DepthStencilPool::GetInstance().GetResource(shadowRes.handle);
                  if (!depthTexture) {
                      m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
                      m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle,
@@ -771,6 +770,107 @@ void GameWorld::RegisterShadowRenderSystem() {
 
                  uint64_t sequence = m_context->GetNextSequence();
                  m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Render,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::PrePass,
+         .alwaysRun = true});
+}
+
+void GameWorld::RegisterPointShadowRenderSystem() {
+    SystemRegistry::Register(
+        {.name = "PointShadowRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 auto &lightMgr = LightManager::GetInstance();
+                 const auto &resList = lightMgr.GetPointShadowResources();
+
+                 if (resList.empty() || m_opaqueQueue.Empty())
+                     return;
+
+                 if (!resList[0].isValid)
+                     return;
+
+                 auto &dsPool = DepthStencilPool::GetInstance();
+                 uint32_t res = resList[0].resolution;
+
+                 uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
+                 auto alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH);
+                 auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+                 auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
+
+                 auto &shadowRes = resList[0];
+                 m_shadowRenderer->SetInPass(true);
+
+                 // 全数组 DSV 清除一次（6 slice 共享纹理）
+                 D3D12_CPU_DESCRIPTOR_HANDLE arrayDsvHandle = dsPool.GetDsvHandle(shadowRes.arrayHandle);
+                 cmd.Get()->ClearDepthStencilView(arrayDsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+                 D3D12_VIEWPORT vp = {0, 0, (float)res, (float)res, 0, 1};
+                 D3D12_RECT scissor = {0, 0, (LONG)res, (LONG)res};
+                 cmd.Get()->RSSetViewports(1, &vp);
+                 cmd.Get()->RSSetScissorRects(1, &scissor);
+
+                 cmd.Get()->SetGraphicsRootSignature(m_shadowRenderer->GetRootSignature());
+
+                 if (ID3D12PipelineState *gsPSO = m_shadowRenderer->GetPointGSPSO()) {
+                     // GS 路径：一次 DrawCall 展开 6 面
+                     cmd.Get()->SetPipelineState(gsPSO);
+                     cmd.Get()->OMSetRenderTargets(0, nullptr, FALSE, &arrayDsvHandle);
+                     cmd.Get()->SetGraphicsRootConstantBufferView(1, lightMgr.GetPointShadowAddress());
+
+                     for (const auto &item : m_opaqueQueue) {
+                         if (!item.IsValid())
+                             continue;
+                         // PointShadowVS_GS 读 gInstanceData[instanceID].World → GS 展开 6 面
+                         if (item.indexCount > 0) {
+                             m_shadowRenderer->DrawIndexedInstancedSubmesh(
+                                 cmd, item.geometryHandle, item.instanceBuffer, item.instanceCount, item.startIndex,
+                                 item.startVertex, item.indexCount);
+                         } else {
+                             m_shadowRenderer->DrawInstanced(cmd, item.geometryHandle, item.instanceBuffer,
+                                                             item.instanceCount);
+                         }
+                     }
+                 } else {
+                     // 6 遍渲染（GS 不可用时的回退）
+                     for (int face = 0; face < 6; ++face) {
+                         D3D12_GPU_VIRTUAL_ADDRESS faceVPAddr = lightMgr.GetPointShadowFaceAddress(face);
+                         if (faceVPAddr == 0)
+                             continue;
+
+                         D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
+                             m_context->DescriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadowRes.dsvSlots[face]);
+
+                         cmd.Get()->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
+
+                         cmd.Get()->SetPipelineState(m_shadowRenderer->GetPointInstancedPSO());
+                         cmd.Get()->SetGraphicsRootConstantBufferView(1, faceVPAddr);
+
+                         for (const auto &item : m_opaqueQueue) {
+                             if (!item.IsValid())
+                                 continue;
+                             if (item.indexCount > 0) {
+                                 m_shadowRenderer->DrawIndexedInstancedSubmesh(
+                                     cmd, item.geometryHandle, item.instanceBuffer, item.instanceCount, item.startIndex,
+                                     item.startVertex, item.indexCount);
+                             } else {
+                                 m_shadowRenderer->DrawInstanced(cmd, item.geometryHandle, item.instanceBuffer,
+                                                                 item.instanceCount);
+                             }
+                         }
+                     }
+                 }
+
+                 m_shadowRenderer->SetInPass(false);
+
+                 cmd.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PrePass, cmdH);
+
+                 uint64_t seq = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Render,

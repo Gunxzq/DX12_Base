@@ -112,6 +112,7 @@ public:
 
     // 注册阴影渲染系统
     void RegisterShadowRenderSystem();
+    void RegisterPointShadowRenderSystem();
 
     // 注册 SSAO 系统
     void RegisterSsaoSystem();
@@ -131,7 +132,7 @@ private:
     void RegisterWaterRenderSystem();
     void RegisterBillboardRenderSystem();
     void RegisterTerrainRenderSystem();
-    void RegisterGBufferPass();
+    void RegisterOpaqueRenderSystem();
     void RegisterLightingPass();
 
     // 光照 Pass 渲染器（延迟渲染）

@@ -44,13 +44,14 @@ void GameWorld::CreateGroundPlane() {
         return;
 
     GeometryGenerator geoGen;
-    auto meshData = geoGen.CreateGrid(10.0f, 10.0f, 10, 10);
+    auto meshData = geoGen.CreateGrid(30.0f, 30.0f, 30, 30);
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
     auto device = m_context->DeviceContext->GetDevice();
 
     size_t vbSize = meshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
-    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, L"Ground_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto vbHandle =
+        gpuMgr.CreateBuffer(device, vbSize, L"Ground_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
     if (vbResource) {
         void *vbMapped = nullptr;
@@ -61,7 +62,8 @@ void GameWorld::CreateGroundPlane() {
     }
 
     size_t ibSize = meshData.Indices32.size() * sizeof(uint32_t);
-    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, L"Ground_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto ibHandle =
+        gpuMgr.CreateBuffer(device, ibSize, L"Ground_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
     if (ibResource) {
         void *ibMapped = nullptr;
@@ -106,6 +108,8 @@ void GameWorld::CreateGroundPlane() {
     MeshComponent meshComp;
     meshComp.lodMeshHandle = lodHandle;
     meshComp.localBounds = bounds;
+    // [TODO] textureHandle 正在被 PBR 材质系统替代，MeshComponent 中的纹理句柄
+    // 已不被 OpaqueRenderItemBuilder 读取，后续应考虑移除或改为材质覆写机制。
     meshComp.materialHandle = m_brickMaterialHandle;
     meshComp.textureHandle = m_brickTextureHandle;
     meshComp.receivesShadow = true;
@@ -129,7 +133,8 @@ void GameWorld::CreateTestCube() {
     auto device = m_context->DeviceContext->GetDevice();
 
     size_t vbSize = meshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
-    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, L"Cube_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto vbHandle =
+        gpuMgr.CreateBuffer(device, vbSize, L"Cube_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
 
     if (vbResource) {
@@ -141,7 +146,8 @@ void GameWorld::CreateTestCube() {
     }
 
     size_t ibSize = meshData.Indices32.size() * sizeof(uint32_t);
-    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, L"Cube_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto ibHandle =
+        gpuMgr.CreateBuffer(device, ibSize, L"Cube_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
 
     if (ibResource) {
@@ -261,7 +267,8 @@ void GameWorld::CreateStressTestScene() {
     auto device = m_context->DeviceContext->GetDevice();
 
     size_t vbSize = meshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
-    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, L"Stress_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto vbHandle =
+        gpuMgr.CreateBuffer(device, vbSize, L"Stress_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
     if (vbResource) {
         void *vbMapped = nullptr;
@@ -272,7 +279,8 @@ void GameWorld::CreateStressTestScene() {
     }
 
     size_t ibSize = meshData.Indices32.size() * sizeof(uint32_t);
-    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, L"Stress_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto ibHandle =
+        gpuMgr.CreateBuffer(device, ibSize, L"Stress_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
     if (ibResource) {
         void *ibMapped = nullptr;
@@ -351,7 +359,8 @@ void GameWorld::CreateTestCylinder() {
     auto device = m_context->DeviceContext->GetDevice();
 
     size_t vbSize = meshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
-    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, L"Cylinder_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto vbHandle =
+        gpuMgr.CreateBuffer(device, vbSize, L"Cylinder_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
     if (vbResource) {
         void *vbMapped = nullptr;
@@ -362,7 +371,8 @@ void GameWorld::CreateTestCylinder() {
     }
 
     size_t ibSize = meshData.Indices32.size() * sizeof(uint32_t);
-    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, L"Cylinder_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto ibHandle =
+        gpuMgr.CreateBuffer(device, ibSize, L"Cylinder_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
     if (ibResource) {
         void *ibMapped = nullptr;
@@ -474,7 +484,8 @@ void GameWorld::CreateTestTorus() {
     auto device = m_context->DeviceContext->GetDevice();
 
     size_t vbSize = vertices.size() * sizeof(GeometryGenerator::Vertex);
-    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, L"Torus_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto vbHandle =
+        gpuMgr.CreateBuffer(device, vbSize, L"Torus_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
     if (vbResource) {
         void *vbMapped = nullptr;
@@ -485,7 +496,8 @@ void GameWorld::CreateTestTorus() {
     }
 
     size_t ibSize = indices.size() * sizeof(uint32_t);
-    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, L"Torus_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto ibHandle =
+        gpuMgr.CreateBuffer(device, ibSize, L"Torus_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
     if (ibResource) {
         void *ibMapped = nullptr;
@@ -620,7 +632,8 @@ void GameWorld::CreateSkybox() {
     auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Device *device = m_context->DeviceContext->GetDevice();
 
-    GpuResourceHandle gpuHandle = gpuMgr.CreateTexture2D(device, ddsInfo.desc, L"Skybox_Texture", D3D12_RESOURCE_STATE_COMMON);
+    GpuResourceHandle gpuHandle =
+        gpuMgr.CreateTexture2D(device, ddsInfo.desc, L"Skybox_Texture", D3D12_RESOURCE_STATE_COMMON);
     if (!gpuHandle.IsValid()) {
         m_context->Logging->Error("[GameWorld] Failed to create skybox GPU texture");
         return;
@@ -659,8 +672,8 @@ void GameWorld::CreateSkybox() {
     UINT64 requiredSize =
         GetRequiredIntermediateSize(gpuMgr.GetResource(gpuHandle), 0, static_cast<UINT>(subresources.size()));
 
-    GpuResourceHandle uploadHandle =
-        gpuMgr.CreateBuffer(device, requiredSize, L"Skybox_Upload", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    GpuResourceHandle uploadHandle = gpuMgr.CreateBuffer(device, requiredSize, L"Skybox_Upload", D3D12_HEAP_TYPE_UPLOAD,
+                                                         D3D12_RESOURCE_STATE_GENERIC_READ);
 
     auto barrier1 = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(gpuHandle), D3D12_RESOURCE_STATE_COMMON,
                                                          D3D12_RESOURCE_STATE_COPY_DEST);
@@ -688,7 +701,8 @@ void GameWorld::CreateSkybox() {
     auto skyMeshData = geoGen.CreateBox(1.0f, 1.0f, 1.0f, 0);
 
     size_t vbSize = skyMeshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
-    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, L"Skybox_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto vbHandle =
+        gpuMgr.CreateBuffer(device, vbSize, L"Skybox_VB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
     if (vbResource) {
         void *vbMapped = nullptr;
@@ -699,7 +713,8 @@ void GameWorld::CreateSkybox() {
     }
 
     size_t ibSize = skyMeshData.Indices32.size() * sizeof(uint32_t);
-    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, L"Skybox_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto ibHandle =
+        gpuMgr.CreateBuffer(device, ibSize, L"Skybox_IB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
     if (ibResource) {
         void *ibMapped = nullptr;
@@ -751,7 +766,8 @@ void GameWorld::CreateWater() {
     auto device = m_context->DeviceContext->GetDevice();
 
     size_t vbSize = meshData.Vertices.size() * sizeof(GeometryGenerator::Vertex);
-    auto vbHandle = gpuMgr.CreateBuffer(device, vbSize, L"Water_MeshVB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto vbHandle =
+        gpuMgr.CreateBuffer(device, vbSize, L"Water_MeshVB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
     if (vbResource) {
         void *vbMapped = nullptr;
@@ -762,7 +778,8 @@ void GameWorld::CreateWater() {
     }
 
     size_t ibSize = meshData.Indices32.size() * sizeof(uint32_t);
-    auto ibHandle = gpuMgr.CreateBuffer(device, ibSize, L"Water_MeshIB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto ibHandle =
+        gpuMgr.CreateBuffer(device, ibSize, L"Water_MeshIB", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
     ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
     if (ibResource) {
         void *ibMapped = nullptr;
@@ -872,6 +889,6 @@ void GameWorld::CreateBillboardTrees() {
     m_context->Logging->Info("[GameWorld] {} billboard trees created ({} texture slices)", m_billboardEntities.size(),
                              m_billboardTotalSlices);
 
-    // [GBuffer 调试] 注释 forward 渲染
-    RegisterBillboardRenderSystem();
+    // [点光源阴影阶段] 临时注释公告牌
+    // RegisterBillboardRenderSystem();
 }

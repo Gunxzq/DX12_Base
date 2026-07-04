@@ -6,9 +6,9 @@
 #include "Platform/Windows/Window.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
+#include "Renderer/Scene/AmbientOcclusionManager/AmbientOcclusionManager.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
-#include "Renderer/Scene/AmbientOcclusionManager/AmbientOcclusionManager.h"
 #include "Renderer/Scene/Struct/Frustum.h"
 #include "Resource/AssetLoader/AssetLoader.h"
 #include "Resource/AssetLoader/Loader/DDSLoader.h"
@@ -79,8 +79,11 @@ bool Game::Initialize() {
         aoMgr.SetEnabled(true);
     }
 
-    // // 为主方向光预创建阴影贴图（2048x2048）
+    // 为主方向光预创建阴影贴图（2048x2048）
     LightManager::GetInstance().CreateShadowMapForDirectionalLight(0, 2048, m_context->GetNextFence());
+
+    // 为第一个点光源预创建阴影贴图（1024x1024）
+    LightManager::GetInstance().CreateShadowMapForPointLight(0, 1024, m_context->GetNextFence());
 
     // 反射探针管理器 — 已在 Bootstrap::CreateContext 中初始化，直接使用
     {
