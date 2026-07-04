@@ -85,6 +85,9 @@ bool Game::Initialize() {
     // 为第一个点光源预创建阴影贴图（1024x1024）
     LightManager::GetInstance().CreateShadowMapForPointLight(0, 1024, m_context->GetNextFence());
 
+    // 为聚光灯预创建阴影贴图（1024x1024）
+    LightManager::GetInstance().CreateShadowMapForSpotLight(0, 1024, m_context->GetNextFence());
+
     // 反射探针管理器 — 已在 Bootstrap::CreateContext 中初始化，直接使用
     {
         auto &probeMgr = *m_context->ReflectionProbeMgr;

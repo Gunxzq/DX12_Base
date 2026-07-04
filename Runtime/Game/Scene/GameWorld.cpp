@@ -220,6 +220,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     // [GBuffer 调试] 注释其他渲染 Pass，避免干扰
     RegisterClearSystem();
     RegisterShadowRenderSystem();
+    RegisterSpotShadowRenderSystem();
     RegisterSsaoSystem();
     {
         auto &aoMgr = AmbientOcclusionManager::GetInstance();

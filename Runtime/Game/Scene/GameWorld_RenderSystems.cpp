@@ -9,6 +9,7 @@
 #include "Renderer/Effects/AO/AmbientOcclusionManager.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
+#include "Renderer/Material/MaterialManager.h"
 #include "Renderer/Pipeline/BillboardRenderer.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/Pipeline/ReflectionProbeRenderer.h"
@@ -22,7 +23,6 @@
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include "Renderer/Material/MaterialManager.h"
 #include "Resource/Pool/RenderTargetPool.h"
 #include "Resource/Texture/TextureManager.h"
 #include "Scheduler/FrameDriver.h"
@@ -718,12 +718,8 @@ void GameWorld::RegisterShadowRenderSystem() {
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
                  auto &lightMgr = LightManager::GetInstance();
-                 D3D12_GPU_VIRTUAL_ADDRESS dirShadowAddr = lightMgr.GetDirShadowRenderAddress();
-                 const auto &shadowRes = lightMgr.GetDirShadowResources();
-
-                 if (!lightMgr.HasDirShadow() || !shadowRes.isValid || dirShadowAddr == 0 || m_opaqueQueue.Empty()) {
+                 if (!lightMgr.HasShadow(LightType::Directional) || m_opaqueQueue.Empty())
                      return;
-                 }
 
                  uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
                  auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
@@ -731,39 +727,32 @@ void GameWorld::RegisterShadowRenderSystem() {
                  auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
                  auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
 
-                 ID3D12Resource *depthTexture = DepthStencilPool::GetInstance().GetResource(shadowRes.handle);
-                 if (!depthTexture) {
-                     m_context->ReleaseCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-                     m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle,
-                                                                                 m_context->GetNextSequence());
-                     return;
-                 }
-
-                 D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
-                     m_context->DescriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadowRes.dsvSlot);
-
-                 CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                     depthTexture,
-                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                     D3D12_RESOURCE_STATE_DEPTH_WRITE);
-                 cmdList.Get()->ResourceBarrier(1, &barrier);
-
-                 m_shadowRenderer->BeginOffscreen(cmdList, dirShadowAddr, dsvHandle, shadowRes.resolution,
-                                                  shadowRes.resolution);
-
-                 for (const auto &item : m_opaqueQueue) {
-                     if (!item.IsValid())
+                 uint32_t dirCount = lightMgr.GetLightCount(LightType::Directional);
+                 for (uint32_t i = 0; i < dirCount; ++i) {
+                     const Light *light = lightMgr.GetLight(LightType::Directional, i);
+                     if (!light || light->CastShadow <= 0.5f)
                          continue;
-                     m_shadowRenderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer,
-                                                     item.instanceCount);
+
+                     const auto &shadowRes = lightMgr.GetDirShadowResource();
+                     ID3D12Resource *depthTexture = DepthStencilPool::GetInstance().GetResource(shadowRes.handle);
+                     if (!depthTexture || shadowRes.cbvAddress == 0)
+                         continue;
+
+                     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
+                         m_context->DescriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadowRes.dsvSlot);
+
+                     m_shadowRenderer->BeginOffscreen(cmdList, shadowRes.cbvAddress, dsvHandle, shadowRes.resolution,
+                                                      shadowRes.resolution);
+
+                     for (const auto &item : m_opaqueQueue) {
+                         if (!item.IsValid())
+                             continue;
+                         m_shadowRenderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer,
+                                                         item.instanceCount);
+                     }
+
+                     m_shadowRenderer->EndOffscreen(cmdList);
                  }
-
-                 m_shadowRenderer->EndOffscreen(cmdList);
-
-                 CD3DX12_RESOURCE_BARRIER barrierBack = CD3DX12_RESOURCE_BARRIER::Transition(
-                     depthTexture, D3D12_RESOURCE_STATE_DEPTH_WRITE,
-                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                 cmdList.Get()->ResourceBarrier(1, &barrierBack);
 
                  cmdList.Close();
                  m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PrePass, cmdListHandle);
@@ -784,16 +773,8 @@ void GameWorld::RegisterPointShadowRenderSystem() {
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
                  auto &lightMgr = LightManager::GetInstance();
-                 const auto &resList = lightMgr.GetPointShadowResources();
-
-                 if (resList.empty() || m_opaqueQueue.Empty())
+                 if (!lightMgr.HasShadow(LightType::Point) || m_opaqueQueue.Empty())
                      return;
-
-                 if (!resList[0].isValid)
-                     return;
-
-                 auto &dsPool = DepthStencilPool::GetInstance();
-                 uint32_t res = resList[0].resolution;
 
                  uint64_t fence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
                  auto allocH = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(fence);
@@ -801,53 +782,37 @@ void GameWorld::RegisterPointShadowRenderSystem() {
                  auto cmdH = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
                  auto cmd = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdH);
 
-                 auto &shadowRes = resList[0];
-                 m_shadowRenderer->SetInPass(true);
-
-                 // 全数组 DSV 清除一次（6 slice 共享纹理）
-                 D3D12_CPU_DESCRIPTOR_HANDLE arrayDsvHandle = dsPool.GetDsvHandle(shadowRes.arrayHandle);
-                 cmd.Get()->ClearDepthStencilView(arrayDsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
-                 D3D12_VIEWPORT vp = {0, 0, (float)res, (float)res, 0, 1};
-                 D3D12_RECT scissor = {0, 0, (LONG)res, (LONG)res};
-                 cmd.Get()->RSSetViewports(1, &vp);
-                 cmd.Get()->RSSetScissorRects(1, &scissor);
-
                  cmd.Get()->SetGraphicsRootSignature(m_shadowRenderer->GetRootSignature());
 
-                 if (ID3D12PipelineState *gsPSO = m_shadowRenderer->GetPointGSPSO()) {
-                     // GS 路径：一次 DrawCall 展开 6 面
-                     cmd.Get()->SetPipelineState(gsPSO);
-                     cmd.Get()->OMSetRenderTargets(0, nullptr, FALSE, &arrayDsvHandle);
-                     cmd.Get()->SetGraphicsRootConstantBufferView(1, lightMgr.GetPointShadowAddress());
+                 m_shadowRenderer->SetInPass(true);
 
-                     for (const auto &item : m_opaqueQueue) {
-                         if (!item.IsValid())
-                             continue;
-                         // PointShadowVS_GS 读 gInstanceData[instanceID].World → GS 展开 6 面
-                         if (item.indexCount > 0) {
-                             m_shadowRenderer->DrawIndexedInstancedSubmesh(
-                                 cmd, item.geometryHandle, item.instanceBuffer, item.instanceCount, item.startIndex,
-                                 item.startVertex, item.indexCount);
-                         } else {
-                             m_shadowRenderer->DrawInstanced(cmd, item.geometryHandle, item.instanceBuffer,
-                                                             item.instanceCount);
-                         }
-                     }
-                 } else {
-                     // 6 遍渲染（GS 不可用时的回退）
-                     for (int face = 0; face < 6; ++face) {
-                         D3D12_GPU_VIRTUAL_ADDRESS faceVPAddr = lightMgr.GetPointShadowFaceAddress(face);
-                         if (faceVPAddr == 0)
-                             continue;
+                 uint32_t ptCount = lightMgr.GetLightCount(LightType::Point);
+                 for (uint32_t lightIdx = 0; lightIdx < ptCount; ++lightIdx) {
+                     const Light *light = lightMgr.GetLight(LightType::Point, lightIdx);
+                     if (!light || light->CastShadow <= 0.5f)
+                         continue;
 
-                         D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
-                             m_context->DescriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadowRes.dsvSlots[face]);
+                     const auto &shadowRes = lightMgr.GetPointShadowResource(lightIdx);
+                     if (!shadowRes.isValid)
+                         continue;
 
-                         cmd.Get()->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
+                     auto &dsPool = DepthStencilPool::GetInstance();
+                     uint32_t res = shadowRes.resolution;
 
-                         cmd.Get()->SetPipelineState(m_shadowRenderer->GetPointInstancedPSO());
-                         cmd.Get()->SetGraphicsRootConstantBufferView(1, faceVPAddr);
+                     // 全数组 DSV 清除一次（6 slice 共享纹理）
+                     D3D12_CPU_DESCRIPTOR_HANDLE arrayDsvHandle = dsPool.GetDsvHandle(shadowRes.arrayHandle);
+                     cmd.Get()->ClearDepthStencilView(arrayDsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+                     D3D12_VIEWPORT vp = {0, 0, (float)res, (float)res, 0, 1};
+                     D3D12_RECT scissor = {0, 0, (LONG)res, (LONG)res};
+                     cmd.Get()->RSSetViewports(1, &vp);
+                     cmd.Get()->RSSetScissorRects(1, &scissor);
+
+                     if (ID3D12PipelineState *gsPSO = m_shadowRenderer->GetPointGSPSO()) {
+                         // GS 路径：一次 DrawCall 展开 6 面
+                         cmd.Get()->SetPipelineState(gsPSO);
+                         cmd.Get()->OMSetRenderTargets(0, nullptr, FALSE, &arrayDsvHandle);
+                         cmd.Get()->SetGraphicsRootConstantBufferView(1, shadowRes.cbvAddress);
 
                          for (const auto &item : m_opaqueQueue) {
                              if (!item.IsValid())
@@ -861,6 +826,31 @@ void GameWorld::RegisterPointShadowRenderSystem() {
                                                                  item.instanceCount);
                              }
                          }
+                     } else {
+                         // 6 遍渲染（GS 不可用时的回退）
+                         for (int face = 0; face < 6; ++face) {
+                             D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
+                                 m_context->DescriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadowRes.dsvSlots[face]);
+
+                             cmd.Get()->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
+
+                             cmd.Get()->SetPipelineState(m_shadowRenderer->GetPointInstancedPSO());
+                             cmd.Get()->SetGraphicsRootConstantBufferView(1, shadowRes.cbvAddress);
+                             cmd.Get()->SetGraphicsRoot32BitConstant(3, face, 0); // gShadowLightIndex
+
+                             for (const auto &item : m_opaqueQueue) {
+                                 if (!item.IsValid())
+                                     continue;
+                                 if (item.indexCount > 0) {
+                                     m_shadowRenderer->DrawIndexedInstancedSubmesh(
+                                         cmd, item.geometryHandle, item.instanceBuffer, item.instanceCount,
+                                         item.startIndex, item.startVertex, item.indexCount);
+                                 } else {
+                                     m_shadowRenderer->DrawInstanced(cmd, item.geometryHandle, item.instanceBuffer,
+                                                                     item.instanceCount);
+                                 }
+                             }
+                         }
                      }
                  }
 
@@ -871,6 +861,70 @@ void GameWorld::RegisterPointShadowRenderSystem() {
 
                  uint64_t seq = m_context->GetNextSequence();
                  m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocH, seq);
+             },
+         .phase = TaskPhase::Render,
+         .threadType = ThreadType::Render,
+         .priority = TaskPriority::Normal,
+         .renderPhase = RenderPhase::PrePass,
+         .alwaysRun = true});
+}
+
+void GameWorld::RegisterSpotShadowRenderSystem() {
+    SystemRegistry::Register(
+        {.name = "SpotShadowRenderSystem",
+         .func =
+             [this](Registry &registry, const MessageContext &ctx) {
+                 auto &lightMgr = LightManager::GetInstance();
+
+                 if (!lightMgr.HasShadow(LightType::Spot) || m_opaqueQueue.Empty())
+                     return;
+
+                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
+                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
+                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
+
+                 // 使用聚光灯专用 PSO（SpotShadowVS_Instanced 读取 gSpotLightViewProj）
+                 cmdList.Get()->SetGraphicsRootSignature(m_shadowRenderer->GetRootSignature());
+
+                 uint32_t spCount = lightMgr.GetLightCount(LightType::Spot);
+                 for (uint32_t i = 0; i < spCount; ++i) {
+                     const Light *light = lightMgr.GetLight(LightType::Spot, i);
+                     if (!light || light->CastShadow <= 0.5f)
+                         continue;
+
+                     const auto &shadowRes = lightMgr.GetSpotShadowResource(i);
+                     if (!shadowRes.isValid || shadowRes.cbvAddress == 0)
+                         continue;
+
+                     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
+                         m_context->DescriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadowRes.dsvSlot);
+
+                     ID3D12Resource *depthTexture = DepthStencilPool::GetInstance().GetResource(shadowRes.handle);
+                     if (!depthTexture)
+                         continue;
+
+                     m_shadowRenderer->BeginOffscreen(cmdList, shadowRes.cbvAddress, dsvHandle, shadowRes.resolution,
+                                                      shadowRes.resolution);
+                     // BeginOffscreen 设了方向光 PSO，覆盖回聚光灯 PSO
+                     cmdList.Get()->SetPipelineState(m_shadowRenderer->GetSpotPSO());
+
+                     for (const auto &item : m_opaqueQueue) {
+                         if (!item.IsValid())
+                             continue;
+                         m_shadowRenderer->DrawInstanced(cmdList, item.geometryHandle, item.instanceBuffer,
+                                                         item.instanceCount);
+                     }
+
+                     m_shadowRenderer->EndOffscreen(cmdList);
+                 }
+
+                 cmdList.Close();
+                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PrePass, cmdListHandle);
+
+                 uint64_t sequence = m_context->GetNextSequence();
+                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Render,

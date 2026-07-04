@@ -113,6 +113,7 @@ public:
     // 注册阴影渲染系统
     void RegisterShadowRenderSystem();
     void RegisterPointShadowRenderSystem();
+    void RegisterSpotShadowRenderSystem();
 
     // 注册 SSAO 系统
     void RegisterSsaoSystem();
