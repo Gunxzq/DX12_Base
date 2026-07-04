@@ -167,6 +167,29 @@ float3 ComputeDirectionalLight(Light L, Material mat, float3 normal, float3 toEy
     return ComputePBR(L, mat, float3(0, 0, 0), normal, toEye);
 }
 
+// 方向光 PBR（延迟渲染专用，参数来自 G-buffer，不含 Material 结构体）
+float3 ComputeDirectionalLightDeferred(Light light, float3 albedo, float metallic, float roughness, float3 N, float3 V)
+{
+    float3 L = -light.Direction;
+    float NdotL = max(dot(N, L), 0.0f);
+    float3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0f);
+    float NdotV = max(dot(N, V), 0.0f);
+    float3 radiance = light.Strength;
+    float3 F0 = lerp(0.04f, albedo, metallic);
+    float3 F = F0 + (1.0f - F0) * pow(1.0f - NdotH, 5.0f);
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float NdotH2 = NdotH * NdotH;
+    float D = a2 / (3.14159f * (NdotH2 * (a2 - 1.0f) + 1.0f) * (NdotH2 * (a2 - 1.0f) + 1.0f));
+    float k = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;
+    float G = (NdotV / (NdotV * (1.0f - k) + k)) * (NdotL / (NdotL * (1.0f - k) + k));
+    float3 specular = D * G * F / (4.0f * max(NdotV, 0.01f) * max(NdotL, 0.01f) + 0.0001f);
+    float3 kD = (1.0f - F) * (1.0f - metallic);
+    float3 diffuse = kD * albedo / 3.14159f;
+    return (diffuse + specular) * radiance * NdotL;
+}
+
 // 点光源封装
 float3 ComputePointLight(Light L, Material mat, float3 pos, float3 normal, float3 toEye)
 {
