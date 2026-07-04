@@ -394,22 +394,33 @@ float4 PS(DomainOutput pin) : SV_Target
 
     // 直接光照（带阴影，与 color.hlsl 一致）
     float3 directLight = 0;
-    for (uint i = 0; i < gNumDirLights; ++i)
+    uint totalLights = gNumDirLights + gNumPointLights + gNumSpotLights;
+    for (uint i = 0; i < totalLights; ++i)
     {
-        float3 lightContrib = ComputeDirectionalLight(gLights[i], mat, N, V);
+        Light light = gLights[i];
+        float3 lightContrib = 0;
 
-        if (gLights[i].ShadowMapIndex >= 0 && gReceiveShadow)
+        [branch]
+        if (light.Type == 0) // Directional
         {
-            float shadow = SampleDirShadow((uint)gLights[i].ShadowMapIndex, pin.WorldPos, N, gLights[i].Direction.xyz);
-            lightContrib *= shadow;
+            lightContrib = ComputeDirectionalLight(light, mat, N, V);
+
+            if (light.ShadowMapIndex >= 0 && gReceiveShadow)
+            {
+                lightContrib *= SampleShadow(light, pin.WorldPos, N);
+            }
+        }
+        else if (light.Type == 1) // Point
+        {
+            lightContrib = ComputePointLight(light, mat, pin.WorldPos, N, V);
+        }
+        else // Spot
+        {
+            lightContrib = ComputeSpotLight(light, mat, pin.WorldPos, N, V);
         }
 
         directLight += lightContrib;
     }
-    for (uint j = gNumDirLights; j < gNumDirLights + gNumPointLights; ++j)
-        directLight += ComputePointLight(gLights[j], mat, pin.WorldPos, N, V);
-    for (uint k = gNumDirLights + gNumPointLights; k < gNumDirLights + gNumPointLights + gNumSpotLights; ++k)
-        directLight += ComputeSpotLight(gLights[k], mat, pin.WorldPos, N, V);
 
     // 环境反射
     float3 R = reflect(-V, N);

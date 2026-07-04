@@ -189,12 +189,9 @@ float4 PS(GSOutput pin) : SV_Target
 
     // 直接光照（无阴影）
     float3 directLight = 0;
-    for (uint i = 0; i < gNumDirLights; ++i)
-        directLight += ComputeDirectionalLight(gLights[i], mat, N, V);
-    for (uint j = gNumDirLights; j < gNumDirLights + gNumPointLights; ++j)
-        directLight += ComputePointLight(gLights[j], mat, pin.WorldPos, N, V);
-    for (uint k = gNumDirLights + gNumPointLights; k < gNumDirLights + gNumPointLights + gNumSpotLights; ++k)
-        directLight += ComputeSpotLight(gLights[k], mat, pin.WorldPos, N, V);
+    uint totalLights = gNumDirLights + gNumPointLights + gNumSpotLights;
+    for (uint i = 0; i < totalLights; ++i)
+        directLight += ComputePBR(gLights[i], mat, pin.WorldPos, N, V);
 
     // 无反射采样（探针捕获本身不能依赖探针）
     float3 litColor = ambient + directLight + emissive;

@@ -90,52 +90,33 @@ float4 PS(QuadOut pin) : SV_Target
     float ssao = gSsaoMap.SampleLevel(gSamplerPointClamp, pin.UV, 0.0f).r;
     float3 ambient = gAmbientLight.xyz * gAmbientLight.w * albedo * ao * ssao;
     float3 direct = 0;
-    for (uint i = 0; i < gNumDirLights; ++i)
-    {
-        float3 lightContrib = ComputeDirectionalLightDeferred(gLights[i], albedo, metallic, roughness, N, V);
-        // 方向光阴影（光源有 ShadowMapIndex 且投射阴影时采样）
-        if (gLights[i].ShadowMapIndex < 255 && gLights[i].CastShadow > 0.5f)
-        {
-            lightContrib *= SampleDirShadow(gLights[i].ShadowMapIndex, worldPos, N, gLights[i].Direction.xyz);
-        }
-        direct += lightContrib;
-    }
 
-    // 点光源
-    for (uint j = 0; j < gNumPointLights; ++j)
+    uint totalLights = gNumDirLights + gNumPointLights + gNumSpotLights;
+    for (uint i = 0; i < totalLights; ++i)
     {
-        uint idx = gNumDirLights + j;
-        Light ptLight = gLights[idx];
-        // 点光源使用 Position 计算 L 向量，不能用 Direction（默认值为 0）
-        float3 L = ptLight.Position.xyz - worldPos;
-        float dist = length(L);
-        L /= dist;
-        float atten = saturate((ptLight.FalloffEnd - dist) / (ptLight.FalloffEnd - ptLight.FalloffStart));
-        if (atten <= 0.0f)
-            continue;
+        Light light = gLights[i];
+        float3 lightContrib = 0;
 
-        float NdotL = max(dot(N, L), 0.0f);
-        float3 H = normalize(V + L);
-        float NdotH = max(dot(N, H), 0.0f);
-        float NdotV = max(dot(N, V), 0.0f);
-        float NdotH2 = NdotH * NdotH;
-        float3 radiance = ptLight.Strength * atten;
-        float3 F0 = lerp(0.04f, albedo, metallic);
-        float3 F = F0 + (1.0f - F0) * pow(1.0f - NdotH, 5.0f);
-        float a = roughness * roughness;
-        float a2 = a * a;
-        float D = a2 / (3.14159f * (NdotH2 * (a2 - 1.0f) + 1.0f) * (NdotH2 * (a2 - 1.0f) + 1.0f));
-        float k = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;
-        float G = (NdotV / (NdotV * (1.0f - k) + k)) * (NdotL / (NdotL * (1.0f - k) + k));
-        float3 specular = D * G * F / (4.0f * max(NdotV, 0.01f) * max(NdotL, 0.01f) + 0.0001f);
-        float3 kD = (1.0f - F) * (1.0f - metallic);
-        float3 diffuse = kD * albedo / 3.14159f;
-        float3 lightContrib = (diffuse + specular) * radiance * NdotL;
-        // 点光源阴影（ShadowMapIndex < 255 且投射阴影）
-        if (ptLight.ShadowMapIndex < 255 && ptLight.CastShadow > 0.5f)
+        [branch]
+        if (light.Type == 0) // Directional
         {
-            lightContrib *= SamplePointShadow(ptLight.ShadowMapIndex, worldPos);
+            lightContrib = ComputeDirectionalLightDeferred(light, albedo, metallic, roughness, N, V);
+            if (light.CastShadow > 0.5f)
+                lightContrib *= SampleShadow(light, worldPos, N);
         }
+        else if (light.Type == 1) // Point
+        {
+            lightContrib = ComputePointLightDeferred(light, albedo, metallic, roughness, N, V, worldPos);
+            if (light.CastShadow > 0.5f)
+                lightContrib *= SampleShadow(light, worldPos, N);
+        }
+        else // Spot
+        {
+            lightContrib = ComputeSpotLightDeferred(light, albedo, metallic, roughness, N, V, worldPos);
+            if (light.CastShadow > 0.5f)
+                lightContrib *= SampleShadow(light, worldPos, N);
+        }
+
         direct += lightContrib;
     }
 

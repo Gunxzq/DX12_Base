@@ -5,20 +5,7 @@
 #ifndef LIGHTING_UTIL_HLSL
 #define LIGHTING_UTIL_HLSL
 
-#define MaxLights 16
 #define PI 3.14159265359f
-
-#ifndef NUM_DIR_LIGHTS
-#define NUM_DIR_LIGHTS 1
-#endif
-
-#ifndef NUM_POINT_LIGHTS
-#define NUM_POINT_LIGHTS 0
-#endif
-
-#ifndef NUM_SPOT_LIGHTS
-#define NUM_SPOT_LIGHTS 0
-#endif
 
 struct Light
 {
@@ -32,7 +19,7 @@ struct Light
     float CastShadow;
     float ShadowBias;
     float ShadowMapIndex;
-    float Pad;
+    float Type; // 0=Directional, 1=Point, 2=Spot
 };
 
 struct Material
@@ -190,6 +177,67 @@ float3 ComputeDirectionalLightDeferred(Light light, float3 albedo, float metalli
     return (diffuse + specular) * radiance * NdotL;
 }
 
+// 点光源 PBR（延迟渲染专用）
+float3 ComputePointLightDeferred(Light light, float3 albedo, float metallic, float roughness, float3 N, float3 V, float3 worldPos)
+{
+    float3 L = light.Position.xyz - worldPos;
+    float dist = length(L);
+    L /= dist;
+    float atten = saturate((light.FalloffEnd - dist) / (light.FalloffEnd - light.FalloffStart));
+    if (atten <= 0.0f)
+        return 0.0f;
+
+    float NdotL = max(dot(N, L), 0.0f);
+    float3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0f);
+    float NdotV_local = max(dot(N, V), 0.0f);
+    float NdotH2 = NdotH * NdotH;
+    float3 radiance = light.Strength * atten;
+    float3 F0 = lerp(0.04f, albedo, metallic);
+    float3 F = F0 + (1.0f - F0) * pow(1.0f - NdotH, 5.0f);
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float D = a2 / (3.14159f * (NdotH2 * (a2 - 1.0f) + 1.0f) * (NdotH2 * (a2 - 1.0f) + 1.0f));
+    float k = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;
+    float G = (NdotV_local / (NdotV_local * (1.0f - k) + k)) * (NdotL / (NdotL * (1.0f - k) + k));
+    float3 specular = D * G * F / (4.0f * max(NdotV_local, 0.01f) * max(NdotL, 0.01f) + 0.0001f);
+    float3 kD = (1.0f - F) * (1.0f - metallic);
+    float3 diffuse = kD * albedo / 3.14159f;
+    return (diffuse + specular) * radiance * NdotL;
+}
+
+// 聚光灯 PBR（延迟渲染专用）
+float3 ComputeSpotLightDeferred(Light light, float3 albedo, float metallic, float roughness, float3 N, float3 V, float3 worldPos)
+{
+    float3 L = light.Position.xyz - worldPos;
+    float dist = length(L);
+    L /= dist;
+    float3 spotDir = normalize(light.Direction.xyz);
+    float cosAngle = max(dot(-L, spotDir), 0.0f);
+    float spotCone = light.SpotPower > 0.0f ? pow(cosAngle, light.SpotPower) : 1.0f;
+    if (spotCone <= 0.0f) return 0.0f;
+    float atten = saturate((light.FalloffEnd - dist) / (light.FalloffEnd - light.FalloffStart));
+    if (atten <= 0.0f) return 0.0f;
+
+    float NdotL = max(dot(N, L), 0.0f);
+    float3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0f);
+    float NdotV_local = max(dot(N, V), 0.0f);
+    float3 radiance = light.Strength * atten * spotCone;
+    float3 F0 = lerp(0.04f, albedo, metallic);
+    float3 F = F0 + (1.0f - F0) * pow(1.0f - NdotH, 5.0f);
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float NdotH2 = NdotH * NdotH;
+    float D = a2 / (3.14159f * (NdotH2 * (a2 - 1.0f) + 1.0f) * (NdotH2 * (a2 - 1.0f) + 1.0f));
+    float k = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;
+    float G = (NdotV_local / (NdotV_local * (1.0f - k) + k)) * (NdotL / (NdotL * (1.0f - k) + k));
+    float3 specular = D * G * F / (4.0f * max(NdotV_local, 0.01f) * max(NdotL, 0.01f) + 0.0001f);
+    float3 kD = (1.0f - F) * (1.0f - metallic);
+    float3 diffuse = kD * albedo / 3.14159f;
+    return (diffuse + specular) * radiance * NdotL;
+}
+
 // 点光源封装
 float3 ComputePointLight(Light L, Material mat, float3 pos, float3 normal, float3 toEye)
 {
@@ -200,36 +248,6 @@ float3 ComputePointLight(Light L, Material mat, float3 pos, float3 normal, float
 float3 ComputeSpotLight(Light L, Material mat, float3 pos, float3 normal, float3 toEye)
 {
     return ComputePBR(L, mat, pos, normal, toEye);
-}
-
-float4 ComputeLighting(Light gLights[MaxLights], Material mat,
-                       float3 pos, float3 normal, float3 toEye,
-                       float3 shadowFactor)
-{
-    float3 result = 0.0f;
-
-#if (NUM_DIR_LIGHTS > 0)
-    for (int i = 0; i < NUM_DIR_LIGHTS; ++i)
-    {
-        result += shadowFactor[i] * ComputeDirectionalLight(gLights[i], mat, normal, toEye);
-    }
-#endif
-
-#if (NUM_POINT_LIGHTS > 0)
-    for (int i = NUM_DIR_LIGHTS; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS; ++i)
-    {
-        result += ComputePointLight(gLights[i], mat, pos, normal, toEye);
-    }
-#endif
-
-#if (NUM_SPOT_LIGHTS > 0)
-    for (int i = NUM_DIR_LIGHTS + NUM_POINT_LIGHTS; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS + NUM_SPOT_LIGHTS; ++i)
-    {
-        result += ComputeSpotLight(gLights[i], mat, pos, normal, toEye);
-    }
-#endif
-
-    return float4(result, 0.0f);
 }
 
 #endif // LIGHTING_UTIL_HLSL

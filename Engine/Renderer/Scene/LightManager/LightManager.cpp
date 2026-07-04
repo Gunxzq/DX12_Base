@@ -54,6 +54,7 @@ void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *de
     m_lightBuffer.Initialize(device, DEFAULT_LIGHT_BUFFER_SIZE, L"LightManager_LightBuffer");
     m_shadowSampleBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE, L"LightManager_ShadowSampleBuffer");
     m_dirShadowRenderBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE, L"LightManager_DirShadowRenderBuffer");
+    m_spotShadowRenderBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE, L"LightManager_SpotShadowRenderBuffer");
     m_pointShadowBuffer.Initialize(device, DEFAULT_SHADOW_BUFFER_SIZE, L"LightManager_PointShadowBuffer");
 
     // 创建阴影采样参数 StructuredBuffer (UPLOAD 堆，每帧 UpdateAndUpload 写入)
@@ -101,6 +102,12 @@ void LightManager::Shutdown() {
     if (m_dirShadow.isValid) {
         ReleaseShadowMap(m_dirShadow, 0);
     }
+    for (auto &res : m_spotShadowResources) {
+        if (res.isValid) {
+            ReleaseShadowMap(res, 0);
+        }
+    }
+    m_spotShadowResources.clear();
     for (auto &res : m_pointShadowResources) {
         if (res.isValid) {
             for (int f = 0; f < 6; ++f) {
@@ -143,13 +150,11 @@ void LightManager::Shutdown() {
     m_lightBuffer.Shutdown();
     m_shadowSampleBuffer.Shutdown();
     m_dirShadowRenderBuffer.Shutdown();
+    m_spotShadowRenderBuffer.Shutdown();
     m_pointShadowBuffer.Shutdown();
 
     m_lightCBAddress = 0;
     m_shadowSampleAddress = 0;
-    m_dirShadowRenderAddress = 0;
-    m_pointShadowAddress = 0;
-    memset(m_pointShadowFaceAddress, 0, sizeof(m_pointShadowFaceAddress));
     m_shadowDataSRV = {};
     m_shadowMapSRV = {};
 
@@ -173,9 +178,11 @@ void LightManager::UpdateAndUpload(uint64_t fence, const Camera &camera) {
         RebuildLightConstants();
     }
 
-    // if (m_shadowDirty) {
-    RebuildShadowConstants(camera);
-    // }
+    // 方向光依赖相机视锥体，必须每帧重建；点/聚光灯仅在脏时重建
+    if (m_shadowDirty || !m_dirLights.empty()) {
+        RebuildShadowConstants(camera);
+        m_shadowDirty = false;
+    }
 
     // 只在脏数据变化时才上传，光源数据是低频更新的
     if (m_lightDirty) {
@@ -183,7 +190,6 @@ void LightManager::UpdateAndUpload(uint64_t fence, const Camera &camera) {
         m_lightDirty = false;
     }
 
-    // if (m_shadowDirty) {
     if (!m_shadowParams.empty()) {
         m_shadowSampleAddress = m_shadowSampleBuffer.AllocateUpload(
             m_shadowParams.data(), static_cast<uint32_t>(m_shadowParams.size() * sizeof(ShadowParams)), fence);
@@ -199,50 +205,36 @@ void LightManager::UpdateAndUpload(uint64_t fence, const Camera &camera) {
             }
         }
     }
-    // 上传方向光阴影 cbuffer（供 ShadowRenderer b1 使用）
-    if (!m_dirShadowCBConstants.empty()) {
-        m_dirShadowRenderAddress = m_dirShadowRenderBuffer.AllocateUpload(
-            m_dirShadowCBConstants.data(),
-            static_cast<uint32_t>(m_dirShadowCBConstants.size() * sizeof(DirLightShadowConstants)), fence);
+    // 上传方向光阴影 cbuffer（逐光源）并存储地址
+    for (size_t i = 0; i < m_dirShadowCBConstants.size(); ++i) {
+        D3D12_GPU_VIRTUAL_ADDRESS addr = m_dirShadowRenderBuffer.AllocateUpload(
+            &m_dirShadowCBConstants[i], sizeof(DirLightShadowConstants), fence, 256);
+        if (i == 0)
+            m_dirShadow.cbvAddress = addr;
     }
-    if (!m_pointShadowConstants.empty()) {
-        // 完整 cbPointShadow 上传（View Instancing VS 使用）
-        m_pointShadowAddress = m_pointShadowBuffer.AllocateUpload(&m_pointShadowConstants[0],
-                                                                  sizeof(PointLightShadowConstants), fence, 256);
 
-        // 逐面上传（旧 6 遍渲染过渡用）
-        const auto &constants = m_pointShadowConstants[0];
-        for (int face = 0; face < 6; ++face) {
-            m_pointShadowFaceAddress[face] = m_pointShadowBuffer.AllocateUpload(
-                &constants.LightViewProj[face], sizeof(DirectX::XMFLOAT4X4), fence, 256);
-        }
+    // 上传聚光灯阴影 cbuffer（逐光源）并存储地址
+    for (size_t i = 0; i < m_spotShadowCBConstants.size(); ++i) {
+        D3D12_GPU_VIRTUAL_ADDRESS addr = m_spotShadowRenderBuffer.AllocateUpload(
+            &m_spotShadowCBConstants[i], sizeof(SpotLightShadowConstants), fence, 256);
+        if (i < m_spotShadowResources.size())
+            m_spotShadowResources[i].cbvAddress = addr;
     }
-    //     if (!m_spotShadowConstants.empty()) {
-    //         m_spotShadowAddress = m_spotShadowBuffer.AllocateUpload(
-    //             m_spotShadowConstants.data(),
-    //             static_cast<uint32_t>(m_spotShadowConstants.size() * sizeof(SpotLightShadowConstants)), fence);
 
-    //         // 同步写入 Spot Shadow StructuredBuffer
-    //         if (m_spotShadowDataBufferHandle.IsValid()) {
-    //             ID3D12Resource *resource =
-    //             GpuResourceManager::GetInstance().GetResource(m_spotShadowDataBufferHandle); if (resource) {
-    //                 void *mapped = nullptr;
-    //                 resource->Map(0, nullptr, &mapped);
-    //                 memcpy(mapped, m_spotShadowConstants.data(),
-    //                        m_spotShadowConstants.size() * sizeof(SpotLightShadowConstants));
-    //                 resource->Unmap(0, nullptr);
-    //             }
-    //         }
-    //     }
-    //     m_shadowDirty = false;
-    // }
+    // 上传点光源阴影常量并存储地址
+    for (size_t i = 0; i < m_pointShadowConstants.size(); ++i) {
+        D3D12_GPU_VIRTUAL_ADDRESS addr = m_pointShadowBuffer.AllocateUpload(
+            &m_pointShadowConstants[i], sizeof(PointLightShadowConstants), fence, 256);
+        if (i < m_pointShadowResources.size())
+            m_pointShadowResources[i].cbvAddress = addr;
+    }
 
     // 回收
     m_lightBuffer.Reclaim(fence);
     m_shadowSampleBuffer.Reclaim(fence);
     m_dirShadowRenderBuffer.Reclaim(fence);
+    m_spotShadowRenderBuffer.Reclaim(fence);
     m_pointShadowBuffer.Reclaim(fence);
-    // m_spotShadowBuffer.Reclaim(fence);
 }
 
 // ============================================================================
@@ -254,6 +246,12 @@ void LightManager::Clear() {
     if (m_dirShadow.isValid) {
         ReleaseShadowMap(m_dirShadow, 0);
     }
+    for (auto &res : m_spotShadowResources) {
+        if (res.isValid) {
+            ReleaseShadowMap(res, 0);
+        }
+    }
+    m_spotShadowResources.clear();
     for (auto &res : m_pointShadowResources) {
         if (res.isValid) {
             for (int f = 0; f < 6; ++f) {
@@ -275,7 +273,9 @@ void LightManager::Clear() {
 
     m_shadowParams.clear();
     m_dirShadowCBConstants.clear();
+    m_spotShadowCBConstants.clear();
     m_pointShadowConstants.clear();
+    m_lightDirty = true;
     m_lightDirty = true;
     m_shadowDirty = true;
 }
@@ -291,8 +291,12 @@ void LightManager::SetDirectionalLight(const Light &light, uint32_t index) {
     if (index >= m_dirLights.size()) {
         m_dirLights.resize(index + 1);
     }
+    bool shadowChanged = index < m_dirLights.size() && (m_dirLights[index].CastShadow != fixedLight.CastShadow ||
+                                                        m_dirLights[index].ShadowMapIndex != fixedLight.ShadowMapIndex);
     m_dirLights[index] = fixedLight;
     m_lightDirty = true;
+    if (shadowChanged)
+        m_shadowDirty = true;
 }
 
 void LightManager::SetAmbientLight(const DirectX::XMFLOAT4 &light) {
@@ -315,22 +319,26 @@ uint32_t LightManager::AddPointLight(const Light &light) {
 
 void LightManager::SetPointLight(uint32_t index, const Light &light) {
     if (index < m_pointLights.size()) {
+        bool shadowChanged = (m_pointLights[index].CastShadow != light.CastShadow) ||
+                             (m_pointLights[index].ShadowMapIndex != light.ShadowMapIndex);
         m_pointLights[index] = light;
         m_lightDirty = true;
+        if (shadowChanged)
+            m_shadowDirty = true;
     }
 }
 
 void LightManager::RemovePointLight(uint32_t index) {
     if (index < m_pointLights.size()) {
-        // 释放对应的阴影贴图（fence 传 0 表示立即标记待释放，由 RingBuffer 的后续 Reclaim 回收）
-        // if (index < m_pointShadowResources.size() && m_pointShadowResources[index].isValid) {
-        //     ReleaseShadowMap(m_pointShadowResources[index], 0);
-        // }
-        // m_pointLights.erase(m_pointLights.begin() + index);
-        // if (index < m_pointShadowResources.size()) {
-        //     m_pointShadowResources.erase(m_pointShadowResources.begin() + index);
-        // }
+        // 释放对应的阴影贴图
+        if (index < m_pointShadowResources.size() && m_pointShadowResources[index].isValid) {
+            ReleaseShadowMap(m_pointShadowResources[index], 0);
+        }
+        m_pointLights.erase(m_pointLights.begin() + index);
+        if (index < m_pointShadowResources.size())
+            m_pointShadowResources.erase(m_pointShadowResources.begin() + index);
         m_lightDirty = true;
+        m_shadowDirty = true;
     }
 }
 
@@ -349,84 +357,61 @@ uint32_t LightManager::AddSpotLight(const Light &light) {
 
 void LightManager::SetSpotLight(uint32_t index, const Light &light) {
     if (index < m_spotLights.size()) {
+        bool shadowChanged = (m_spotLights[index].CastShadow != light.CastShadow) ||
+                             (m_spotLights[index].ShadowMapIndex != light.ShadowMapIndex);
         m_spotLights[index] = light;
         m_lightDirty = true;
+        if (shadowChanged)
+            m_shadowDirty = true;
     }
 }
 
 void LightManager::RemoveSpotLight(uint32_t index) {
     if (index < m_spotLights.size()) {
-        // 释放对应的阴影贴图
-        // if (index < m_spotShadowResources.size() && m_spotShadowResources[index].isValid) {
-        //     ReleaseShadowMap(m_spotShadowResources[index], 0);
-        // }
-        // m_spotLights.erase(m_spotLights.begin() + index);
-        // if (index < m_spotShadowResources.size()) {
-        //     m_spotShadowResources.erase(m_spotShadowResources.begin() + index);
-        // }
+        m_spotLights.erase(m_spotLights.begin() + index);
         m_lightDirty = true;
+        m_shadowDirty = true;
     }
 }
 
-// void LightManager::SetShadowParams(uint32_t lightIndex, LightType type, float bias, float normalBias, float strength,
-//                                    uint32_t resolution) {
-//     switch (type) {
-//     case LightType::Directional:
-//         if (lightIndex < m_shadowParams.size()) {
-//             auto &c = m_shadowParams[lightIndex];
-//             c.Bias = bias;
-//             c.NormalBias = normalBias;
-//             c.ShadowStrength = strength;
-//             c.ShadowMapSize = static_cast<float>(resolution);
-//             m_shadowDirty = true;
-//         }
-//         break;
-//     case LightType::Point:
-//         if (lightIndex < m_pointShadowConstants.size()) {
-//             auto &c = m_pointShadowConstants[lightIndex];
-//             c.Bias = bias;
-//             c.NormalBias = normalBias;
-//             c.ShadowStrength = strength;
-//             c.ShadowMapSize = static_cast<float>(resolution);
-//             m_shadowDirty = true;
-//         }
-//         break;
-//     case LightType::Spot:
-//         if (lightIndex < m_spotShadowConstants.size()) {
-//             auto &c = m_spotShadowConstants[lightIndex];
-//             c.Bias = bias;
-//             c.NormalBias = normalBias;
-//             c.ShadowStrength = strength;
-//             c.ShadowMapSize = static_cast<float>(resolution);
-//             m_shadowDirty = true;
-//         }
-//         break;
-//     }
-// }
+const SpotShadowResources &LightManager::GetSpotShadowResource(uint32_t index) const {
+    static SpotShadowResources invalid = {};
+    return (index < m_spotShadowResources.size()) ? m_spotShadowResources[index] : invalid;
+}
+
+const PointShadowResources &LightManager::GetPointShadowResource(uint32_t index) const {
+    static PointShadowResources invalid = {};
+    return (index < m_pointShadowResources.size()) ? m_pointShadowResources[index] : invalid;
+}
 
 // ============================================================================
-// 数据访问
+// 通用光源访问
 // ============================================================================
 
-Light *LightManager::GetDirectionalLight(uint32_t index) {
-    if (index < m_dirLights.size()) {
-        return &m_dirLights[index];
+uint32_t LightManager::GetLightCount(LightType type) const {
+    switch (type) {
+    case LightType::Directional:
+        return m_lightConstants.NumDirLights;
+    case LightType::Point:
+        return m_lightConstants.NumPointLights;
+    case LightType::Spot:
+        return m_lightConstants.NumSpotLights;
+    default:
+        return 0;
     }
-    return nullptr;
 }
 
-Light *LightManager::GetPointLight(uint32_t index) {
-    if (index < m_pointLights.size()) {
-        return &m_pointLights[index];
+const Light *LightManager::GetLight(LightType type, uint32_t index) const {
+    switch (type) {
+    case LightType::Directional:
+        return (index < m_dirLights.size()) ? &m_dirLights[index] : nullptr;
+    case LightType::Point:
+        return (index < m_pointLights.size()) ? &m_pointLights[index] : nullptr;
+    case LightType::Spot:
+        return (index < m_spotLights.size()) ? &m_spotLights[index] : nullptr;
+    default:
+        return nullptr;
     }
-    return nullptr;
-}
-
-Light *LightManager::GetSpotLight(uint32_t index) {
-    if (index < m_spotLights.size()) {
-        return &m_spotLights[index];
-    }
-    return nullptr;
 }
 
 // ============================================================================
@@ -439,19 +424,25 @@ void LightManager::RebuildLightConstants() {
     // 复制方向光到 Lights[0..NumDirLights-1]
     m_lightConstants.NumDirLights = static_cast<uint32_t>(m_dirLights.size());
     for (size_t i = 0; i < m_dirLights.size() && offset < MAX_LIGHTS; ++i) {
-        m_lightConstants.Lights[offset++] = m_dirLights[i];
+        Light light = m_dirLights[i];
+        light.Type = 0.0f; // Directional
+        m_lightConstants.Lights[offset++] = light;
     }
 
     // 复制点光源
     m_lightConstants.NumPointLights = static_cast<uint32_t>(m_pointLights.size());
     for (size_t i = 0; i < m_pointLights.size() && offset < MAX_LIGHTS; ++i) {
-        m_lightConstants.Lights[offset++] = m_pointLights[i];
+        Light light = m_pointLights[i];
+        light.Type = 1.0f; // Point
+        m_lightConstants.Lights[offset++] = light;
     }
 
     // 复制聚光灯
     m_lightConstants.NumSpotLights = static_cast<uint32_t>(m_spotLights.size());
     for (size_t i = 0; i < m_spotLights.size() && offset < MAX_LIGHTS; ++i) {
-        m_lightConstants.Lights[offset++] = m_spotLights[i];
+        Light light = m_spotLights[i];
+        light.Type = 2.0f; // Spot
+        m_lightConstants.Lights[offset++] = light;
     }
 
     // 注意：不在此处清除 m_lightDirty，由 UpdateAndUpload 在上传完成后统一清除
@@ -461,11 +452,12 @@ void LightManager::RebuildShadowConstants(const Camera &camera) {
     // 方向光阴影采样参数
     m_shadowParams.clear();
     m_dirShadowCBConstants.clear();
+
     for (size_t i = 0; i < m_dirLights.size(); ++i) {
         ShadowParams params = {};
         params.Type = 0; // Directional
         ComputeDirShadowMatrix(m_dirLights[i], params, camera);
-        params.ShadowMapIndex = m_dirShadow.isValid ? 0u : UINT32_MAX;
+        params.ShadowMapIndex = m_dirShadow.isValid ? m_dirShadow.srvSlot : UINT32_MAX;
         m_shadowParams.push_back(params);
     }
 
@@ -494,7 +486,7 @@ void LightManager::RebuildShadowConstants(const Camera &camera) {
         params.ShadowStrength = light.CastShadow;
         params.ShadowMapSize = 1024.0f; // 缓存贴图分辨率
         params.ShadowMapIndex = (i < m_pointShadowResources.size() && m_pointShadowResources[i].isValid)
-                                    ? static_cast<uint32_t>(i)
+                                    ? m_pointShadowResources[i].srvBaseSlot
                                     : UINT32_MAX;
         m_shadowParams.push_back(params);
     }
@@ -510,17 +502,40 @@ void LightManager::RebuildShadowConstants(const Camera &camera) {
         m_pointShadowConstants.push_back(constants);
     }
 
-    // // 聚光灯阴影常量
-    // m_spotShadowConstants.clear();
-    // for (size_t i = 0; i < m_spotLights.size(); ++i) {
-    //     SpotLightShadowConstants constants = {};
-    //     ComputeSpotShadowMatrix(m_spotLights[i], constants);
-    //     // 设置 ShadowMapIndex
-    //     if (i < m_spotShadowResources.size() && m_spotShadowResources[i].isValid) {
-    //         constants.ShadowMapIndex = static_cast<int>(m_spotShadowResources[i].srvSlot);
-    //     }
-    //     m_spotShadowConstants.push_back(constants);
-    // }
+    // 聚光灯阴影采样参数 + 渲染常量
+    m_spotShadowCBConstants.clear();
+    for (size_t i = 0; i < m_spotLights.size(); ++i) {
+        ShadowParams params = {};
+        params.Type = 2; // Spot
+        ComputeSpotShadowMatrix(m_spotLights[i], params);
+        uint32_t srvSlot = (i < m_spotShadowResources.size() && m_spotShadowResources[i].isValid)
+                               ? m_spotShadowResources[i].srvSlot
+                               : UINT32_MAX;
+        params.ShadowMapIndex = srvSlot;
+        params.ShadowMapSize = 1024.0f;
+        m_shadowParams.push_back(params);
+
+        // 渲染常量（供 ShadowRenderer b1 使用）
+        SpotLightShadowConstants cbConst = {};
+        cbConst.LightViewProj = params.LightViewProj;
+        cbConst.ShadowMapSize = params.ShadowMapSize;
+        cbConst.Bias = params.Bias;
+        cbConst.NormalBias = params.NormalBias;
+        cbConst.ShadowStrength = params.ShadowStrength;
+        cbConst.SpotPower = m_spotLights[i].SpotPower;
+        cbConst.ShadowMapIndex = params.ShadowMapIndex;
+        m_spotShadowCBConstants.push_back(cbConst);
+    }
+
+    // 更新各光源的 ShadowMapIndex，使其直接指向 gShadowParams[] 中的对应项
+    uint32_t shadowIdx = 0;
+    for (size_t i = 0; i < m_dirLights.size(); ++i, ++shadowIdx)
+        m_dirLights[i].ShadowMapIndex = static_cast<float>(shadowIdx);
+    for (size_t i = 0; i < m_pointLights.size(); ++i, ++shadowIdx)
+        m_pointLights[i].ShadowMapIndex = static_cast<float>(shadowIdx);
+    for (size_t i = 0; i < m_spotLights.size(); ++i, ++shadowIdx)
+        m_spotLights[i].ShadowMapIndex = static_cast<float>(shadowIdx);
+    m_lightDirty = true;
 }
 
 void LightManager::ComputeDirShadowMatrix(const Light &light, ShadowParams &outParams, const Camera &mainCamera) {
@@ -641,86 +656,34 @@ void LightManager::ComputePointShadowMatrices(const Light &light, PointLightShad
     }
 }
 
-// void LightManager::ComputePointShadowMatrices(const Light &light, PointLightShadowConstants &outConstants) {
-//     using namespace DirectX;
+void LightManager::ComputeSpotShadowMatrix(const Light &light, ShadowParams &outParams) {
+    using namespace DirectX;
 
-//     // 显式构造 pos 并强制 .w = 0，避免 XMLoadFloat4 带入非零 .w 污染向量运算
-//     XMVECTOR pos = XMVectorSet(light.Position.x, light.Position.y, light.Position.z, 0.0f);
+    XMVECTOR pos = XMLoadFloat4(&light.Position);
+    XMVECTOR dir = XMLoadFloat4(&light.Direction);
+    dir = XMVector3Normalize(dir);
 
-//     // 防御：如果位置包含 NaN 或 Inf，使用原点
-//     if (XMVector3IsNaN(pos) || XMVector3IsInfinite(pos)) {
-//         pos = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
-//     }
+    XMVECTOR target = XMVectorAdd(pos, dir);
+    XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    if (fabsf(XMVectorGetY(dir)) > 0.99f) {
+        up = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+    }
 
-//     XMStoreFloat3(&outConstants.LightPosition, pos);
+    XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
+    float nearPlane = 0.1f;
+    float farPlane = light.Range > 0.0f ? light.Range : 50.0f;
+    float fov = XMConvertToRadians(45.0f); // 固定视场角 45°
+    XMMATRIX proj = XMMatrixPerspectiveFovLH(fov, 1.0f, nearPlane, farPlane);
+    XMMATRIX vp = XMMatrixMultiply(view, proj);
 
-//     // 6 个面的方向
-//     static const XMVECTORF32 directions[6] = {
-//         {{1.0f, 0.0f, 0.0f, 0.0f}},  // +X
-//         {{-1.0f, 0.0f, 0.0f, 0.0f}}, // -X
-//         {{0.0f, 1.0f, 0.0f, 0.0f}},  // +Y
-//         {{0.0f, -1.0f, 0.0f, 0.0f}}, // -Y
-//         {{0.0f, 0.0f, 1.0f, 0.0f}},  // +Z
-//         {{0.0f, 0.0f, -1.0f, 0.0f}}, // -Z
-//     };
-//     static const XMVECTORF32 ups[6] = {
-//         {{0.0f, 1.0f, 0.0f, 0.0f}}, {{0.0f, 1.0f, 0.0f, 0.0f}}, {{0.0f, 0.0f, -1.0f, 0.0f}},
-//         {{0.0f, 0.0f, 1.0f, 0.0f}}, {{0.0f, 1.0f, 0.0f, 0.0f}}, {{0.0f, 1.0f, 0.0f, 0.0f}},
-//     };
-
-//     float nearPlane = 0.1f;
-//     float farPlane = light.Range > 0.0f ? light.Range : 50.0f;
-//     XMMATRIX proj = XMMatrixPerspectiveFovLH(XMConvertToRadians(90.0f), 1.0f, nearPlane, farPlane);
-
-//     for (int i = 0; i < 6; ++i) {
-//         XMVECTOR target = XMVectorAdd(pos, directions[i]);
-//         XMVECTOR eyeDir = XMVectorSubtract(target, pos);
-//         // 防御：确保 EyeDirection 非零
-//         if (XMVector3Equal(eyeDir, XMVectorZero())) {
-//             eyeDir = directions[i]; // fallback 到方向向量
-//         }
-//         XMMATRIX view = XMMatrixLookAtLH(pos, XMVectorAdd(pos, eyeDir), ups[i]);
-//         XMMATRIX vp = XMMatrixMultiply(view, proj);
-//         XMStoreFloat4x4(&outConstants.LightViewProj[i], XMMatrixTranspose(vp));
-//     }
-
-//     outConstants.ShadowMapSize = 1024.0f;
-//     outConstants.Bias = 0.005f;
-//     outConstants.NormalBias = 0.02f;
-//     outConstants.ShadowStrength = 1.0f;
-//     outConstants.Range = light.Range;
-//     outConstants.ShadowMapIndex = -1;
-// }
-
-// void LightManager::ComputeSpotShadowMatrix(const Light &light, SpotLightShadowConstants &outConstants) {
-//     using namespace DirectX;
-
-//     XMVECTOR pos = XMLoadFloat4(&light.Position);
-//     XMVECTOR dir = XMLoadFloat4(&light.Direction);
-//     dir = XMVector3Normalize(dir);
-
-//     XMVECTOR target = XMVectorAdd(pos, dir);
-//     XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-//     if (fabsf(XMVectorGetY(dir)) > 0.99f) {
-//         up = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-//     }
-
-//     XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
-//     float nearPlane = 0.1f;
-//     float farPlane = light.Range > 0.0f ? light.Range : 50.0f;
-//     XMMATRIX proj = XMMatrixPerspectiveFovLH(light.SpotPower > 0.0f ? light.SpotPower :
-//     XMConvertToRadians(45.0f), 1.0f,
-//                                              nearPlane, farPlane);
-//     XMMATRIX vp = XMMatrixMultiply(view, proj);
-
-//     XMStoreFloat4x4(&outConstants.LightViewProj, XMMatrixTranspose(vp));
-//     outConstants.ShadowMapSize = 2048.0f;
-//     outConstants.Bias = 0.005f;
-//     outConstants.NormalBias = 0.02f;
-//     outConstants.ShadowStrength = 1.0f;
-//     outConstants.SpotPower = light.SpotPower;
-//     outConstants.ShadowMapIndex = -1;
-// }
+    XMStoreFloat4x4(&outParams.LightViewProj, vp);
+    outParams.LightPosition = XMFLOAT3(light.Position.x, light.Position.y, light.Position.z);
+    outParams.Range = light.Range;
+    outParams.ShadowMapSize = 1024.0f;
+    outParams.Bias = light.ShadowBias > 0.0f ? light.ShadowBias : 0.005f;
+    outParams.NormalBias = 0.02f;
+    outParams.ShadowStrength = light.CastShadow;
+}
 
 // ============================================================================
 // 阴影贴图资源管理
@@ -808,6 +771,81 @@ void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint3
     }
 
     m_dirShadow.isValid = true;
+    m_shadowDirty = true;
+}
+
+void LightManager::CreateShadowMapForSpotLight(uint32_t lightIndex, uint32_t resolution, uint64_t completeFence) {
+    if (!m_initialized || !m_descriptorHeaps)
+        return;
+
+    // 确保 shadow resources 数组大小匹配
+    if (lightIndex >= m_spotShadowResources.size()) {
+        m_spotShadowResources.resize(lightIndex + 1);
+    }
+
+    // 释放旧资源
+    auto &prev = m_spotShadowResources[lightIndex];
+    if (prev.isValid) {
+        ReleaseShadowMap(prev, completeFence);
+    }
+
+    auto &shadow = m_spotShadowResources[lightIndex];
+    shadow = {};
+    shadow.resolution = resolution;
+
+    auto &dsPool = DepthStencilPool::GetInstance();
+
+    DepthStencilDesc dsDesc = {};
+    dsDesc.width = resolution;
+    dsDesc.height = resolution;
+    dsDesc.format = DXGI_FORMAT_D32_FLOAT;
+    dsDesc.arraySize = 1;
+    dsDesc.flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    dsDesc.sampleDesc.Count = 1;
+    dsDesc.name = L"SpotShadowMap_Depth";
+
+    D3D12_CLEAR_VALUE clearValue = {};
+    clearValue.Format = DXGI_FORMAT_D32_FLOAT;
+    clearValue.DepthStencil.Depth = 1.0f;
+    dsDesc.clearValue = clearValue;
+
+    shadow.handle = dsPool.Allocate(dsDesc);
+    if (!shadow.handle.IsValid())
+        return;
+
+    ID3D12Resource *depthTexture = dsPool.GetResource(shadow.handle);
+
+    shadow.dsvSlot = m_descriptorHeaps->Allocate(PartitionType::Dsv);
+    if (shadow.dsvSlot == UINT32_MAX) {
+        dsPool.Free(shadow.handle, 0);
+        shadow = {};
+        return;
+    }
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsvDesc.Texture2D.MipSlice = 0;
+    m_device->CreateDepthStencilView(depthTexture, &dsvDesc,
+                                     m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadow.dsvSlot));
+
+    shadow.srvSlot = m_descriptorHeaps->Allocate(PartitionType::Shadow);
+    if (shadow.srvSlot == UINT32_MAX) {
+        m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlot, 0);
+        dsPool.Free(shadow.handle, 0);
+        shadow = {};
+        return;
+    }
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2DArray.MipLevels = 1;
+    srvDesc.Texture2DArray.FirstArraySlice = 0;
+    srvDesc.Texture2DArray.ArraySize = 1;
+    m_device->CreateShaderResourceView(depthTexture, &srvDesc,
+                                       m_descriptorHeaps->GetCpuHandle(PartitionType::Shadow, shadow.srvSlot));
+
+    shadow.isValid = true;
     m_shadowDirty = true;
 }
 
@@ -932,82 +970,6 @@ void LightManager::CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t re
     }
 }
 
-// void LightManager::CreateShadowMapForSpotLight(uint32_t lightIndex, uint32_t resolution) {
-//     if (!m_initialized || !m_descriptorHeaps)
-//         return;
-
-//     auto &gpuMgr = GpuResourceManager::GetInstance();
-
-//     // 确保 shadow resources 数组大小匹配
-//     if (lightIndex >= m_spotShadowResources.size()) {
-//         m_spotShadowResources.resize(lightIndex + 1);
-//     }
-
-//     // 释放旧资源
-//     if (m_spotShadowResources[lightIndex].isValid) {
-//         ReleaseShadowMap(m_spotShadowResources[lightIndex], 0);
-//     }
-
-//     auto &shadow = m_spotShadowResources[lightIndex];
-//     shadow = {};
-//     shadow.resolution = resolution;
-
-//     // 1. 创建 2D 深度纹理
-//     D3D12_RESOURCE_DESC desc = {};
-//     desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-//     desc.Width = resolution;
-//     desc.Height = resolution;
-//     desc.DepthOrArraySize = 1;
-//     desc.MipLevels = 1;
-//     desc.Format = DXGI_FORMAT_R32_TYPELESS;
-//     desc.SampleDesc.Count = 1;
-//     desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-//     desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-
-//     D3D12_CLEAR_VALUE clearValue = {};
-//     clearValue.Format = DXGI_FORMAT_D32_FLOAT;
-//     clearValue.DepthStencil.Depth = 1.0f;
-
-//     shadow.textureHandle = gpuMgr.CreateTexture2D(m_device, desc, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-//     if (!shadow.textureHandle.IsValid()) {
-//         return;
-//     }
-
-//     // 2. 分配 DSV 槽并创建 DSV
-//     shadow.dsvSlot = m_descriptorHeaps->Allocate(PartitionType::Dsv);
-//     if (shadow.dsvSlot == UINT32_MAX) {
-//         gpuMgr.Release(shadow.textureHandle, 0);
-//         shadow = {};
-//         return;
-//     }
-//     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-//     dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
-//     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-//     dsvDesc.Texture2D.MipSlice = 0;
-//     m_device->CreateDepthStencilView(gpuMgr.GetResource(shadow.textureHandle), &dsvDesc,
-//                                      m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadow.dsvSlot));
-
-//     // 3. 分配 SRV 槽并创建 SRV
-//     shadow.srvSlot = m_descriptorHeaps->Allocate(PartitionType::Buffer);
-//     if (shadow.srvSlot == UINT32_MAX) {
-//         m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlot, 0);
-//         gpuMgr.Release(shadow.textureHandle, 0);
-//         shadow = {};
-//         return;
-//     }
-//     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-//     srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
-//     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-//     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-//     srvDesc.Texture2D.MipLevels = 1;
-//     m_device->CreateShaderResourceView(gpuMgr.GetResource(shadow.textureHandle), &srvDesc,
-//                                        m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer,
-//                                        shadow.srvSlot));
-
-//     shadow.isValid = true;
-//     m_shadowDirty = true;
-// }
-
 void LightManager::ReleaseShadowMap(DirShadowResources &shadow, uint64_t completedFence) {
     if (!shadow.isValid)
         return;
@@ -1027,43 +989,76 @@ void LightManager::ReleaseShadowMap(DirShadowResources &shadow, uint64_t complet
     shadow = {};
 }
 
-// void LightManager::ReleaseShadowMap(PointShadowResources &shadow, uint64_t fence) {
-//     if (!shadow.isValid)
-//         return;
+void LightManager::ReleaseShadowMap(SpotShadowResources &shadow, uint64_t completedFence) {
+    if (!shadow.isValid)
+        return;
 
-//     auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto &dsPool = DepthStencilPool::GetInstance();
 
-//     if (shadow.textureHandle.IsValid()) {
-//         gpuMgr.Release(shadow.textureHandle, fence);
-//     }
-//     if (shadow.dsvSlot != UINT32_MAX && m_descriptorHeaps) {
-//         m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlot, fence);
-//     }
-//     if (shadow.srvSlot != UINT32_MAX && m_descriptorHeaps) {
-//         m_descriptorHeaps->Free(PartitionType::Buffer, shadow.srvSlot, fence);
-//     }
+    if (shadow.handle.IsValid()) {
+        dsPool.Free(shadow.handle, completedFence);
+    }
+    if (shadow.dsvSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlot, completedFence);
+    }
+    if (shadow.srvSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(PartitionType::Shadow, shadow.srvSlot, completedFence);
+    }
 
-//     shadow = {};
-// }
+    shadow = {};
+}
 
-// void LightManager::ReleaseShadowMap(SpotShadowResources &shadow, uint64_t fence) {
-//     if (!shadow.isValid)
-//         return;
+void LightManager::ReleaseShadowMap(PointShadowResources &shadow, uint64_t completedFence) {
+    if (!shadow.isValid)
+        return;
 
-//     auto &gpuMgr = GpuResourceManager::GetInstance();
+    auto &dsPool = DepthStencilPool::GetInstance();
 
-//     if (shadow.textureHandle.IsValid()) {
-//         gpuMgr.Release(shadow.textureHandle, fence);
-//     }
-//     if (shadow.dsvSlot != UINT32_MAX && m_descriptorHeaps) {
-//         m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlot, fence);
-//     }
-//     if (shadow.srvSlot != UINT32_MAX && m_descriptorHeaps) {
-//         m_descriptorHeaps->Free(PartitionType::Buffer, shadow.srvSlot, fence);
-//     }
+    for (int f = 0; f < 6; ++f) {
+        if (shadow.dsvSlots[f] != UINT32_MAX && m_descriptorHeaps) {
+            m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlots[f], completedFence);
+        }
+        shadow.dsvSlots[f] = UINT32_MAX;
+    }
+    if (shadow.srvBaseSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(PartitionType::Shadow, shadow.srvBaseSlot, completedFence);
+    }
+    if (shadow.arrayHandle.IsValid()) {
+        dsPool.Free(shadow.arrayHandle, completedFence);
+    }
 
-//     shadow = {};
-// }
+    shadow = {};
+}
+
+bool LightManager::HasShadow(LightType type) const {
+    switch (type) {
+    case LightType::Directional:
+        if (!m_dirShadow.isValid)
+            return false;
+        for (auto &l : m_dirLights)
+            if (l.CastShadow > 0.5f)
+                return true;
+        return false;
+    case LightType::Point:
+        if (m_pointShadowResources.empty())
+            return false;
+        for (size_t i = 0; i < m_pointLights.size(); ++i)
+            if (m_pointLights[i].CastShadow > 0.5f && i < m_pointShadowResources.size() &&
+                m_pointShadowResources[i].isValid)
+                return true;
+        return false;
+    case LightType::Spot:
+        if (m_spotShadowResources.empty())
+            return false;
+        for (size_t i = 0; i < m_spotLights.size(); ++i)
+            if (m_spotLights[i].CastShadow > 0.5f && i < m_spotShadowResources.size() &&
+                m_spotShadowResources[i].isValid)
+                return true;
+        return false;
+    default:
+        return false;
+    }
+}
 
 // ============================================================================
 // 调试辅助
@@ -1072,27 +1067,44 @@ void LightManager::ReleaseShadowMap(DirShadowResources &shadow, uint64_t complet
 void LightManager::CreateTestLights() {
     Clear();
 
-    // 设置环境光（几乎关闭，便于观察阴影）
-    m_lightConstants.AmbientLight = DirectX::XMFLOAT4{0.15f, 0.15f, 0.15f, 1.0f};
+    // 设置环境光（微弱，便于观察阴影）
+    m_lightConstants.AmbientLight = DirectX::XMFLOAT4{0.05f, 0.05f, 0.1f, 1.0f};
 
     // 方向光 0
-    Light dirLight = {};
-    dirLight.Strength = DirectX::XMFLOAT4(4.5f, 4.0f, 3.5f, 0.0f);
-    dirLight.Direction = DirectX::XMFLOAT4(0.4f, -0.85f, 0.35f, 0.0f);
-    dirLight.ShadowMapIndex = 0;
-    dirLight.CastShadow = 1.0f;
-    SetDirectionalLight(dirLight, 0);
+    {
+        Light dirLight = {};
+        dirLight.Strength = DirectX::XMFLOAT4(4.5f, 4.0f, 3.5f, 0.0f);
+        dirLight.Direction = DirectX::XMFLOAT4(0.4f, -0.85f, 0.35f, 0.0f);
+        dirLight.ShadowMapIndex = 0;
+        dirLight.CastShadow = 1.0f;
+        SetDirectionalLight(dirLight, 0);
+    }
 
     // 暖色点光源（投射阴影，位于地面中心正上方）
-    Light pointLight0 = {};
-    pointLight0.Strength = DirectX::XMFLOAT4(25.0f, 18.0f, 8.0f, 0.0f);
-    pointLight0.Position = DirectX::XMFLOAT4(0.0f, 35.0f, 0.0f, 0.0f);
-    pointLight0.FalloffStart = 5.0f;
-    pointLight0.FalloffEnd = 30.0f;
-    pointLight0.Range = 20.0f;
-    pointLight0.CastShadow = 1.0f;
-    pointLight0.ShadowBias = 0.005f;
-    AddPointLight(pointLight0);
+    {
+        Light pointLight0 = {};
+        pointLight0.Strength = DirectX::XMFLOAT4(25.0f, 18.0f, 8.0f, 0.0f);
+        pointLight0.Position = DirectX::XMFLOAT4(0.0f, 35.0f, 0.0f, 0.0f);
+        pointLight0.FalloffStart = 5.0f;
+        pointLight0.FalloffEnd = 30.0f;
+        pointLight0.Range = 20.0f;
+        pointLight0.CastShadow = 1.0f;
+        pointLight0.ShadowBias = 0.005f;
+        AddPointLight(pointLight0);
+    }
+
+    // 聚光灯（从右上前方斜照，投射阴影）
+    Light spotLight = {};
+    spotLight.Strength = DirectX::XMFLOAT4(200.0f, 180.0f, 120.0f, 0.0f);
+    spotLight.Position = DirectX::XMFLOAT4(15.0f, 45.0f, -15.0f, 0.0f);
+    spotLight.Direction = DirectX::XMFLOAT4(-0.3f, -1.0f, 0.3f, 0.0f);
+    spotLight.FalloffStart = 1.0f;
+    spotLight.FalloffEnd = 30.0f;
+    spotLight.Range = 30.0f;
+    spotLight.SpotPower = 8.0f; // 锥体衰减指数
+    spotLight.CastShadow = 1.0f;
+    spotLight.ShadowBias = 0.005f;
+    AddSpotLight(spotLight);
 
     // // 冷色点光源（左前方）— 注释，只保留主点光源
     // Light pointLight1 = {};

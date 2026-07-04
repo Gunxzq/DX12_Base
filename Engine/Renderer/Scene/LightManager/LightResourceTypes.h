@@ -18,7 +18,7 @@ struct Light {
     float CastShadow;            // offset 64
     float ShadowBias;            // offset 68
     float ShadowMapIndex;        // offset 72
-    float Pad;                   // offset 76
+    float Type;                  // offset 76: 0=Directional, 1=Point, 2=Spot
 };
 
 static_assert(sizeof(Light) % 16 == 0, "Light size mismatch");

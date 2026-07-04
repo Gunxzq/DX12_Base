@@ -172,4 +172,68 @@ float SamplePointShadow(uint index, float3 worldPos)
     return lerp(1.0f, sampled, shadow.ShadowStrength);
 }
 
+// 聚光灯阴影采样（透视投影，通过 gShadowParams 统一读取参数）
+float SampleSpotShadow(uint index, float3 worldPos, float3 normal)
+{
+    ShadowParams shadow = gShadowParams[index];
+
+    // 变换到光源裁剪空间（透视投影）
+    float4 shadowPos = mul(float4(worldPos, 1.0f), shadow.LightViewProj);
+
+    // 透视除法
+    float3 projCoords = shadowPos.xyz / shadowPos.w;
+
+    if (projCoords.z < 0.0f || projCoords.z > 1.0f)
+        return 1.0f;
+
+    float2 uv = ComputeShadowUV(shadowPos);
+
+    if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f)
+        return 1.0f;
+
+    // 法线偏移
+    float3 offsetWorldPos = worldPos + normalize(shadow.LightPosition - worldPos) * shadow.NormalBias;
+    shadowPos = mul(float4(offsetWorldPos, 1.0f), shadow.LightViewProj);
+    uv = ComputeShadowUV(shadowPos);
+
+    float compareDepth = shadowPos.z / shadowPos.w;
+
+    // PCF 采样
+    float shadowFactor = 0.0f;
+    const float texelSize = 1.0f / shadow.ShadowMapSize;
+
+    for (int x = -1; x <= 1; ++x)
+    {
+        for (int y = -1; y <= 1; ++y)
+        {
+            float2 offsetUV = uv + float2(x, y) * texelSize;
+            shadowFactor += gShadowMaps[NonUniformResourceIndex(shadow.ShadowMapIndex)].SampleCmpLevelZero(
+                gShadowSampler, float3(offsetUV, 0), compareDepth);
+        }
+    }
+
+    shadowFactor /= 9.0f;
+    return lerp(1.0f, shadowFactor, shadow.ShadowStrength);
+}
+
+// ============================================================================
+// 统一阴影采样入口 — 根据 Light.Type 分派到对应子方法
+// ============================================================================
+float SampleShadow(Light light, float3 worldPos, float3 normal)
+{
+    [branch]
+    if (light.Type == 0) // Directional
+    {
+        return SampleDirShadow(light.ShadowMapIndex, worldPos, normal, light.Direction.xyz);
+    }
+    else if (light.Type == 1) // Point
+    {
+        return SamplePointShadow(light.ShadowMapIndex, worldPos);
+    }
+    else // Spot
+    {
+        return SampleSpotShadow(light.ShadowMapIndex, worldPos, normal);
+    }
+}
+
 #endif // SHADOW_SAMPLING_HLSL

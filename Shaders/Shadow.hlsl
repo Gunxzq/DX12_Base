@@ -64,6 +64,9 @@ cbuffer cbSpotShadow : register(b1)
     float gSpotPad[2];
 }
 
+// 点光源阴影面索引（root constant，PointShadowVS_Instanced 使用）
+uint gShadowLightIndex : register(b2);
+
 //==============================================================================
 // 实例数据（统一实例化模式）
 //==============================================================================
@@ -184,12 +187,24 @@ void ShadowPS_Point(GeoOut pin)
 }
 
 //==============================================================================
-// 点光源阴影 VS（实例化，单面）— 从 InstanceData 读 World + b1 为 VP
+// 点光源阴影 VS（实例化，单面）— 从 InstanceData 读 World + b1 为 cbPointShadow
+//          gShadowLightIndex 为 root constant，决定使用哪个面的 VP 矩阵
 //==============================================================================
 VertexOut PointShadowVS_Instanced(VertexIn vin, uint instanceID : SV_InstanceID)
 {
     VertexOut vout;
     float4 worldPos = mul(float4(vin.PosL, 1.0f), gInstanceData[instanceID].World);
-    vout.PosH = mul(worldPos, gDirLightViewProj);
+    vout.PosH = mul(worldPos, gPointLightViewProj[gShadowLightIndex]);
+    return vout;
+}
+
+//==============================================================================
+// 聚光灯阴影 VS（实例化）— 从 InstanceData 读 World + b1 为 cbSpotShadow
+//==============================================================================
+VertexOut SpotShadowVS_Instanced(VertexIn vin, uint instanceID : SV_InstanceID)
+{
+    VertexOut vout;
+    float4 worldPos = mul(float4(vin.PosL, 1.0f), gInstanceData[instanceID].World);
+    vout.PosH = mul(worldPos, gSpotLightViewProj);
     return vout;
 }
