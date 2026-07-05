@@ -288,3 +288,32 @@ struct FrameResourceConfig {
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(FrameResourceConfig, ringBuffers)
 };
 ```
+
+---
+
+## 7. 热重载现状
+
+### 当前状态（2026-07-05）
+
+`ConfigEntry::enableHotReload` 已声明并存储在 `Register` 阶段，但 **未被任何代码实际读取**。
+
+| 配置节 | 标记热重载 | 实际行为 |
+|--------|:---------:|---------|
+| `renderer` | `true` | 仅 `Register` 时加载一次 |
+| `logging` | `true` | 同上 |
+| `window` | `false` | 同上 |
+| `frame_resource` | `false` | 同上 |
+
+`Reload(key)` 方法存在，但只能手动调用——没有自动检测文件变更的机制。
+
+### 待实现
+
+热重载不应由 ConfigManager 自己轮询文件。Snapshot System 的 L1 `FileSnapshot` 层已提供文件级变更检测能力，ConfigManager 订阅其通知即可：
+
+```
+FileSnapshot（Snapshot System L1）
+  └─ 文件变更事件 → ConfigManager（订阅者）
+                        └─ Reload(key) → NotifySubscribers(key)
+```
+
+ConfigManager 不关心文件系统细节，`Update()` 只做节流自动保存。文件监听仅在编辑器模式下启用（`WITH_EDITOR`），发布版关闭。

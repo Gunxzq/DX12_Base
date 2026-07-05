@@ -1,5 +1,9 @@
 #pragma once
 
+#include "Core/Config/ConfigManager.h"
+#include "Core/Config/ConfigTypes/LoggerConfig.h"
+#include "Core/Config/ConfigTypes/RendererConfig.h"
+#include "Core/Config/ConfigTypes/WindowConfig.h"
 #include "DebugUI/DebugUIManager.h"
 #include "ECS/Core/Registry.h"
 #include "GameTimer.h"
@@ -80,6 +84,11 @@ private:
     std::unique_ptr<Renderer::D3D12DeviceContext> m_deviceContext; // D3D12 设备上下文
     std::unique_ptr<ECS::Registry> m_registry;                     // ECS Registry
     Scheduler::FrameDriver *m_frameDriver;                         // FrameDriver (由基础设施层创建)
+
+    // 配置数据（由 ConfigManager 托管注册，Register 时自动加载）
+    Boot::RendererConfig m_rendererConfig;
+    Boot::WindowConfig m_windowConfig;
+    Boot::LogConfig m_logConfig;
 
     Renderer::FrameResourceManager m_frameResourceManager;
 

@@ -2,8 +2,8 @@
 
 #include "Common/Common.h"
 
-#include "Core/Config/ConfigTypes/ResourceConfig.h"
 #include "Core/Config/ConfigManager.h"
+#include "Core/Config/ConfigTypes/ResourceConfig.h"
 #include "ECS/Core/Registry.h"
 #include "Event/MessageDispatcher.h"
 #include "GameContext.h"
@@ -11,6 +11,7 @@
 #include "Logger/Logger.h"
 #include "Platform/Input/InputManager.h"
 #include "Platform/Windows/Window.h"
+#include "Renderer/FrameResources/FrameResourceConfig.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
@@ -114,7 +115,54 @@ void Bootstrap::Shutdown() {
 void Bootstrap::InitializeConfigManager(const std::filesystem::path &configDir) {
     EarlyLog("[Bootstrap] Initializing ConfigManager...");
 
-    ConfigManager::GetInstance().Initialize(configDir);
+    auto &cfg = ConfigManager::GetInstance();
+    cfg.Initialize(configDir);
+
+    // 注册引擎 CORE 配置（Register 时立即加载 + apply）
+    cfg.Register("renderer", {configDir / "renderer.json", ConfigManager::ConfigFormat::JSON, true},
+                 [this](const nlohmann::json &j) {
+                     if (!j.is_null() && j.contains("renderer")) {
+                         m_rendererConfig = j["renderer"].get<RendererConfig>();
+                     }
+                     m_rendererConfig.PostLoad();
+                 });
+
+    cfg.Register("window", {configDir / "window.ini", ConfigManager::ConfigFormat::INI, false},
+                 [this](const nlohmann::json &j) {
+                     if (j.is_null() || !j.contains("window")) {
+                         ErrorReporter::Fatal("Config/window.ini: 缺少 [window] 节\n"
+                                              "期望格式:\n"
+                                              "[window]\n"
+                                              "title=DX12 Engine\n"
+                                              "width=1920\n"
+                                              "height=1080\n"
+                                              "mode=windowed\n"
+                                              "resizable=true\n"
+                                              "maximizable=true\n");
+                     }
+                     auto &w = j["window"];
+                     if (w.contains("title") && w["title"].is_string()) {
+                         std::string t = w["title"];
+                         m_windowConfig.title.assign(t.begin(), t.end());
+                     }
+                     if (w.contains("width") && w["width"].is_number_unsigned())
+                         m_windowConfig.width = w["width"].get<uint32_t>();
+                     if (w.contains("height") && w["height"].is_number_unsigned())
+                         m_windowConfig.height = w["height"].get<uint32_t>();
+                     if (w.contains("mode") && w["mode"].is_string())
+                         m_windowConfig.mode = w["mode"].get<std::string>();
+                     if (w.contains("resizable") && w["resizable"].is_boolean())
+                         m_windowConfig.resizable = w["resizable"].get<bool>();
+                     if (w.contains("maximizable") && w["maximizable"].is_boolean())
+                         m_windowConfig.maximizable = w["maximizable"].get<bool>();
+                 });
+
+    cfg.Register("logging", {configDir / "logging_config.json", ConfigManager::ConfigFormat::JSON, true},
+                 [this](const nlohmann::json &j) {
+                     if (!j.is_null() && j.contains("logging")) {
+                         m_logConfig = j["logging"].get<LogConfig>();
+                     }
+                 });
 
     EarlyLog("[Bootstrap] ConfigManager initialized.");
 }
@@ -123,7 +171,7 @@ void Bootstrap::InitializeLogging() {
     EarlyLog("[Bootstrap] Initializing Logging...");
 
     // 获取配置 (此时 ConfigManager 必须已初始化)
-    const auto &logConfig = ConfigManager::GetInstance().GetLogConfig();
+    const auto &logConfig = m_logConfig;
 
     // 任何获取实例，迫使创建
     EngineLogger::GetInstance();
@@ -138,7 +186,7 @@ void Bootstrap::InitializeLogging() {
 bool Bootstrap::CreateMainWindow() {
     EngineLogger::GetInstance()->Info("[Bootstrap] Creating Window...");
 
-    const auto &windowConfig = ConfigManager::GetInstance().GetWindowConfig();
+    const auto &windowConfig = m_windowConfig;
 
     m_window = std::make_unique<Platform::Window>(windowConfig);
 
@@ -158,8 +206,8 @@ bool Bootstrap::InitializeD3DDeviceContext() {
     EngineLogger::GetInstance()->Info("[Bootstrap] Initializing D3D12 Device Context...");
 
     // 获取窗口配置
-    const auto &windowConfig = ConfigManager::GetInstance().GetWindowConfig();
-    const auto &rendererConfig = ConfigManager::GetInstance().GetRendererConfig();
+    const auto &windowConfig = m_windowConfig;
+    const auto &rendererConfig = m_rendererConfig;
 
     // 配置 D3D12 设备上下文参数
     DX12Engine::Renderer::D3D12DeviceContext::InitParams params;
@@ -233,6 +281,9 @@ void Bootstrap::InitializeModules() {
 
         // 2. 日志 (依赖配置)
         InitializeLogging();
+
+        // 日志就绪后挂载到 ErrorReporter
+        ErrorReporter::SetLogger(EngineLogger::GetInstance());
 
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing InputManager...");
         auto &inputMgr = DX12Engine::Input::InputManager::Get();
@@ -323,7 +374,34 @@ void Bootstrap::InitializeModules() {
         // ====================================================================
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing FrameResourceManager...");
 
-        m_frameResourceManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
+        // 加载帧资源配置
+        Renderer::FrameResourceConfig frameResConfig;
+        auto frameResConfigPath = std::filesystem::path("Config") / "frame_resource.json";
+        if (std::filesystem::exists(frameResConfigPath)) {
+            try {
+                frameResConfig = Boot::ConfigManager::LoadJSON<Renderer::FrameResourceConfig>(frameResConfigPath);
+            } catch (const std::exception &e) {
+                EngineLogger::GetInstance()->Warn("[Bootstrap] Failed to load frame_resource.json, using defaults");
+            }
+        }
+
+        m_frameResourceManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps, frameResConfig);
+
+        // 注册到 ConfigManager 托管（供后续热重载）
+        Boot::ConfigManager::GetInstance().Register(
+            "frame_resource", {frameResConfigPath, Boot::ConfigManager::ConfigFormat::JSON, false},
+            [this](const nlohmann::json &j) {
+                if (j.is_null() || !j.contains("ringBuffers"))
+                    return;
+                Renderer::FrameResourceConfig cfg;
+                try {
+                    cfg = j.get<Renderer::FrameResourceConfig>();
+                } catch (...) {
+                    return;
+                }
+                // TODO: 在线重建 RingBuffer
+                (void)cfg;
+            });
 
         EngineLogger::GetInstance()->Info("[Bootstrap] FrameResourceManager initialized.");
 
@@ -460,7 +538,7 @@ void Bootstrap::InitializeDebugUI() {
     debugUI.Initialize(m_window->GetHandle());
 
     // 2. 初始化 DX12 后端
-    const auto &rendererConfig = ConfigManager::GetInstance().GetRendererConfig();
+    const auto &rendererConfig = m_rendererConfig;
 
     debugUI.InitDX12Backend(m_deviceContext->GetDevice(), m_deviceContext->GetCommandQueue(), 2,
                             rendererConfig.formats.BackBufferFormatEnum);
