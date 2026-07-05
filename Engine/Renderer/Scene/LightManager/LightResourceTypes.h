@@ -60,44 +60,23 @@ struct ShadowParams {
 static_assert(sizeof(ShadowParams) % 16 == 0, "ShadowParams size mismatch");
 static_assert(sizeof(ShadowParams) == 112, "ShadowParams size must be 112 bytes");
 
-// 方向光阴影常量（供 ShadowRenderer cbuffer b1 使用，布局与 Shadow.hlsl cbDirShadow 严格对齐）
+// 方向光阴影常量（供 ShadowRenderer（b1）
 struct DirLightShadowConstants {
     DirectX::XMFLOAT4X4 LightViewProj; // 正交 VP 矩阵
-    float ShadowMapSize;
-    float Bias;
-    float NormalBias;
-    float ShadowStrength;
-    uint32_t ShadowMapIndex;
-    float Pad[3];
 };
 
 static_assert(sizeof(DirLightShadowConstants) % 16 == 0, "DirLightShadowConstants size mismatch");
 
-// 点光源阴影常量（立方体阴影，供阴影渲染 Pass 使用，非采样）
+// 点光源阴影常量（b1）
 struct PointLightShadowConstants {
     DirectX::XMFLOAT4X4 LightViewProj[6]; // 6 个面的 VP 矩阵
-    DirectX::XMFLOAT4 LightPosition;
-    float ShadowMapSize;
-    float Bias;
-    float NormalBias;
-    float ShadowStrength;
-    float Range;             // 光源范围
-    uint32_t ShadowMapIndex; // 立方体贴图索引
-    float Pad[2];
 };
 
 static_assert(sizeof(PointLightShadowConstants) % 16 == 0, "PointLightShadowConstants size mismatch");
 
-// 聚光源阴影常量
+// 聚光源阴影常量（b1）
 struct SpotLightShadowConstants {
     DirectX::XMFLOAT4X4 LightViewProj; // 透视 VP 矩阵
-    float ShadowMapSize;
-    float Bias;
-    float NormalBias;
-    float ShadowStrength;
-    float SpotPower; // 聚光锥角
-    uint32_t ShadowMapIndex;
-    float Pad[2];
 };
 
 static_assert(sizeof(SpotLightShadowConstants) % 16 == 0, "SpotLightShadowConstants size mismatch");

@@ -25,43 +25,22 @@ cbuffer cbShadowObject : register(b0)
 cbuffer cbDirShadow : register(b1)
 {
     row_major float4x4 gDirLightViewProj;
-    float gDirShadowMapSize;
-    float gDirBias;
-    float gDirNormalBias;
-    float gDirShadowStrength;
-    uint gDirShadowMapIndex;
-    float gDirPad[3];
 }
 
 //==============================================================================
-// 点光源阴影常量 (b1, 替换使用)
+// 点光源阴影常量 (b1)
 //==============================================================================
 cbuffer cbPointShadow : register(b1)
 {
     row_major float4x4 gPointLightViewProj[6];
-    float3 gPointLightPosition;
-    float gPointShadowMapSize;
-    float gPointBias;
-    float gPointNormalBias;
-    float gPointShadowStrength;
-    float gPointRange;
-    uint gPointShadowMapIndex;
-    float gPointPad[2];
 }
 
 //==============================================================================
-// 聚光灯阴影常量 (b1, 替换使用)
+// 聚光灯阴影常量 (b1)
 //==============================================================================
 cbuffer cbSpotShadow : register(b1)
 {
     row_major float4x4 gSpotLightViewProj;
-    float gSpotShadowMapSize;
-    float gSpotBias;
-    float gSpotNormalBias;
-    float gSpotShadowStrength;
-    float gSpotPower;
-    uint gSpotShadowMapIndex;
-    float gSpotPad[2];
 }
 
 // 点光源阴影面索引（root constant，PointShadowVS_Instanced 使用）

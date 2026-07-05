@@ -461,16 +461,11 @@ void LightManager::RebuildShadowConstants(const Camera &camera) {
         m_shadowParams.push_back(params);
     }
 
-    // 方向光阴影 cbuffer（供 ShadowRenderer b1 渲染 Pass 使用，复用已计算的 ShadowParams 数据）
+    // 方向光阴影 cbuffer（供 ShadowRenderer b1 渲染 Pass 使用，仅需 VP 矩阵）
     for (size_t i = 0; i < m_shadowParams.size(); ++i) {
         if (m_shadowParams[i].Type == 0) { // Directional
             DirLightShadowConstants cbConst = {};
             cbConst.LightViewProj = m_shadowParams[i].LightViewProj;
-            cbConst.ShadowMapSize = m_shadowParams[i].ShadowMapSize;
-            cbConst.Bias = m_shadowParams[i].Bias;
-            cbConst.NormalBias = m_shadowParams[i].NormalBias;
-            cbConst.ShadowStrength = m_shadowParams[i].ShadowStrength;
-            cbConst.ShadowMapIndex = m_shadowParams[i].ShadowMapIndex;
             m_dirShadowCBConstants.push_back(cbConst);
         }
     }
@@ -491,14 +486,11 @@ void LightManager::RebuildShadowConstants(const Camera &camera) {
         m_shadowParams.push_back(params);
     }
 
-    // 点光源阴影常量（VP 矩阵，仅供渲染 Pass，非采样）
+    // 点光源阴影常量（VP 矩阵，仅供渲染 Pass 使用，非采样）
     m_pointShadowConstants.clear();
     for (size_t i = 0; i < m_pointLights.size(); ++i) {
         PointLightShadowConstants constants = {};
         ComputePointShadowMatrices(m_pointLights[i], constants);
-        if (i < m_pointShadowResources.size() && m_pointShadowResources[i].isValid) {
-            constants.ShadowMapIndex = static_cast<uint32_t>(i);
-        }
         m_pointShadowConstants.push_back(constants);
     }
 
@@ -515,15 +507,9 @@ void LightManager::RebuildShadowConstants(const Camera &camera) {
         params.ShadowMapSize = 1024.0f;
         m_shadowParams.push_back(params);
 
-        // 渲染常量（供 ShadowRenderer b1 使用）
+        // 渲染常量（供 ShadowRenderer b1 使用，仅需 VP 矩阵）
         SpotLightShadowConstants cbConst = {};
         cbConst.LightViewProj = params.LightViewProj;
-        cbConst.ShadowMapSize = params.ShadowMapSize;
-        cbConst.Bias = params.Bias;
-        cbConst.NormalBias = params.NormalBias;
-        cbConst.ShadowStrength = params.ShadowStrength;
-        cbConst.SpotPower = m_spotLights[i].SpotPower;
-        cbConst.ShadowMapIndex = params.ShadowMapIndex;
         m_spotShadowCBConstants.push_back(cbConst);
     }
 
