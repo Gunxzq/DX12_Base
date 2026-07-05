@@ -192,7 +192,7 @@ void LightManager::UpdateAndUpload(uint64_t fence, const Camera &camera) {
 
     if (!m_shadowParams.empty()) {
         m_shadowSampleAddress = m_shadowSampleBuffer.AllocateUpload(
-            m_shadowParams.data(), static_cast<uint32_t>(m_shadowParams.size() * sizeof(ShadowParams)), fence);
+            m_shadowParams.data(), static_cast<uint32_t>(m_shadowParams.size() * sizeof(ShadowParams)), fence, 16);
 
         // 同步写入阴影采样参数 StructuredBuffer（UPLOAD 堆，直接 Map 写入）
         if (m_shadowParamsBufferHandle.IsValid()) {

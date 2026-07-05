@@ -35,6 +35,18 @@
 | 主颜色缓冲（Main RTV） | 所有 Pass | ❌ 仅 Opaque 主渲染阶段 | 场景主渲染 |
 | 私有深度/颜色缓冲 | 创建者 + 下游 | ✅ 创建者 Pass | 各 Pass 内部 |
 
+## GPU 地址对齐要求
+
+`RingBuffer` 分配时通过 alignment 参数控制 GPU 地址对齐粒度，不同类型 GPU 资源的对齐要求不同：
+
+| GPU 绑定方式 | 对齐要求 | 说明 |
+|:------------|:--------:|------|
+| **CBV**（Constant Buffer View） | **256 字节** | D3D12 硬件要求 `D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT` |
+| **StructuredBuffer SRV**（t#） | **16 字节** | 无硬件对齐约束，16 字节兼容所有结构体 stride |
+| **Raw / Typed Buffer SRV**（t#） | **16 字节** | 同上 |
+
+**原则**：`RingBuffer` 默认 alignment=256（保守适配 CBV），非 CBV 用途应在 `AllocateUpload` 调用处显式传入 `16` 避免空间浪费。
+
 ## 蒙皮骨骼动画
 
 参阅 `Docs/architecture/SkinnedAnimation.md`

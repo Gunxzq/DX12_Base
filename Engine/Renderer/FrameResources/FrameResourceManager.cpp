@@ -69,15 +69,6 @@ void FrameResourceManager::Shutdown() {
     m_instance.Shutdown();
     m_waterCB.Shutdown();
 
-    // 释放所有持久化缓冲区
-    for (auto &[addr, alloc] : m_persistentAllocs) {
-        if (alloc.resource && alloc.mappedData) {
-            alloc.resource->Unmap(0, nullptr);
-        }
-        alloc.resource.Reset();
-    }
-    m_persistentAllocs.clear();
-
     if (m_passCBResource) {
         if (m_passCBMapped) {
             m_passCBResource->Unmap(0, nullptr);
@@ -115,12 +106,12 @@ void FrameResourceManager::UpdatePassConstants() {
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateWithRetry(RingBuffer &buffer, const void *data, uint32_t size,
-                                                                  uint64_t fence) {
+                                                                  uint64_t fence, uint32_t alignment) {
     D3D12_GPU_VIRTUAL_ADDRESS addr;
     if (data) {
-        addr = buffer.AllocateUpload(data, size, fence);
+        addr = buffer.AllocateUpload(data, size, fence, alignment);
     } else {
-        addr = buffer.Allocate(size, fence);
+        addr = buffer.Allocate(size, fence, alignment);
     }
 
     if (addr == 0) {
@@ -133,9 +124,9 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateWithRetry(RingBuffer &bu
         buffer.Initialize(m_device, newSize, buffer.GetName());
 
         if (data) {
-            addr = buffer.AllocateUpload(data, size, fence);
+            addr = buffer.AllocateUpload(data, size, fence, alignment);
         } else {
-            addr = buffer.Allocate(size, fence);
+            addr = buffer.Allocate(size, fence, alignment);
         }
     }
     return addr;
@@ -150,13 +141,13 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateObjectCB(const void *dat
 D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateSkinning(const void *data, uint32_t size) {
     if (!m_initialized)
         return 0;
-    return AllocateWithRetry(m_skinning, data, size, m_currentFence);
+    return AllocateWithRetry(m_skinning, data, size, m_currentFence, 16);
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateInstance(const void *data, uint32_t size) {
     if (!m_initialized)
         return 0;
-    return AllocateWithRetry(m_instance, data, size, m_currentFence);
+    return AllocateWithRetry(m_instance, data, size, m_currentFence, 16);
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateWaterCB(const void *data, uint32_t size) {
@@ -187,80 +178,6 @@ void FrameResourceManager::FreeTemporarySrvSlot(uint32_t slot, uint64_t fence) {
     }
 
     m_descriptorHeaps->Free(PartitionType::Buffer, slot, fence);
-}
-
-// ========================================================================
-// 持久化缓冲区实现
-// ========================================================================
-
-D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocatePersistentInternal(const void *data, uint32_t size) {
-    if (!m_initialized || !m_device || size == 0) {
-        return 0;
-    }
-
-    uint32_t alignedSize = (size + 255) & ~255;
-
-    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
-    auto desc = CD3DX12_RESOURCE_DESC::Buffer(alignedSize);
-
-    PersistentAllocation alloc;
-    HRESULT hr =
-        m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-                                          nullptr, IID_PPV_ARGS(&alloc.resource));
-    if (FAILED(hr)) {
-        return 0;
-    }
-
-    alloc.resource->SetName(L"PersistentAlloc_Upload");
-
-    hr = alloc.resource->Map(0, nullptr, &alloc.mappedData);
-    if (FAILED(hr)) {
-        alloc.resource.Reset();
-        return 0;
-    }
-
-    alloc.gpuAddress = alloc.resource->GetGPUVirtualAddress();
-    alloc.size = alignedSize;
-
-    if (data) {
-        memcpy(alloc.mappedData, data, size);
-    }
-
-    D3D12_GPU_VIRTUAL_ADDRESS addr = alloc.gpuAddress;
-    m_persistentAllocs[addr] = std::move(alloc);
-
-    return addr;
-}
-
-D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocatePersistentObjectCB(const void *data, uint32_t size) {
-    return AllocatePersistentInternal(data, size);
-}
-
-D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocatePersistentInstanceBuffer(const void *data, uint32_t size) {
-    return AllocatePersistentInternal(data, size);
-}
-
-void FrameResourceManager::UpdatePersistentBuffer(D3D12_GPU_VIRTUAL_ADDRESS address, const void *data, uint32_t size) {
-    auto it = m_persistentAllocs.find(address);
-    if (it == m_persistentAllocs.end() || !it->second.mappedData) {
-        return;
-    }
-
-    uint32_t copySize = std::min(size, it->second.size);
-    memcpy(it->second.mappedData, data, copySize);
-}
-
-void FrameResourceManager::ReleasePersistentBuffer(D3D12_GPU_VIRTUAL_ADDRESS address) {
-    auto it = m_persistentAllocs.find(address);
-    if (it == m_persistentAllocs.end()) {
-        return;
-    }
-
-    if (it->second.resource && it->second.mappedData) {
-        it->second.resource->Unmap(0, nullptr);
-    }
-    it->second.resource.Reset();
-    m_persistentAllocs.erase(it);
 }
 
 } // namespace DX12Engine::Renderer

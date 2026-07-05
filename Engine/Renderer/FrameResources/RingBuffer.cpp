@@ -8,8 +8,7 @@ namespace DX12Engine::Renderer {
 
 RingBuffer::~RingBuffer() { Shutdown(); }
 
-bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, const std::wstring &name,
-                            D3D12_HEAP_TYPE heapType) {
+bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, const std::wstring &name, D3D12_HEAP_TYPE heapType) {
     if (m_initialized) {
         Shutdown();
     }
