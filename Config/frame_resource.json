@@ -1,0 +1,8 @@
+{
+    "ringBuffers": [
+        { "name": "ObjectCB",   "initialSize": 16777216, "alignment": 256 },
+        { "name": "Skinning",   "initialSize": 16777216, "alignment": 16 },
+        { "name": "Instance",   "initialSize": 16777216, "alignment": 16 },
+        { "name": "WaterCB",    "initialSize": 16777216, "alignment": 256 }
+    ]
+}

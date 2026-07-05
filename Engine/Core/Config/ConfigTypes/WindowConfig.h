@@ -2,7 +2,7 @@
 
 #include "Common/Common.h"
 
-#include <nlohmann/json.hpp>
+#include <string>
 
 namespace DX12Engine {
 namespace Boot {
@@ -18,8 +18,6 @@ struct WindowConfig {
     std::string mode = "windowed";
     bool resizable = true;
     bool maximizable = true;
-
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(WindowConfig, title, width, height, mode, resizable, maximizable)
 };
 
 } // namespace Boot
