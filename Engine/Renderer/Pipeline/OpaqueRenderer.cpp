@@ -48,8 +48,7 @@ void OpaqueRenderer::Initialize() {
     LoadGBufferShader();
 
     if (!m_vsBlob || !m_psGBufferBlob) {
-        OutputDebugStringW(L"[ERROR] OpaqueRenderer: Failed to load shaders!\n");
-        throw std::runtime_error("OpaqueRenderer: Failed to load shaders");
+        ErrorReporter::Fatal("OpaqueRenderer: Failed to load shaders");
     }
 
     CreateGBufferRootSignature();

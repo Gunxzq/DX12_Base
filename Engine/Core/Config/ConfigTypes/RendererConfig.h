@@ -25,7 +25,7 @@ inline DXGI_FORMAT StringToDxgiFormat(const std::string &formatStr) {
     if (formatStr == "R10G10B10A2_UNORM")
         return DXGI_FORMAT_R10G10B10A2_UNORM;
 
-    ENGINE_ASSERT_FMT("Unknown DXGI Format string: %s, defaulting to UNKNOWN", formatStr.c_str());
+    ErrorReporter::Fatal("Unknown DXGI Format string: %s, defaulting to UNKNOWN", formatStr.c_str());
     return DXGI_FORMAT_UNKNOWN;
 }
 
@@ -48,13 +48,13 @@ inline D3D_FEATURE_LEVEL FloatToFeatureLevel(float level) {
 struct DeviceConfig {
     float minFeatureLevel = 11.0f;
     bool enableDebugLayer = true;
-    bool enableGPUBasedValidation = false;  // 控制 GBV 调试层，会显著影响性能
+    bool enableGPUBasedValidation = false; // 控制 GBV 调试层，会显著影响性能
     bool warpFallback = true;
 
     D3D_FEATURE_LEVEL FeatureLevelEnum = D3D_FEATURE_LEVEL_11_0;
 
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(DeviceConfig, minFeatureLevel, enableDebugLayer, 
-                                   enableGPUBasedValidation, warpFallback)
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(DeviceConfig, minFeatureLevel, enableDebugLayer, enableGPUBasedValidation,
+                                   warpFallback)
 
     void PostLoad() { FeatureLevelEnum = FloatToFeatureLevel(minFeatureLevel); }
 };

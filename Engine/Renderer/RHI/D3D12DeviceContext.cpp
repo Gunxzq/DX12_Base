@@ -23,7 +23,7 @@ void D3D12DeviceContext::Shutdown() {
 
 bool D3D12DeviceContext::Initialize(const InitParams &params) {
     if (!params.hwnd) {
-        ENGINE_ASSERT_MSG("D3D12DeviceContext: Window handle is required");
+        ErrorReporter::Fatal("%s", "D3D12DeviceContext: Window handle is required");
         return false;
     }
 
@@ -40,7 +40,7 @@ bool D3D12DeviceContext::Initialize(const InitParams &params) {
 
     // 创建设备
     if (!m_featureChecker->CreateDevice(params.adapterIndex, params.minFeatureLevel)) {
-        ENGINE_ASSERT_MSG("D3D12DeviceContext: Failed to create D3D12 device");
+        ErrorReporter::Fatal("%s", "D3D12DeviceContext: Failed to create D3D12 device");
         return false;
     }
 

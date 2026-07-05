@@ -20,7 +20,7 @@ void SkinnedRenderer::SetDeviceContext(D3D12DeviceContext *context) { m_context 
 
 void SkinnedRenderer::Initialize() {
     if (!m_context) {
-        OutputDebugStringW(L"[ERROR] SkinnedRenderer::Initialize - DeviceContext not set!\n");
+        ErrorReporter::Report("SkinnedRenderer::Initialize - DeviceContext not set");
         return;
     }
 

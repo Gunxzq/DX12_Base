@@ -62,7 +62,7 @@ void BillboardRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueu
     }
 
     if (!dynamicBatch.instances.empty()) {
-        D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = m_frameResourceManager->AllocateInstance(
+        D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress = m_frameResourceManager->Allocate("Instance",
             dynamicBatch.instances.data(),
             static_cast<uint32_t>(dynamicBatch.instances.size() * sizeof(BillboardInstanceData)));
 

@@ -1,4 +1,5 @@
 #include "FrameResourceManager.h"
+#include "FrameResourceConfig.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 
 #include "Common/Common.h"
@@ -34,7 +35,16 @@ void FrameResourceManager::CreatePassCB(ID3D12Device *device) {
     m_passCBAddress = m_passCBResource->GetGPUVirtualAddress();
 }
 
-void FrameResourceManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps) {
+RingBuffer *FrameResourceManager::FindBuffer(const std::string &name) {
+    for (auto &entry : m_ringBuffers) {
+        if (entry.name == name)
+            return &entry.buffer;
+    }
+    return nullptr;
+}
+
+void FrameResourceManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps,
+                                      const FrameResourceConfig &config) {
     if (m_initialized) {
         Shutdown();
     }
@@ -45,13 +55,15 @@ void FrameResourceManager::Initialize(ID3D12Device *device, DescriptorHeapCollec
     // 创建 PassCB
     CreatePassCB(device);
 
-    // 初始化每帧的环形缓冲区（预分配 16MB 每类型）
-    const uint32_t DEFAULT_BUFFER_SIZE = 16 * 1024 * 1024; // 16MB
+    // 按配置创建环形缓冲区
+    for (const auto &rbCfg : config.ringBuffers) {
+        auto &entry = m_ringBuffers.emplace_back();
+        entry.name = rbCfg.name;
+        entry.alignment = rbCfg.alignment;
 
-    m_objectCB.Initialize(device, DEFAULT_BUFFER_SIZE, L"FrameResource_ObjectCB");
-    m_skinning.Initialize(device, DEFAULT_BUFFER_SIZE, L"FrameResource_Skinning");
-    m_instance.Initialize(device, DEFAULT_BUFFER_SIZE, L"FrameResource_Instance");
-    m_waterCB.Initialize(device, DEFAULT_BUFFER_SIZE, L"FrameResource_WaterCB");
+        std::wstring wname(rbCfg.name.begin(), rbCfg.name.end());
+        entry.buffer.Initialize(device, rbCfg.initialSize, wname);
+    }
 
     m_passConstants = {};
     UpdatePassConstants();
@@ -64,10 +76,10 @@ void FrameResourceManager::Shutdown() {
         return;
     }
 
-    m_objectCB.Shutdown();
-    m_skinning.Shutdown();
-    m_instance.Shutdown();
-    m_waterCB.Shutdown();
+    for (auto &entry : m_ringBuffers) {
+        entry.buffer.Shutdown();
+    }
+    m_ringBuffers.clear();
 
     if (m_passCBResource) {
         if (m_passCBMapped) {
@@ -87,10 +99,9 @@ void FrameResourceManager::BeginFrame(uint64_t completedFence, uint64_t nextFenc
     if (!m_initialized)
         return;
 
-    m_objectCB.Reclaim(completedFence);
-    m_skinning.Reclaim(completedFence);
-    m_instance.Reclaim(completedFence);
-    m_waterCB.Reclaim(completedFence);
+    for (auto &entry : m_ringBuffers) {
+        entry.buffer.Reclaim(completedFence);
+    }
 
     m_currentFence = nextFence;
 }
@@ -132,28 +143,24 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateWithRetry(RingBuffer &bu
     return addr;
 }
 
-D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateObjectCB(const void *data, uint32_t size) {
+D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::Allocate(const std::string &name, const void *data, uint32_t size) {
     if (!m_initialized)
         return 0;
-    return AllocateWithRetry(m_objectCB, data, size, m_currentFence);
-}
 
-D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateSkinning(const void *data, uint32_t size) {
-    if (!m_initialized)
+    RingBuffer *buf = FindBuffer(name);
+    if (!buf)
         return 0;
-    return AllocateWithRetry(m_skinning, data, size, m_currentFence, 16);
-}
 
-D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateInstance(const void *data, uint32_t size) {
-    if (!m_initialized)
-        return 0;
-    return AllocateWithRetry(m_instance, data, size, m_currentFence, 16);
-}
+    // 查找对应 alignment
+    uint32_t alignment = 256;
+    for (const auto &entry : m_ringBuffers) {
+        if (entry.name == name) {
+            alignment = entry.alignment;
+            break;
+        }
+    }
 
-D3D12_GPU_VIRTUAL_ADDRESS FrameResourceManager::AllocateWaterCB(const void *data, uint32_t size) {
-    if (!m_initialized)
-        return 0;
-    return AllocateWithRetry(m_waterCB, data, size, m_currentFence);
+    return AllocateWithRetry(*buf, data, size, m_currentFence, alignment);
 }
 
 void *FrameResourceManager::GetCPUAddress(uint32_t offset) {
@@ -161,7 +168,11 @@ void *FrameResourceManager::GetCPUAddress(uint32_t offset) {
         return nullptr;
     }
 
-    return m_objectCB.GetCPUAddress(offset);
+    // 默认返回第一个 RingBuffer 的 CPU 地址（通常为 ObjectCB）
+    if (!m_ringBuffers.empty()) {
+        return m_ringBuffers[0].buffer.GetCPUAddress(offset);
+    }
+    return nullptr;
 }
 
 uint32_t FrameResourceManager::AllocateTemporarySrvSlot() {

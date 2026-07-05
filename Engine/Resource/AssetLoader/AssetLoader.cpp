@@ -12,7 +12,7 @@ bool AssetLoader::LoadTextureFromFile(const std::wstring &path, DDSTextureInfo &
     // 1. 打开文件
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
-        OutputDebugStringW(L"[ERROR] AssetLoader: Failed to open file\n");
+        ErrorReporter::Report("AssetLoader: Failed to open file");
         return false;
     }
 
@@ -43,7 +43,7 @@ bool AssetLoader::LoadTerrainFromFile(const std::wstring &path, float width, flo
                                       uint32_t segments, TerrainMeshData &outMesh) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
-        OutputDebugStringW(L"[ERROR] AssetLoader: Failed to open terrain file\n");
+        ErrorReporter::Report("AssetLoader: Failed to open terrain file");
         return false;
     }
 

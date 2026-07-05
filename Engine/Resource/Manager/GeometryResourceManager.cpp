@@ -44,7 +44,7 @@ void GeometryResourceManager::Shutdown() {
 
 GeometryHandle GeometryResourceManager::RegisterGeometryVariant(const GeometryVariant &geometry) {
     if (!m_initialized) {
-        OutputDebugStringW(L"[ERROR] Not initialized!\n");
+        ErrorReporter::Report("GeometryResourceManager: Not initialized");
         return GeometryHandle::Invalid();
     }
 

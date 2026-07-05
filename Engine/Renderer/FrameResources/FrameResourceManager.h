@@ -1,9 +1,11 @@
 #pragma once
+#include "FrameResourceConfig.h"
 #include "Resource/Struct/Descriptor.h"
 #include "RingBuffer.h"
 #include "Struct/FrameResourceTypes.h"
 #include <d3d12.h>
-#include <unordered_map>
+#include <string>
+#include <vector>
 #include <wrl/client.h>
 
 namespace DX12Engine {
@@ -33,7 +35,8 @@ public:
     FrameResourceManager(const FrameResourceManager &) = delete;
     FrameResourceManager &operator=(const FrameResourceManager &) = delete;
 
-    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps);
+    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps,
+                    const FrameResourceConfig &config);
     void Shutdown();
 
     void BeginFrame(uint64_t completedFence, uint64_t nextFence);
@@ -50,10 +53,14 @@ public:
     // 环形缓冲区分配接口（每帧动态分配）
     // ========================================================================
 
-    D3D12_GPU_VIRTUAL_ADDRESS AllocateObjectCB(const void *data, uint32_t size);
-    D3D12_GPU_VIRTUAL_ADDRESS AllocateSkinning(const void *data, uint32_t size);
-    D3D12_GPU_VIRTUAL_ADDRESS AllocateInstance(const void *data, uint32_t size);
-    D3D12_GPU_VIRTUAL_ADDRESS AllocateWaterCB(const void *data, uint32_t size);
+    /**
+     * @brief 按名称分配 RingBuffer 空间
+     * @param name  配置中定义的名称（如 "Instance", "Skinning"）
+     * @param data  上传数据（可为 nullptr 仅分配地址）
+     * @param size  请求大小
+     * @return GPU 虚拟地址，失败返回 0
+     */
+    D3D12_GPU_VIRTUAL_ADDRESS Allocate(const std::string &name, const void *data, uint32_t size);
 
     void *GetCPUAddress(uint32_t offset);
 
@@ -72,10 +79,15 @@ public:
     uint64_t GetCurrentFence() const { return m_currentFence; }
 
 private:
-    RingBuffer m_objectCB;
-    RingBuffer m_skinning;
-    RingBuffer m_instance;
-    RingBuffer m_waterCB;
+    struct RingBufferEntry {
+        std::string name;
+        RingBuffer buffer;
+        uint32_t alignment = 256;
+    };
+
+    std::vector<RingBufferEntry> m_ringBuffers;
+
+    RingBuffer *FindBuffer(const std::string &name);
 
     D3D12_GPU_VIRTUAL_ADDRESS AllocateWithRetry(RingBuffer &buffer, const void *data, uint32_t size, uint64_t fence,
                                                   uint32_t alignment = 256);

@@ -57,7 +57,7 @@ void BillboardRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRE
                                    D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart,
                                    D3D12_GPU_DESCRIPTOR_HANDLE billboardTextureSRV) {
     if (!m_pso || !m_rootSignature) {
-        OutputDebugStringW(L"[ERROR] BillboardRenderer::BeginFrame: PSO or RootSignature not initialized\n");
+        ErrorReporter::Report("BillboardRenderer::BeginFrame: PSO or RootSignature not initialized");
         return;
     }
 

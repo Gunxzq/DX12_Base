@@ -21,6 +21,50 @@ public:
     RingBuffer(const RingBuffer &) = delete;
     RingBuffer &operator=(const RingBuffer &) = delete;
 
+    RingBuffer(RingBuffer &&other) noexcept
+        : m_resource(std::move(other.m_resource)),
+          m_mappedData(other.m_mappedData),
+          m_gpuAddress(other.m_gpuAddress),
+          m_size(other.m_size),
+          m_head(other.m_head),
+          m_tail(other.m_tail),
+          m_allocatedSize(other.m_allocatedSize),
+          m_pending(std::move(other.m_pending)),
+          m_name(std::move(other.m_name)),
+          m_initialized(other.m_initialized) {
+        other.m_mappedData = nullptr;
+        other.m_gpuAddress = 0;
+        other.m_size = 0;
+        other.m_head = 0;
+        other.m_tail = 0;
+        other.m_allocatedSize = 0;
+        other.m_initialized = false;
+    }
+
+    RingBuffer &operator=(RingBuffer &&other) noexcept {
+        if (this != &other) {
+            Shutdown();
+            m_resource = std::move(other.m_resource);
+            m_mappedData = other.m_mappedData;
+            m_gpuAddress = other.m_gpuAddress;
+            m_size = other.m_size;
+            m_head = other.m_head;
+            m_tail = other.m_tail;
+            m_allocatedSize = other.m_allocatedSize;
+            m_pending = std::move(other.m_pending);
+            m_name = std::move(other.m_name);
+            m_initialized = other.m_initialized;
+            other.m_mappedData = nullptr;
+            other.m_gpuAddress = 0;
+            other.m_size = 0;
+            other.m_head = 0;
+            other.m_tail = 0;
+            other.m_allocatedSize = 0;
+            other.m_initialized = false;
+        }
+        return *this;
+    }
+
     bool Initialize(ID3D12Device *device, uint32_t size, const std::wstring &name,
                     D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_UPLOAD);
     void Shutdown();

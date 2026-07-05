@@ -25,7 +25,7 @@ void TerrainManager::Initialize(ID3D12Device *device, uint32_t bufferSize) {
     }
 
     if (!device) {
-        OutputDebugStringW(L"[ERROR] TerrainManager: Device is null\n");
+        ErrorReporter::Report("TerrainManager: Device is null");
         return;
     }
 

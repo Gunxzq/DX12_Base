@@ -26,8 +26,7 @@ void WaterRenderer::Initialize() {
     LoadShaders();
 
     if (!m_vsBlob || !m_psBlob) {
-        OutputDebugStringW(L"[ERROR] WaterRenderer: Failed to load shaders!\n");
-        throw std::runtime_error("WaterRenderer: Failed to load shaders");
+        ErrorReporter::Fatal("WaterRenderer: Failed to load shaders");
     }
 
     CreateRootSignature();
@@ -74,7 +73,7 @@ void WaterRenderer::DrawWater(CommandList &cmdList, Resource::GeometryHandle geo
                               const DirectX::XMMATRIX &worldMatrix, D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
                               D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV) {
     if (!m_geometryManager) {
-        OutputDebugStringW(L"[ERROR] WaterRenderer::DrawWater - GeometryResourceManager not set!\n");
+        ErrorReporter::Report("WaterRenderer::DrawWater - GeometryResourceManager not set");
         return;
     }
 
@@ -88,7 +87,7 @@ void WaterRenderer::DrawWater(CommandList &cmdList, Resource::GeometryHandle geo
     ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
 
     if (!vbResource || !ibResource) {
-        OutputDebugStringW(L"[ERROR] WaterRenderer::DrawWater - Invalid vertex or index buffer!\n");
+        ErrorReporter::Report("WaterRenderer::DrawWater - Invalid vertex or index buffer");
         return;
     }
 

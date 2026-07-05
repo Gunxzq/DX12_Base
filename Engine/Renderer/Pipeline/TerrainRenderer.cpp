@@ -54,7 +54,7 @@ void TerrainRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS
                                  D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV,
                                  D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
     if (!m_pso || !m_rootSignature) {
-        OutputDebugStringW(L"[ERROR] TerrainRenderer::BeginFrame: PSO or RootSignature not initialized\n");
+        ErrorReporter::Report("TerrainRenderer::BeginFrame: PSO or RootSignature not initialized");
         return;
     }
 
@@ -66,7 +66,7 @@ void TerrainRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS
 void TerrainRenderer::DrawTerrain(CommandList &cmdList, const TerrainRenderItem &item) {
 
     if (!m_geometryManager) {
-        OutputDebugStringW(L"[ERROR] TerrainRenderer::DrawTerrain - GeometryResourceManager not set!\n");
+        ErrorReporter::Report("TerrainRenderer::DrawTerrain - GeometryResourceManager not set");
         return;
     }
 
@@ -86,7 +86,7 @@ void TerrainRenderer::DrawTerrain(CommandList &cmdList, const TerrainRenderItem 
     ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
 
     if (!vbResource || !ibResource) {
-        OutputDebugStringW(L"[ERROR] TerrainRenderer::DrawTerrain - Invalid vertex or index buffer!\n");
+        ErrorReporter::Report("TerrainRenderer::DrawTerrain - Invalid vertex or index buffer");
         return;
     }
 

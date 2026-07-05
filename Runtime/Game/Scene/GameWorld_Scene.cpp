@@ -90,7 +90,7 @@ void GameWorld::CreateGroundPlane() {
     auto &geoMgr = m_context->GeometryResourceManager;
     GeometryHandle geoHandle = geoMgr->RegisterGeometry<TriangleMesh>(planeMesh);
     if (!geoHandle.IsValid()) {
-        OutputDebugStringW(L"[ERROR] RegisterGeometry for ground plane failed!\n");
+        ErrorReporter::Report("GameWorld::RegisterGeometry for ground plane failed");
         return;
     }
 
@@ -174,7 +174,7 @@ void GameWorld::CreateTestCube() {
     GeometryHandle geoHandle = geoMgr->RegisterGeometry<TriangleMesh>(triangleMesh);
 
     if (!geoHandle.IsValid()) {
-        OutputDebugStringW(L"[ERROR] RegisterGeometry failed!\n");
+        ErrorReporter::Report("GameWorld::RegisterGeometry failed");
         return;
     }
 
@@ -746,7 +746,7 @@ void GameWorld::CreateSkybox() {
     skyObjCB.MaterialIndex = 0;
     skyObjCB.ReceiveShadow = 0;
 
-    m_skyboxObjectCBAddress = m_context->FrameResourceManager->AllocateObjectCB(&skyObjCB, sizeof(ObjectConstants));
+    m_skyboxObjectCBAddress = m_context->FrameResourceManager->Allocate("ObjectCB", &skyObjCB, sizeof(ObjectConstants));
 
     m_context->Logging->Info("[GameWorld] Skybox created successfully");
 

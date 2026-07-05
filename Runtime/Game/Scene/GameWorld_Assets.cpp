@@ -291,7 +291,7 @@ void GameWorld::LoadTestTexture() {
     std::wstring texturePath = L"Content/Textures/WoodCrate01.dds";
 
     if (!AssetLoader::GetInstance().LoadTextureFromFile(texturePath, ddsInfo)) {
-        OutputDebugStringW(L"[ERROR] Failed to load test texture\n");
+        ErrorReporter::Report("Failed to load test texture");
         return;
     }
 
@@ -301,14 +301,14 @@ void GameWorld::LoadTestTexture() {
         gpuMgr.CreateTexture2D(device, ddsInfo.desc, L"Test_Texture", D3D12_RESOURCE_STATE_COMMON);
 
     if (!gpuHandle.IsValid()) {
-        OutputDebugStringW(L"[ERROR] Failed to create GPU texture\n");
+        ErrorReporter::Report("Failed to create GPU texture");
         return;
     }
 
     auto &descriptorHeaps = m_context->DescriptorHeaps;
     uint32_t srvIndex = descriptorHeaps->Allocate(PartitionType::Texture);
     if (srvIndex == UINT32_MAX) {
-        OutputDebugStringW(L"[ERROR] Failed to allocate SRV index\n");
+        ErrorReporter::Report("Failed to allocate SRV index");
         gpuMgr.Release(gpuHandle, 0);
         return;
     }

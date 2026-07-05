@@ -18,8 +18,7 @@ void LightingRenderer::Initialize() {
     LoadShaders();
 
     if (!m_vsBlob || !m_psBlob) {
-        OutputDebugStringW(L"[ERROR] LightingRenderer: Failed to load shaders!\n");
-        throw std::runtime_error("LightingRenderer: Failed to load shaders");
+        ErrorReporter::Fatal("LightingRenderer: Failed to load shaders");
     }
 
     CreateRootSignature();

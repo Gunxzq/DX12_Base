@@ -57,7 +57,7 @@ GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t 
                                                  IID_PPV_ARGS(&resource));
 
     if (FAILED(hr) || !resource) {
-        ENGINE_ASSERT_FMT("GpuResourceManager: Failed to create buffer. Size: %zu, HR: 0x%X", size, hr);
+        ErrorReporter::Fatal("GpuResourceManager: Failed to create buffer. Size: %zu, HR: 0x%X", size, hr);
         m_handlePool.FreeSlot(handle);
         return GpuResourceHandle::Invalid();
     }

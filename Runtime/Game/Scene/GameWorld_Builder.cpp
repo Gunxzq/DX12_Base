@@ -47,7 +47,7 @@ void FillCaptureCB(const DirectX::XMFLOAT3 &probePos, D3D12_GPU_VIRTUAL_ADDRESS 
         XMStoreFloat4x4(&captureCB.faceViewProj[f], viewProj);
     }
     captureCB.probePosition = probePos;
-    outCBAddress = frameMgr.AllocateObjectCB(&captureCB, sizeof(ProbeCaptureCB));
+    outCBAddress = frameMgr.Allocate("ProbeCaptureCB", &captureCB, sizeof(ProbeCaptureCB));
 }
 } // namespace ProbeHelpers
 
@@ -170,7 +170,7 @@ void GameWorld::RegisterBuilderSystems() {
                     for (auto &batch : batches) {
                         if (batch.queueIndex >= queue.Size() || batch.instances.empty())
                             continue;
-                        D3D12_GPU_VIRTUAL_ADDRESS addr = frameRes->AllocateInstance(
+                        D3D12_GPU_VIRTUAL_ADDRESS addr = frameRes->Allocate("Instance",
                             batch.instances.data(),
                             static_cast<uint32_t>(batch.instances.size() * sizeof(InstanceData)));
                         queue[batch.queueIndex].instanceBuffer = addr;
@@ -185,7 +185,7 @@ void GameWorld::RegisterBuilderSystems() {
                     for (auto &batch : batches) {
                         if (batch.queueIndex >= queue.Size() || batch.instances.empty())
                             continue;
-                        D3D12_GPU_VIRTUAL_ADDRESS addr = frameRes->AllocateInstance(
+                        D3D12_GPU_VIRTUAL_ADDRESS addr = frameRes->Allocate("Instance",
                             batch.instances.data(),
                             static_cast<uint32_t>(batch.instances.size() * sizeof(InstanceData)));
                         queue[batch.queueIndex].instanceBuffer = addr;
@@ -201,7 +201,7 @@ void GameWorld::RegisterBuilderSystems() {
                         auto &item = queue[i];
                         if (item.tempSlot != UINT32_MAX && item.tempSlot < batches.size()) {
                             item.objectCBAddress =
-                                frameRes->AllocateObjectCB(&batches[item.tempSlot].object, sizeof(ObjectConstants));
+                                frameRes->Allocate("ObjectCB", &batches[item.tempSlot].object, sizeof(ObjectConstants));
                         }
                     }
                     batches.clear();
@@ -232,7 +232,7 @@ void GameWorld::RegisterWaterConstantsCallback() {
         waterCB.NormalTextureIndex = 0;
         waterCB.Pad = 0;
 
-        m_waterCBAddress = m_context->FrameResourceManager->AllocateWaterCB(&waterCB, sizeof(WaterConstants));
+        m_waterCBAddress = m_context->FrameResourceManager->Allocate("WaterCB", &waterCB, sizeof(WaterConstants));
     });
 }
 
@@ -282,7 +282,7 @@ void GameWorld::RegisterAnimationAdvancer() {
                      }
 
                      uint32_t uploadSize = boneCount * sizeof(DirectX::XMFLOAT4X4);
-                     skin.boneBufferAddress = frameResMgr->AllocateSkinning(boneTransforms.data(), uploadSize);
+                     skin.boneBufferAddress = frameResMgr->Allocate("Skinning", boneTransforms.data(), uploadSize);
                  }
 
                  if (!m_soldierEntities.empty()) {

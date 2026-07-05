@@ -203,7 +203,7 @@ void ReflectionProbeRenderer::BeginCapture(CommandList &cmdList, ID3D12Resource 
                                            D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
                                            D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart) {
     if (!m_pso || !m_rootSignature) {
-        OutputDebugStringW(L"[ERROR] ReflectionProbeRenderer: PSO or RootSignature not initialized\n");
+        ErrorReporter::Report("ReflectionProbeRenderer: PSO or RootSignature not initialized");
         return;
     }
 

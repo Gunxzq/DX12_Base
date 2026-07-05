@@ -87,7 +87,7 @@ void ShadowRenderer::BeginOffscreen(CommandList &cmdList) {
 void ShadowRenderer::BeginOffscreen(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
                                     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle, uint32_t width, uint32_t height) {
     if (!m_pso || !m_rootSignature) {
-        OutputDebugStringW(L"[ERROR] ShadowRenderer::BeginOffscreen: PSO or RootSignature not initialized\n");
+        ErrorReporter::Report("ShadowRenderer::BeginOffscreen: PSO or RootSignature not initialized");
         return;
     }
 
@@ -132,7 +132,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE ShadowRenderer::GetDepthDSV() const { return m_curre
 void ShadowRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometryHandle,
                                    D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount) {
     if (!m_inPass || !m_geometryManager) {
-        OutputDebugStringW(L"[ERROR] ShadowRenderer::DrawInstanced: BeginOffscreen not called\n");
+        ErrorReporter::Report("ShadowRenderer::DrawInstanced: BeginOffscreen not called");
         return;
     }
 
@@ -146,7 +146,7 @@ void ShadowRenderer::DrawInstanced(CommandList &cmdList, GeometryHandle geometry
     ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
 
     if (!vbResource || !ibResource) {
-        OutputDebugStringW(L"[ERROR] ShadowRenderer::DrawInstanced - Invalid buffer!\n");
+        ErrorReporter::Report("ShadowRenderer::DrawInstanced - Invalid buffer");
         return;
     }
 
@@ -176,7 +176,7 @@ void ShadowRenderer::DrawIndexedInstancedSubmesh(CommandList &cmdList, GeometryH
                                                  uint32_t instanceCount, uint32_t startIndex, int32_t startVertex,
                                                  uint32_t indexCount) {
     if (!m_inPass || !m_geometryManager) {
-        OutputDebugStringW(L"[ERROR] ShadowRenderer::DrawIndexedInstancedSubmesh: BeginOffscreen not called\n");
+        ErrorReporter::Report("ShadowRenderer::DrawIndexedInstancedSubmesh: BeginOffscreen not called");
         return;
     }
 

@@ -25,8 +25,7 @@ void SkyRenderer::Initialize() {
     LoadShaders();
 
     if (!m_vsBlob || !m_psBlob) {
-        OutputDebugStringW(L"[ERROR] SkyRenderer: Failed to load shaders!\n");
-        throw std::runtime_error("SkyRenderer: Failed to load shaders");
+        ErrorReporter::Fatal("SkyRenderer: Failed to load shaders");
     }
 
     CreateRootSignature();
@@ -66,7 +65,7 @@ void SkyRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS pas
 void SkyRenderer::DrawSky(CommandList &cmdList, GeometryHandle skyboxGeometry,
                           D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress) {
     if (!m_geometryManager) {
-        OutputDebugStringW(L"[ERROR] SkyRenderer::DrawSky - GeometryResourceManager not set!\n");
+        ErrorReporter::Report("SkyRenderer::DrawSky - GeometryResourceManager not set");
         return;
     }
 
@@ -80,7 +79,7 @@ void SkyRenderer::DrawSky(CommandList &cmdList, GeometryHandle skyboxGeometry,
     ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
 
     if (!vbResource || !ibResource) {
-        OutputDebugStringW(L"[ERROR] SkyRenderer::DrawSky - Invalid vertex or index buffer!\n");
+        ErrorReporter::Report("SkyRenderer::DrawSky - Invalid vertex or index buffer");
         return;
     }
 
