@@ -1,5 +1,5 @@
 #pragma once
-#include "Boot/ResourceConfig.h"
+#include "Core/Config/ConfigTypes/ResourceConfig.h"
 #include "DataPoolContext.h"
 #include <cstddef>
 #include <cstdint>

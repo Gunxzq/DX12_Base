@@ -1,5 +1,5 @@
 #include "Logger/Logger.h"
-#include "Boot/LoggerConfig.h"
+#include "Core/Config/ConfigTypes/LoggerConfig.h"
 #include "Logger/SinkFactory.h"
 
 #include <spdlog/async.h>

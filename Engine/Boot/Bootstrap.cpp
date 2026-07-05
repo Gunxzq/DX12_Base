@@ -2,8 +2,8 @@
 
 #include "Common/Common.h"
 
-#include "Boot/ResourceConfig.h"
-#include "ConfigManager.h"
+#include "Core/Config/ConfigTypes/ResourceConfig.h"
+#include "Core/Config/ConfigManager.h"
 #include "ECS/Core/Registry.h"
 #include "Event/MessageDispatcher.h"
 #include "GameContext.h"

@@ -1,5 +1,5 @@
 #pragma once
-#include "Boot/ResourceConfig.h"
+#include "Core/Config/ConfigTypes/ResourceConfig.h"
 #include "Core/CpuHandlePool.h"
 #include "Core/DataPool.h"
 #include "Core/DataPoolContext.h"

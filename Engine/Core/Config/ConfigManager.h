@@ -1,8 +1,8 @@
 #pragma once
 
-#include "LoggerConfig.h"
-#include "RendererConfig.h"
-#include "WindowConfig.h"
+#include "ConfigTypes/LoggerConfig.h"
+#include "ConfigTypes/RendererConfig.h"
+#include "ConfigTypes/WindowConfig.h"
 #include <shared_mutex>
 
 #include <nlohmann/json.hpp>

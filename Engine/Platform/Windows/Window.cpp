@@ -2,7 +2,7 @@
 
 #include "Common/Common.h"
 
-#include "Boot/WindowConfig.h"
+#include "Core/Config/ConfigTypes/WindowConfig.h"
 #include "Event/MessageDispatcher.h"
 #include "Platform/Input/InputManager.h"
 #include "Platform/Input/RawInputBuffer.h"

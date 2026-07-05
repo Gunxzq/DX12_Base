@@ -2,7 +2,7 @@
 
 #include "Common/Common.h"
 
-#include "Boot/LoggerConfig.h"
+#include "Core/Config/ConfigTypes/LoggerConfig.h"
 #include "Logger/DebugOverlay.h"
 #include "Logger/Skinks/DebugOutputSink.h"
 #include "Logger/Skinks/LogWindowSink.h"

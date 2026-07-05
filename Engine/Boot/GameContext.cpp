@@ -1,7 +1,7 @@
 #include "GameContext.h"
 #include "Common/Common.h"
 
-#include "ConfigManager.h"
+#include "Core/Config/ConfigManager.h"
 #include "Logger/Logger.h"
 #include "Platform/Input/InputSystem.h"
 #include "Platform/Windows/Window.h"
