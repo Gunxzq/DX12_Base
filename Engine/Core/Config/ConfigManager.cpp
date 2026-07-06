@@ -365,7 +365,12 @@ static nlohmann::json ParseINIImpl(std::istream &stream) {
             char *end = nullptr;
             long longVal = strtoll(value.c_str(), &end, 10);
             if (*end == '\0') {
-                root[section][key] = static_cast<int64_t>(longVal);
+                // 正数存为 uint64_t（满足 is_number_unsigned 检查）
+                // 负数存为 int64_t（保持符号）
+                if (longVal >= 0)
+                    root[section][key] = static_cast<uint64_t>(longVal);
+                else
+                    root[section][key] = static_cast<int64_t>(longVal);
                 continue;
             }
             double dblVal = strtod(value.c_str(), &end);

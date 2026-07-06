@@ -98,7 +98,7 @@ parallel_for(0, entities.size(), [&](size_t begin, size_t end) {
 - [ ] **CullingSystem 移除**：剔除逻辑下沉到 Builder
 - [ ] **LODSystem 移除**：LOD 计算下沉到 Builder
 - [ ] **MeshComponent 已有 localBounds**：已存在，可以用于剔除
-- [ ] **多线程安全的内存分配**：`AllocateInstance` 等需要在并发环境下安全，或改为统一上传阶段
+- [ ] **多线程安全的内存分配**：`Allocate("Instance", ...)` 等需要在并发环境下安全，或改为统一上传阶段
 - [ ] **ThreadLocal RenderQueue**：Builder 产出需先写线程局部队列，最后合并
 
 ---
@@ -123,7 +123,7 @@ parallel_for(0, entities.size(), [&](size_t begin, size_t end) {
 |:-----|:-----|:------|
 | `FrameResourceManager` | `FRAME_COUNT = 3` | ObjectCB、InstanceData、Skinning 等每帧数据的 RingBuffer |
 | `BeginFrame(completedFence, nextFence)` | — | 通过围栏回收已消费的槽位 |
-| 生产者 | 各 Builder（PreRender） | `AllocateInstance()`, `AllocateObjectCB()` |
+| 生产者 | 各 Builder（PreRender） | `Allocate("ObjectCB", ...)`, `Allocate("Instance", ...)` |
 | 消费者 | GPU（Render 阶段） | 提交后异步执行 |
 
 **这是最核心的多缓冲场景。** 每个 RingBuffer 内部通过 fence 值来追踪 GPU 消费进度。
@@ -267,7 +267,7 @@ Physics Worker 0: Entity 0-999    Physics Worker 1: Entity 1000-1999
 
 - **CullingResult/LODResult 是「假多缓冲」**：它们只是阶段间数据传递的临时分配，不是真正的多缓冲（没有并发生产者和消费者）。内联方案直接移除。
 - **真正的多缓冲只在「跨线程交互」处出现**：网络↔主线程、后台加载↔主线程。事件系统 `MessageDispatcher` 已经统一覆盖了这些场景。
-- **渲染管线内部的「多缓冲」已由 FrameResourceManager 的 RingBuffer 统一覆盖**：Builder、Renderer 等消费 GPU 内存的地方统一走 `AllocateInstance/AllocateObjectCB`，不需要各自独立实现。
+- **渲染管线内部的「多缓冲」已由 FrameResourceManager 的 RingBuffer 统一覆盖**：Builder、Renderer 等消费 GPU 内存的地方统一走 `Allocate("ObjectCB", ...)` / `Allocate("Instance", ...)`，不需要各自独立实现。
 - **FrameSync 不是多缓冲场景的终点，而是多缓冲的协调点**：它提供了安全的回调时机让各模块做自己的缓冲交换，但不负责每个模块的内部逻辑。
 
 ---
@@ -324,7 +324,7 @@ worldBounds.max = transform.position + localBounds.max;
 
 ### 后续：统一上传阶段
 
-Builder 内联后，`AllocateInstance()` / `AllocateObjectCB()` 仍在 Builder 循环内被调用。如果要实现 Builder 并发，需要：
+Builder 内联后，`Allocate("ObjectCB", ...)` / `Allocate("Instance", ...)` 仍在 Builder 循环内被调用。如果要实现 Builder 并发，需要：
 - 每个线程有独立的临时缓冲区
 - 或在 PreRender 之前统一计算每帧需要的总内存量，分配一次，Builder 只从预分配区域取用
 
