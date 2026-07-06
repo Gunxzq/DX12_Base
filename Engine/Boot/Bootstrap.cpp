@@ -15,6 +15,7 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
+#include "Core/SharedDataStore/SharedDataStore.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Pool/DepthStencilPool.h"
 #include "Resource/Pool/RenderTargetPool.h"
@@ -70,6 +71,13 @@ void Bootstrap::Shutdown() {
     // 2.6 关闭渲染目标资源池
     try {
         RenderTargetPool::GetInstance().Shutdown();
+    } catch (...) {
+        // 忽略
+    }
+
+    // 2.7 关闭 AssetDataManager
+    try {
+        Core::SharedDataStore::GetInstance().Shutdown();
     } catch (...) {
         // 忽略
     }
@@ -356,6 +364,30 @@ void Bootstrap::InitializeModules() {
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing RenderTargetPool...");
         RenderTargetPool::GetInstance().Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
         EngineLogger::GetInstance()->Info("[Bootstrap] RenderTargetPool initialized.");
+
+        // ====================================================================
+        // 初始化 SharedDataStore（共享数据存储层）
+        // ====================================================================
+        {
+            EngineLogger::GetInstance()->Info("[Bootstrap] Initializing SharedDataStore...");
+            auto resourceCfgPath = std::filesystem::path("Config") / "resource.json";
+            Core::SharedDataStore::GetInstance().Preallocate(1024);
+            if (std::filesystem::exists(resourceCfgPath)) {
+                try {
+                    auto resourceCfg = Boot::ConfigManager::LoadJSON<Boot::ResourceSystemConfig>(resourceCfgPath);
+                    Core::SharedDataStore::GetInstance().Initialize(resourceCfg);
+                } catch (const std::exception &e) {
+                    EngineLogger::GetInstance()->Warn("[Bootstrap] Failed to load resource.json: {}", e.what());
+                    Boot::ResourceSystemConfig defaultCfg;
+                    Core::SharedDataStore::GetInstance().Initialize(defaultCfg);
+                }
+            } else {
+                EngineLogger::GetInstance()->Warn("[Bootstrap] resource.json not found, using defaults");
+                Boot::ResourceSystemConfig defaultCfg;
+                Core::SharedDataStore::GetInstance().Initialize(defaultCfg);
+            }
+            EngineLogger::GetInstance()->Info("[Bootstrap] SharedDataStore initialized.");
+        }
 
         // 初始化材质管理器
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing MaterialManager...");

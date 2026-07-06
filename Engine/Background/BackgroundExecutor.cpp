@@ -87,6 +87,47 @@ void BackgroundExecutor::SubmitGraph(Scheduler::TaskGraph graph) {
     }
 }
 
+void BackgroundExecutor::SubmitLoadTask(LoadTask task) {
+    if (!task.cpuWork)
+        return;
+
+    Scheduler::Task cpuTask;
+    cpuTask.name = task.name;
+    cpuTask.phase = Scheduler::TaskPhase::Update;
+    cpuTask.thread = Scheduler::ThreadType::Worker;
+    cpuTask.priority = static_cast<uint32_t>(Scheduler::TaskPriority::Background);
+
+    auto gpuWorkFn = std::move(task.gpuWork);
+    auto onCompleteFn = std::move(task.onComplete);
+
+    cpuTask.execute = [this, cpuName = task.name,
+                       cpuWork = std::move(task.cpuWork),
+                       gpuWork = std::move(gpuWorkFn),
+                       onComplete = std::move(onCompleteFn)]() mutable {
+        // Step 1: CPU 工作
+        cpuWork();
+
+        // Step 2: GPU 工作（录制命令）
+        if (gpuWork) {
+            auto item = gpuWork();
+            if (item) {
+                item->onComplete = [item_onComplete = std::move(onComplete)](bool success) {
+                    if (item_onComplete)
+                        item_onComplete(success);
+                };
+                RegisterGpuWork(std::move(item));
+                return;
+            }
+        }
+
+        // 没有 GPU 工作 → 直接回调
+        if (onComplete)
+            onComplete(true);
+    };
+
+    Submit(cpuTask);
+}
+
 void BackgroundExecutor::RegisterGpuWork(GpuWorkItemPtr item) {
     if (!item)
         return;

@@ -4,7 +4,7 @@
 #include "Event/EventRegistry.h"
 #include "Event/EventTypes.h"
 #include "Renderer/RHI/Command/CommandManager.h"
-#include "Resource/AssetDataManager.h"
+#include "Core/SharedDataStore/SharedDataStore.h"
 #include "Resource/GpuResourceManager.h"
 #include <memory>
 #include <string>
@@ -35,7 +35,7 @@ public:
      * @param stateBefore  转换前状态（通常为 D3D12_RESOURCE_STATE_COPY_DEST）
      * @param stateAfter   转换后状态（通常为 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE）
      * @param waitFence    等待的 COPY 队列 fence 值（0 表示不等待）
-     * @param fenceKey     用于存储 transitionFence 的 AssetDataManager key
+     * @param fenceKey     用于存储 transitionFence 的 SharedDataStore key
      * @return transitionFence 值（0 表示失败）
      */
     static uint64_t SubmitTransition(ID3D12Device *device,
@@ -80,9 +80,9 @@ public:
                                          cmdMgr.GetGraphicsQueue()->Get(),
                                          transitionFence);
 
-        // 将 fence value 存入 AssetDataManager，供后续 System 检查
+        // 将 fence value 存入 SharedDataStore，供后续 System 检查
         if (!fenceKey.empty()) {
-            Resource::AssetDataManager::GetInstance().StoreTypedData<uint64_t>(
+            Core::SharedDataStore::GetInstance().StoreTypedData<uint64_t>(
                 fenceKey, std::make_shared<uint64_t>(transitionFence));
         }
 

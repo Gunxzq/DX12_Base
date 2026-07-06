@@ -231,6 +231,71 @@ struct FullscreenToggleEvent {
 };
 
 // ========================================================================
+// 异步加载事件（三步数据流，资源类型由 payload 高位编码）
+// 均无额外字段，数据通过 payload 传递
+// ========================================================================
+
+struct ResourceLoadCompleteEvent {
+    EVENT_HEADER_FIELDS
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::ResourceLoadCompleteEvent);
+
+    explicit ResourceLoadCompleteEvent(EventPriority prio = EventPriority::P4_Background)
+        : INIT_EVENT_HEADER(prio) {}
+
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
+struct ResourceUploadCompleteEvent {
+    EVENT_HEADER_FIELDS
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::ResourceUploadCompleteEvent);
+
+    explicit ResourceUploadCompleteEvent(EventPriority prio = EventPriority::P4_Background)
+        : INIT_EVENT_HEADER(prio) {}
+
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
+struct ResourceReadyEvent {
+    EVENT_HEADER_FIELDS
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::ResourceReadyEvent);
+
+    explicit ResourceReadyEvent(EventPriority prio = EventPriority::P3_Low)
+        : INIT_EVENT_HEADER(prio) {}
+
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
+struct ResourceLoadFailedEvent {
+    EVENT_HEADER_FIELDS
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::ResourceLoadFailedEvent);
+
+    explicit ResourceLoadFailedEvent(EventPriority prio = EventPriority::P4_Background)
+        : INIT_EVENT_HEADER(prio) {}
+
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
+struct RequestLoadEvent {
+    EVENT_HEADER_FIELDS
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::RequestLoadEvent);
+
+    explicit RequestLoadEvent(EventPriority prio = EventPriority::P2_Normal)
+        : INIT_EVENT_HEADER(prio) {}
+
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
+struct CombineCompleteEvent {
+    EVENT_HEADER_FIELDS
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::CombineCompleteEvent);
+
+    explicit CombineCompleteEvent(EventPriority prio = EventPriority::P2_Normal)
+        : INIT_EVENT_HEADER(prio) {}
+
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
+// ========================================================================
 // Asset Loaded Payload Utilities (RequestID + Handle)
 // ========================================================================
 

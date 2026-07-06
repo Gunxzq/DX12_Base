@@ -2,7 +2,7 @@
 
 #include "Renderer/RHI/Command/Allocator/CommandAllocatorPool.h"
 #include "Renderer/RHI/Command/CommandList/CommandListPool.h"
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include "Scheduler/Task.h"
 #include "Scheduler/TaskGraph.h"
 #include <atomic>
@@ -44,6 +44,36 @@ struct GpuWorkItem {
 
 using GpuWorkItemPtr = std::shared_ptr<GpuWorkItem>;
 
+// ============================================================================
+// 通用加载任务 — 表达"CPU 工作 → GPU 工作 → 完成回调"的完整链路
+//
+// 数据流：
+//   SubmitLoadTask(task)
+//     → background thread: cpuWork() 执行 CPU 加载/创建 GPU 资源
+//     → background thread: gpuWork() 录制 COPY+DIRECT 命令，返回 GpuWorkItem
+//     → main thread Tick:   提交 COPY → Signal → DIRECT(Wait) → Signal
+//     → main thread:        onComplete(success) 回调
+//
+// 灵活性：
+//   不同资源类型只需替换 cpuWork / gpuWork 函数，不需要新增 Factory 类。
+//   复合资产（如地形）用 SubmitGraph 表达依赖，每个叶子节点是独立 LoadTask。
+// ============================================================================
+
+struct LoadTask {
+    std::string name;
+
+    // Step 1: 后台线程执行（CPU 加载、解析、创建 GPU 资源）
+    // 返回值：后续需要上传到 GPU 的数据
+    std::function<void()> cpuWork;
+
+    // Step 2: 后台线程执行（录制 COPY+DIRECT 命令，返回 GpuWorkItem）
+    // 在 cpuWork 完成后自动调用
+    std::function<GpuWorkItemPtr()> gpuWork;
+
+    // Step 3: 主线程执行（GPU 上传完成后回调）
+    std::function<void(bool success)> onComplete;
+};
+
 /**
  * @brief 后台任务执行器 — 承担类似帧驱动器的能力
  *
@@ -84,6 +114,20 @@ public:
 
     void Submit(Scheduler::Task task);
     void SubmitGraph(Scheduler::TaskGraph graph);
+
+    // ========================================================================
+    // 通用加载任务提交
+    // ========================================================================
+
+    /**
+     * @brief 提交一个通用加载任务
+     *
+     * 内部将 LoadTask 拆为两步：
+     *   1. CPU 工作 → 包装为 Scheduler::Task 提交到后台线程
+     *   2. CPU 完成后自动调用 gpuWork() → RegisterGpuWork
+     *   3. Tick 中 GPU 完成 → onComplete 回调
+     */
+    void SubmitLoadTask(LoadTask task);
 
     // ========================================================================
     // GPU 工作项注册（后台线程调用，将录好的命令注册到队列）
