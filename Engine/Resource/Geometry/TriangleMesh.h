@@ -3,7 +3,7 @@
 #include "Common/Common.h"
 #include "Math/BoundingVolume.h"
 #include "Resource/Struct/GeometryHandle.h"
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include <cstdint>
 #include <variant>
 

@@ -2,7 +2,7 @@
 
 #include "Resource/Pool/DepthStencilPool.h"
 #include "Resource/Pool/RenderTargetPool.h"
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include <DirectXMath.h>
 #include <vector>
 

@@ -1,14 +1,14 @@
-#include "AssetDataManager.h"
+#include "SharedDataStore.h"
 #include <algorithm>
 #include <cassert>
 #include <iostream>
 
 using namespace DX12Engine::Boot;
 
-namespace DX12Engine::Resource {
+namespace DX12Engine::Core {
 
-AssetDataManager &AssetDataManager::GetInstance() {
-    static AssetDataManager instance;
+SharedDataStore &SharedDataStore::GetInstance() {
+    static SharedDataStore instance;
     return instance;
 }
 
@@ -17,16 +17,16 @@ AssetDataManager &AssetDataManager::GetInstance() {
  * @param config
  * @date 2026-05-24
  */
-void AssetDataManager::Initialize(const ResourceSystemConfig &config) {
+void SharedDataStore::Initialize(const ResourceSystemConfig &config) {
     if (m_initialized) {
         Shutdown();
     }
 
-    CpuHandlePool::InitConfig handleConfig;
+    DataSlotPool::InitConfig handleConfig;
     handleConfig.maxTotalHandles = config.HandlePoolConfig.MaxTotalHandles;
     handleConfig.initialFreeListReserve = config.HandlePoolConfig.InitialFreeListReserve;
 
-    m_handlePool.Initialize(handleConfig);
+    m_slotPool.Initialize(handleConfig);
 
     // 初始化数据池
     InitializeDataPoolsFromConfig(config);
@@ -41,7 +41,7 @@ void AssetDataManager::Initialize(const ResourceSystemConfig &config) {
  * @brief 关闭资产数据管理器
  * @date 2026-05-24
  */
-void AssetDataManager::Shutdown() {
+void SharedDataStore::Shutdown() {
 
     for (auto &pair : m_dataPools) {
         if (pair.second) {
@@ -51,7 +51,7 @@ void AssetDataManager::Shutdown() {
     }
 
     m_dataPools.clear();
-    m_handlePool.Shutdown();
+    m_slotPool.Shutdown();
 
     // 清理路径映射
     {
@@ -67,7 +67,7 @@ void AssetDataManager::Shutdown() {
  * @param config
  * @date 2026-05-24
  */
-void AssetDataManager::InitializeDataPoolsFromConfig(const ResourceSystemConfig &config) {
+void SharedDataStore::InitializeDataPoolsFromConfig(const ResourceSystemConfig &config) {
     // 遍历配置中的每个数据池
     for (const auto &poolCfg : config.MemoryPools) {
         // 检查 Tag 是否有效 (0-15)
@@ -103,8 +103,8 @@ void AssetDataManager::InitializeDataPoolsFromConfig(const ResourceSystemConfig 
     }
 }
 
-CpuResourceHandle AssetDataManager::AllocateSlot(CpuResourceType type, uint8_t poolId) {
-    return m_handlePool.AllocateSlot(type, poolId);
+DataSlotHandle SharedDataStore::AllocateSlot(DataSlotType type, uint8_t poolId) {
+    return m_slotPool.AllocateSlot(type, poolId);
 };
 
 /**
@@ -114,15 +114,15 @@ CpuResourceHandle AssetDataManager::AllocateSlot(CpuResourceType type, uint8_t p
  * @param size 数据大小
  * @date 2026-05-24
  */
-void AssetDataManager::RegisterData(CpuResourceHandle handle, void *dataPtr, size_t size) {
-    if (!m_handlePool.Validate(handle)) {
+void SharedDataStore::RegisterData(DataSlotHandle handle, void *dataPtr, size_t size) {
+    if (!m_slotPool.Validate(handle)) {
         assert(false && "RegisterData: Invalid Handle");
         return;
     }
 
-    CpuResourceState currentState = m_handlePool.GetState(handle);
-    if (currentState != CpuResourceState::Loading) {
-        if (currentState == CpuResourceState::Ready) {
+    DataSlotState currentState = m_slotPool.GetState(handle);
+    if (currentState != DataSlotState::Loading) {
+        if (currentState == DataSlotState::Ready) {
             return;
         }
         assert(false && "RegisterData: Handle is not in Loading state");
@@ -140,28 +140,49 @@ void AssetDataManager::RegisterData(CpuResourceHandle handle, void *dataPtr, siz
 #endif
 
     // 设置句柄数据指针
-    m_handlePool.SetDataPtr(handle, dataPtr);
+    m_slotPool.SetDataPtr(handle, dataPtr);
 
     // 设置句柄状态为已加载
-    m_handlePool.SetState(handle, CpuResourceState::Ready);
+    m_slotPool.SetState(handle, DataSlotState::Ready);
+}
+
+void *SharedDataStore::StoreData(DataSlotHandle handle, const void *dataPtr, size_t size) {
+    if (!m_slotPool.Validate(handle)) {
+        return nullptr;
+    }
+
+    DataPool *pool = GetDataPoolForHandle(handle);
+    if (!pool) {
+        return nullptr;
+    }
+
+    void *dst = pool->Allocate(size, 16);
+    if (!dst) {
+        return nullptr;
+    }
+
+    memcpy(dst, dataPtr, size);
+    RegisterData(handle, dst, size);
+    return dst;
 }
 
 /**
+ * @brief 获取资产数据指针
  * @brief 获取资产数据指针
  * @param handle 资产句柄
  * @return void*
  * @date 2026-05-24
  */
-void *AssetDataManager::GetData(CpuResourceHandle handle) const {
-    if (!m_handlePool.Validate(handle)) {
+void *SharedDataStore::GetData(DataSlotHandle handle) const {
+    if (!m_slotPool.Validate(handle)) {
         return nullptr;
     }
 
-    if (m_handlePool.GetState(handle) != CpuResourceState::Ready) {
+    if (m_slotPool.GetState(handle) != DataSlotState::Ready) {
         return nullptr;
     }
 
-    return m_handlePool.GetDataPtr(handle);
+    return m_slotPool.GetDataPtr(handle);
 }
 
 /**
@@ -170,14 +191,14 @@ void *AssetDataManager::GetData(CpuResourceHandle handle) const {
  * @param pendingFence 待办Fence
  * @date 2026-05-24
  */
-void AssetDataManager::ScheduleRelease(CpuResourceHandle handle, uint64_t pendingFence) {
-    if (!m_handlePool.Validate(handle)) {
+void SharedDataStore::ScheduleRelease(DataSlotHandle handle, uint64_t pendingFence) {
+    if (!m_slotPool.Validate(handle)) {
         return;
     }
 
-    CpuResourceState state = m_handlePool.GetState(handle);
+    DataSlotState state = m_slotPool.GetState(handle);
 
-    if (state == CpuResourceState::PendingRelease || state == CpuResourceState::Empty) {
+    if (state == DataSlotState::PendingRelease || state == DataSlotState::Empty) {
         return;
     }
 
@@ -190,7 +211,7 @@ void AssetDataManager::ScheduleRelease(CpuResourceHandle handle, uint64_t pendin
         m_pendingReleases.push_back(pr);
     }
 
-    m_handlePool.SetState(handle, CpuResourceState::PendingRelease);
+    m_slotPool.SetState(handle, DataSlotState::PendingRelease);
 }
 
 /**
@@ -198,17 +219,17 @@ void AssetDataManager::ScheduleRelease(CpuResourceHandle handle, uint64_t pendin
  * @param handle 资产句柄
  * @date 2026-05-24
  */
-void AssetDataManager::ForceRelease(CpuResourceHandle handle) {
-    if (!m_handlePool.Validate(handle))
+void SharedDataStore::ForceRelease(DataSlotHandle handle) {
+    if (!m_slotPool.Validate(handle))
         return;
 
-    void *ptr = m_handlePool.GetDataPtr(handle);
+    void *ptr = m_slotPool.GetDataPtr(handle);
     if (ptr) {
         DataPool *pool = GetDataPoolForHandle(handle);
         if (pool)
             pool->Free(ptr);
     }
-    m_handlePool.FreeSlot(handle);
+    m_slotPool.FreeSlot(handle);
 }
 
 /**
@@ -216,7 +237,7 @@ void AssetDataManager::ForceRelease(CpuResourceHandle handle) {
  * @param completedFence GPU已完成Fence
  * @date 2026-05-24
  */
-void AssetDataManager::Reclaim(uint64_t completedFence) {
+void SharedDataStore::Reclaim(uint64_t completedFence) {
 
     std::vector<PendingRelease> toRelease;
     std::vector<std::string> releasedPaths; // 需要从映射表中移除的路径
@@ -249,14 +270,14 @@ void AssetDataManager::Reclaim(uint64_t completedFence) {
 
     // 执行释放
     for (auto &pr : toRelease) {
-        void *ptr = m_handlePool.GetDataPtr(pr.handle);
+        void *ptr = m_slotPool.GetDataPtr(pr.handle);
         if (ptr) {
             DataPool *pool = GetDataPoolForHandle(pr.handle);
             if (pool) {
                 pool->Free(ptr);
             }
         }
-        m_handlePool.FreeSlot(pr.handle);
+        m_slotPool.FreeSlot(pr.handle);
     }
 
     // 从映射表移除
@@ -273,7 +294,7 @@ void AssetDataManager::Reclaim(uint64_t completedFence) {
  * @return size_t
  * @date 2026-05-24
  */
-size_t AssetDataManager::GetMemoryUsage() const {
+size_t SharedDataStore::GetMemoryUsage() const {
     size_t total = 0;
     for (const auto &pair : m_dataPools) {
         if (pair.second) {
@@ -289,7 +310,7 @@ size_t AssetDataManager::GetMemoryUsage() const {
  * @return DataPool*
  * @date 2026-05-24
  */
-DataPool *AssetDataManager::GetDataPoolForHandle(CpuResourceHandle handle) const {
+DataPool *SharedDataStore::GetDataPoolForHandle(DataSlotHandle handle) const {
     auto it = m_dataPools.find(handle.poolId);
     if (it != m_dataPools.end()) {
         return it->second.get();
@@ -300,16 +321,16 @@ DataPool *AssetDataManager::GetDataPoolForHandle(CpuResourceHandle handle) const
 /**
  * @brief 获取资产句柄
  * @param path 资产路径
- * @return CpuResourceHandle
+ * @return DataSlotHandle
  * @date 2026-05-24
  */
-CpuResourceHandle AssetDataManager::GetHandle(const std::string &path) const {
+DataSlotHandle SharedDataStore::GetHandle(const std::string &path) const {
     std::shared_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end() && it->second.handle.IsValid()) {
         return it->second.handle;
     }
-    return CpuResourceHandle::Invalid();
+    return DataSlotHandle::Invalid();
 }
 
 /**
@@ -318,12 +339,12 @@ CpuResourceHandle AssetDataManager::GetHandle(const std::string &path) const {
  * @return bool
  * @date 2026-05-24
  */
-bool AssetDataManager::IsLoaded(const std::string &path) const {
-    CpuResourceHandle handle = GetHandle(path);
+bool SharedDataStore::IsLoaded(const std::string &path) const {
+    DataSlotHandle handle = GetHandle(path);
     if (!handle.IsValid()) {
         return false;
     }
-    return m_handlePool.GetState(handle) == CpuResourceState::Ready;
+    return m_slotPool.GetState(handle) == DataSlotState::Ready;
 }
 
 /**
@@ -332,26 +353,26 @@ bool AssetDataManager::IsLoaded(const std::string &path) const {
  * @return bool
  * @date 2026-05-24
  */
-bool AssetDataManager::IsLoading(const std::string &path) const {
-    CpuResourceHandle handle = GetHandle(path);
+bool SharedDataStore::IsLoading(const std::string &path) const {
+    DataSlotHandle handle = GetHandle(path);
     if (!handle.IsValid()) {
         return false;
     }
-    return m_handlePool.GetState(handle) == CpuResourceState::Loading;
+    return m_slotPool.GetState(handle) == DataSlotState::Loading;
 }
 
 /**
  * @brief 获取资产数据状态
  * @param path 资产路径
- * @return CpuResourceState
+ * @return DataSlotState
  * @date 2026-05-24
  */
-CpuResourceState AssetDataManager::GetStatus(const std::string &path) const {
-    CpuResourceHandle handle = GetHandle(path);
+DataSlotState SharedDataStore::GetStatus(const std::string &path) const {
+    DataSlotHandle handle = GetHandle(path);
     if (!handle.IsValid()) {
-        return CpuResourceState::Empty;
+        return DataSlotState::Empty;
     }
-    return m_handlePool.GetState(handle);
+    return m_slotPool.GetState(handle);
 }
 
 /**
@@ -359,10 +380,10 @@ CpuResourceState AssetDataManager::GetStatus(const std::string &path) const {
  * @param path 资产路径
  * @param type 资产类型
  * @param poolId 数据池ID
- * @return CpuResourceHandle
+ * @return DataSlotHandle
  * @date 2026-05-24
  */
-CpuResourceHandle AssetDataManager::RegisterPath(const std::string &path, CpuResourceType type, uint8_t poolId) {
+DataSlotHandle SharedDataStore::RegisterPath(const std::string &path, DataSlotType type, uint8_t poolId) {
     std::unique_lock lock(m_assetMutex);
 
     // 已存在则直接返回
@@ -372,7 +393,7 @@ CpuResourceHandle AssetDataManager::RegisterPath(const std::string &path, CpuRes
     }
 
     // 分配新句柄（HandlePool 会设置状态为 Loading）
-    CpuResourceHandle handle = m_handlePool.AllocateSlot(type, poolId);
+    DataSlotHandle handle = m_slotPool.AllocateSlot(type, poolId);
 
     // 注册映射
     AssetInfo info;
@@ -388,7 +409,7 @@ CpuResourceHandle AssetDataManager::RegisterPath(const std::string &path, CpuRes
  * @param path 资产路径
  * @date 2026-05-24
  */
-void AssetDataManager::UnregisterPath(const std::string &path) {
+void SharedDataStore::UnregisterPath(const std::string &path) {
     std::unique_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end()) {
@@ -403,12 +424,12 @@ void AssetDataManager::UnregisterPath(const std::string &path) {
  * @return std::vector<std::string>
  * @date 2026-05-24
  */
-std::vector<std::string> AssetDataManager::GetPendingPaths() const {
+std::vector<std::string> SharedDataStore::GetPendingPaths() const {
     std::shared_lock lock(m_assetMutex);
     std::vector<std::string> result;
     for (const auto &pair : m_assetMap) {
-        CpuResourceState state = m_handlePool.GetState(pair.second.handle);
-        if (state == CpuResourceState::Loading || state == CpuResourceState::Empty) {
+        DataSlotState state = m_slotPool.GetState(pair.second.handle);
+        if (state == DataSlotState::Loading || state == DataSlotState::Empty) {
             result.push_back(pair.first);
         }
     }
@@ -420,7 +441,7 @@ std::vector<std::string> AssetDataManager::GetPendingPaths() const {
  * @param path 资产路径
  * @date 2026-05-24
  */
-void AssetDataManager::AddRef(const std::string &path) {
+void SharedDataStore::AddRef(const std::string &path) {
     std::shared_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end()) {
@@ -433,7 +454,7 @@ void AssetDataManager::AddRef(const std::string &path) {
  * @param path 资产路径
  * @date 2026-05-24
  */
-void AssetDataManager::ReleaseRef(const std::string &path) {
+void SharedDataStore::ReleaseRef(const std::string &path) {
     std::unique_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end()) {
@@ -442,8 +463,8 @@ void AssetDataManager::ReleaseRef(const std::string &path) {
         }
         // 引用归零且已加载，可以延迟释放
         if (it->second.refCount == 0) {
-            CpuResourceState state = m_handlePool.GetState(it->second.handle);
-            if (state == CpuResourceState::Ready) {
+            DataSlotState state = m_slotPool.GetState(it->second.handle);
+            if (state == DataSlotState::Ready) {
                 ForceRelease(it->second.handle);
             }
         }
@@ -456,7 +477,7 @@ void AssetDataManager::ReleaseRef(const std::string &path) {
  * @return uint32_t
  * @date 2026-05-24
  */
-uint32_t AssetDataManager::GetRefCount(const std::string &path) const {
+uint32_t SharedDataStore::GetRefCount(const std::string &path) const {
     std::shared_lock lock(m_assetMutex);
     auto it = m_assetMap.find(path);
     if (it != m_assetMap.end()) {
@@ -470,7 +491,7 @@ uint32_t AssetDataManager::GetRefCount(const std::string &path) const {
  * @return size_t
  * @date 2026-05-24
  */
-size_t AssetDataManager::GetAssetCount() const {
+size_t SharedDataStore::GetAssetCount() const {
     std::shared_lock lock(m_assetMutex);
     return m_assetMap.size();
 }
@@ -479,12 +500,12 @@ size_t AssetDataManager::GetAssetCount() const {
  * @brief 清理未使用的资产数据
  * @date 2026-05-24
  */
-void AssetDataManager::CleanupUnused() {
+void SharedDataStore::CleanupUnused() {
     std::unique_lock lock(m_assetMutex);
     for (auto it = m_assetMap.begin(); it != m_assetMap.end();) {
         if (it->second.refCount == 0) {
-            CpuResourceState state = m_handlePool.GetState(it->second.handle);
-            if (state == CpuResourceState::Ready) {
+            DataSlotState state = m_slotPool.GetState(it->second.handle);
+            if (state == DataSlotState::Ready) {
                 ForceRelease(it->second.handle);
             }
             it = m_assetMap.erase(it);

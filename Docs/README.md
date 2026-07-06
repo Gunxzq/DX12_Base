@@ -37,15 +37,23 @@
 
 > 配置系统相关模块：**ConfigManager**（配置加载器）、**ErrorReporter**（错误报告器）
 
-### 资源管理
+### 场景与资产加载
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| **ResourceManager** | 资源管理器架构 | ✅ 活跃 |
-| **SkinnedAnimation** | 蒙皮骨骼动画 | ✅ 活跃 |
-| **AdaptiveFarPlane** | 自适应远平面 | ✅ 活跃 |
+| **SceneFileAndLoading** | 场景文件格式 + AssetManager 加载管线 + 场景构造 | 📋 新设计 |
+| **EventSystemAndDataLayer** | 事件系统四层架构 + 数据层（ECS / SharedDataStore）关系 | ✅ |
+| **ResourceManager** | 资源管理器架构、AssetManager 设计 | ✅ 活跃 |
 
-> 资源相关模块：**AssetManager**（设计于 ResourceManager.md，统一资产加载入口，未实现）、**AssetLoader**（原始文件加载器）、**TextureManager**、**MaterialManager**、**SkeletonManager**、**GeometryResourceManager**
+> 相关模块：**BackgroundExecutor**（TaskGraph 后台执行器）、**AssetLoader**（文件读取）、**AssetDataManager**（CPU 数据中转）
+
+### 资源与动画
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| **SkinnedAnimation** | 蒙皮骨骼动画系统（AnimationAdvancer + AnimationStateMachine） | ✅ 活跃 |
+| **AdaptiveFarPlane** | 自适应远平面 | ✅ 活跃 |
+| **FormatConsistency** | DXGI 格式一致性 | ✅ 活跃 |
 
 ### 编辑器
 

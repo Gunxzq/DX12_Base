@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace DX12Engine {
-namespace Resource {
+namespace Core {
 
 class DataPool {
 public:
@@ -105,6 +105,6 @@ private:
     void MarkSlotFree(int index);
 };
 
-} // namespace Resource
+} // namespace Core
 
 } // namespace DX12Engine

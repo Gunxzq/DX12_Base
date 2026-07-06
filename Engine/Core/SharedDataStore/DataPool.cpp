@@ -8,7 +8,7 @@
 
 using namespace DX12Engine::Boot;
 
-namespace DX12Engine::Resource {
+namespace DX12Engine::Core {
 
 void DataPool::Initialize(const std::string &name, size_t totalSize, size_t alignment, MemoryStrategy strategy,
                           size_t blockSize) {
@@ -468,4 +468,4 @@ void DataPool::AllocateBlockInternal() {
     m_blocks.push_back(newBlock);
 }
 
-} // namespace DX12Engine::Resource
+} // namespace DX12Engine::Core

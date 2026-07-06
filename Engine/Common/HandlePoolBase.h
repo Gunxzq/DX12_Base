@@ -1,3 +1,4 @@
+// HandlePoolBase.h — 通用句柄池系统（模板基类）
 #pragma once
 #include <atomic>
 #include <cassert>
@@ -5,7 +6,7 @@
 #include <mutex>
 #include <vector>
 
-namespace DX12Engine::Resource {
+namespace DX12Engine {
 
 template <typename HandleType, typename StateEnum, typename TypeEnum> class HandlePoolBase {
 public:
@@ -21,7 +22,6 @@ public:
     virtual HandleType AllocateSlot(TypeEnum type, uint8_t poolId, StateEnum initialState) = 0;
     virtual void FreeSlot(HandleType handle) = 0;
 
-    // 非虚方法（可直接继承）
     void Initialize(const InitConfig &config = {}) {
         std::lock_guard<std::mutex> lock(m_mutex);
         uint32_t cap = m_capacity.load(std::memory_order_relaxed);
@@ -51,7 +51,6 @@ public:
     }
 
     void SetState(HandleType handle, StateEnum state) {
-        // snapshot 持有 shared_ptr 引用，防止 ExpandCapacity 替换数组时访问已释放内存
         auto states = m_states;
         auto generations = m_generations;
         uint32_t cap = m_capacity.load(std::memory_order_relaxed);
@@ -132,13 +131,10 @@ public:
 protected:
     mutable std::mutex m_mutex;
     std::vector<TypeEnum> m_types;
-    // BugFix: 使用 shared_ptr 替代 unique_ptr，无锁路径通过 snapshot 持有引用，
-    // 确保 ExpandCapacity/Shutdown 替换数组时旧内存不会被提前释放
     std::shared_ptr<std::atomic<StateEnum>[]> m_states;
     std::shared_ptr<std::atomic<uint32_t>[]> m_generations;
     std::shared_ptr<std::atomic<void *>[]> m_dataPtrs;
     std::vector<uint32_t> m_freeIndices;
-    // BugFix: m_capacity 在 TLS 无锁路径中被读取，必须是 atomic 以避免 data race
     std::atomic<uint32_t> m_capacity = 0;
     bool m_initialized = false;
 
@@ -254,4 +250,4 @@ protected:
     }
 };
 
-} // namespace DX12Engine::Resource
+} // namespace DX12Engine

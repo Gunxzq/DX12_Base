@@ -2,7 +2,7 @@
 #pragma once
 
 #include "Math/BoundingVolume.h"
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include <DirectXMath.h>
 #include <d3d12.h>
 

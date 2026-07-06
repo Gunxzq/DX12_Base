@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include "Resource/Struct/TextureHandle.h"
 #include <d3d12.h>
 #include <string>

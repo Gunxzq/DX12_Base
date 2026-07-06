@@ -2,9 +2,7 @@
 #pragma once
 #include <cstdint>
 
-namespace DX12Engine {
-
-namespace Resource {
+namespace DX12Engine::Core {
 
 // ========================================================================
 // 全局线程上下文：解决 TLS 爆炸问题
@@ -29,7 +27,5 @@ inline thread_local ResourceThreadContext g_threadContext;
 
 // 获取指定池的线程状态
 inline PoolThreadState *GetThreadPoolState(uint8_t poolId) { return &g_threadContext.slotStates[poolId]; }
-
-} // namespace Resource
 
 } // namespace DX12Engine

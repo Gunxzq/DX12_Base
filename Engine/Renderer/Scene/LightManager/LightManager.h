@@ -7,7 +7,7 @@
 #include "Renderer/Scene/Struct/Frustum.h"
 #include "Resource/Pool/DepthStencilPool.h"
 #include "Resource/Pool/RenderTargetPool.h"
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include <d3d12.h>
 #include <vector>
 

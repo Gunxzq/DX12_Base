@@ -1,7 +1,7 @@
 #pragma once
 #include "Resource/Struct/Descriptor.h"
 #include "Resource/Struct/DescriptorHandle.h"
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include <d3d12.h>
 #include <unordered_map>
 #include <vector>
