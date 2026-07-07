@@ -1,5 +1,6 @@
-#include "Async/TerrainLoadTask.h"
+#include "Background/TerrainLoadTask.h"
 #include "Boot/GameContext.h"
+#include "Core/SharedDataStore/SharedDataStore.h"
 #include "ECS/Core/Components.h"
 #include "ECS/Core/Registry.h"
 #include "Event/EventRegistry.h"
@@ -458,123 +459,121 @@ void GameWorld::RegisterWaterRenderSystem() {
 }
 
 void GameWorld::RegisterTerrainSystems() {
-    // System A: TerrainGPUCreateSystem
+    // 合并 System：从 SharedDataStore 读取 TerrainGPUResult → 注册 GPU 资源 → 创建 ECS 实体
+    //
+    // 数据流：
+    //   事件 payload (低位 32 bits) = DataSlotHandle → SharedDataStore::GetData()
+    //   → TerrainGPUResult* → 注册 GeometryHandle/TextureHandle → 创建 Entity
+    //   高位 32 bits = 资源类型标识（0=地形），用于区分不同资源类型
     SystemRegistry::Register(
         {.name = "TerrainGPUCreateSystem",
          .func =
              [this](Registry &reg, const MessageContext &ctx) {
-                 uint32_t requestId = static_cast<uint32_t>(ctx.payload >> 32);
-                 m_context->Logging->Info("[TerrainGPUCreate] Triggered (request={})", requestId);
-                 if (!m_terrainReadyState)
-                     return;
-                 auto &state = *m_terrainReadyState;
-                 if (!state.geometryCreated.load()) {
-                     return;
-                 }
-                 if (!state.vbHandle.IsValid() || !state.ibHandle.IsValid()) {
+                 // 从 payload 低位解码 DataSlotHandle
+                 auto cpuHandle = Core::DataSlotHandle::FromUint32(static_cast<uint32_t>(ctx.payload & 0xFFFFFFFF));
+                 uint32_t flags = static_cast<uint32_t>(ctx.payload >> 32);
+                 m_context->Logging->Info("[TerrainGPUCreate] Triggered (handle={}, flags={})",
+                                          static_cast<uint32_t>(cpuHandle), flags);
+
+                 auto &assetMgr = Core::SharedDataStore::GetInstance();
+                 auto *result = static_cast<const Async::TerrainGPUResult *>(assetMgr.GetData(cpuHandle));
+                 if (!result) {
+                     m_context->Logging->Error("[TerrainGPUCreate] Invalid handle from AssetDataManager");
                      return;
                  }
 
-                 uint32_t indexCount = static_cast<uint32_t>(m_terrainLoadData->indices.size());
+                 // 注册几何体（PatchMesh）
                  Resource::PatchMesh mesh;
-                 mesh.vertexBufferHandle = state.vbHandle;
-                 mesh.indexBufferHandle = state.ibHandle;
-                 mesh.vertexCount = static_cast<uint32_t>(m_terrainLoadData->vertices.size());
-                 mesh.indexCount = indexCount;
-                 mesh.patchCount = indexCount / 4;
+                 mesh.vertexBufferHandle = result->vbHandle;
+                 mesh.indexBufferHandle = result->ibHandle;
+                 mesh.vertexCount = result->vertexCount;
+                 mesh.indexCount = result->indexCount;
+                 mesh.patchCount = result->indexCount / 4;
                  mesh.vertexStride = sizeof(GeometryGenerator::Vertex);
                  mesh.indexFormat = DXGI_FORMAT_R32_UINT;
                  mesh.patchType = Resource::PatchType::Quad;
                  mesh.isGpuReady = true;
-                 mesh.localBounds = state.bounds;
-                 auto handle = m_context->GeometryResourceManager->RegisterGeometry<PatchMesh>(mesh);
-                 m_terrainGeometryHandle = handle;
+                 mesh.localBounds = result->bounds;
+                 auto geoHandle = m_context->GeometryResourceManager->RegisterGeometry<PatchMesh>(mesh);
 
-                 if ((!m_terrainTextureHandle.IsValid() || !m_terrainAlbedoHandle.IsValid() ||
-                      !m_terrainNormalHandle.IsValid()) &&
-                     state.heightMapCreated.load() && state.albedoCreated.load() && state.normalCreated.load()) {
+                 // 创建纹理 SRV
+                 TextureHandle heightMapHandle = TextureHandle::Invalid();
+                 TextureHandle albedoHandle = TextureHandle::Invalid();
+                 TextureHandle normalHandle = TextureHandle::Invalid();
+                 if (result->heightMapGpuHandle.IsValid() || result->albedoGpuHandle.IsValid() ||
+                     result->normalMapGpuHandle.IsValid()) {
                      uint32_t baseSrvIdx = m_context->DescriptorHeaps->AllocateConsecutive(PartitionType::Texture, 3);
                      if (baseSrvIdx != UINT32_MAX) {
                          auto device = m_context->DeviceContext->GetDevice();
                          auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
-                         if (state.heightMapGpuHandle.IsValid() && !m_terrainTextureHandle.IsValid()) {
+
+                         if (result->heightMapGpuHandle.IsValid()) {
                              D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                             srvDesc.Format = state.heightMapDesc.Format;
+                             srvDesc.Format = result->heightMapDesc.Format;
                              srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                              srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                              srvDesc.Texture2D.MostDetailedMip = 0;
-                             srvDesc.Texture2D.MipLevels = state.heightMapDesc.MipLevels;
-                             auto cpuHandle = m_context->DescriptorHeaps->GetCpuHandle(
+                             srvDesc.Texture2D.MipLevels = result->heightMapDesc.MipLevels;
+                             auto cpuHandleDesc = m_context->DescriptorHeaps->GetCpuHandle(
                                  D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, baseSrvIdx);
-                             device->CreateShaderResourceView(gpuMgr.GetResource(state.heightMapGpuHandle), &srvDesc,
-                                                              cpuHandle);
-                             m_terrainTextureHandle =
-                                 m_context->TextureMgr->RegisterTexture(state.heightMapGpuHandle, baseSrvIdx);
+                             device->CreateShaderResourceView(gpuMgr.GetResource(result->heightMapGpuHandle), &srvDesc,
+                                                              cpuHandleDesc);
+                             heightMapHandle =
+                                 m_context->TextureMgr->RegisterTexture(result->heightMapGpuHandle, baseSrvIdx);
                          }
-                         if (state.albedoGpuHandle.IsValid() && !m_terrainAlbedoHandle.IsValid()) {
+                         if (result->albedoGpuHandle.IsValid()) {
                              D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                             srvDesc.Format = state.albedoDesc.Format;
+                             srvDesc.Format = result->albedoDesc.Format;
                              srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                              srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                              srvDesc.Texture2D.MostDetailedMip = 0;
-                             srvDesc.Texture2D.MipLevels = state.albedoDesc.MipLevels;
-                             auto cpuHandle = m_context->DescriptorHeaps->GetCpuHandle(
+                             srvDesc.Texture2D.MipLevels = result->albedoDesc.MipLevels;
+                             auto cpuHandleDesc = m_context->DescriptorHeaps->GetCpuHandle(
                                  D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, baseSrvIdx + 1);
-                             device->CreateShaderResourceView(gpuMgr.GetResource(state.albedoGpuHandle), &srvDesc,
-                                                              cpuHandle);
-                             m_terrainAlbedoHandle =
-                                 m_context->TextureMgr->RegisterTexture(state.albedoGpuHandle, baseSrvIdx + 1);
+                             device->CreateShaderResourceView(gpuMgr.GetResource(result->albedoGpuHandle), &srvDesc,
+                                                              cpuHandleDesc);
+                             albedoHandle =
+                                 m_context->TextureMgr->RegisterTexture(result->albedoGpuHandle, baseSrvIdx + 1);
                          }
-                         if (state.normalMapGpuHandle.IsValid() && !m_terrainNormalHandle.IsValid()) {
+                         if (result->normalMapGpuHandle.IsValid()) {
                              D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                             srvDesc.Format = state.normalMapDesc.Format;
+                             srvDesc.Format = result->normalMapDesc.Format;
                              srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                              srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                              srvDesc.Texture2D.MostDetailedMip = 0;
-                             srvDesc.Texture2D.MipLevels = state.normalMapDesc.MipLevels;
-                             auto cpuHandle = m_context->DescriptorHeaps->GetCpuHandle(
+                             srvDesc.Texture2D.MipLevels = result->normalMapDesc.MipLevels;
+                             auto cpuHandleDesc = m_context->DescriptorHeaps->GetCpuHandle(
                                  D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, baseSrvIdx + 2);
-                             device->CreateShaderResourceView(gpuMgr.GetResource(state.normalMapGpuHandle), &srvDesc,
-                                                              cpuHandle);
-                             m_terrainNormalHandle =
-                                 m_context->TextureMgr->RegisterTexture(state.normalMapGpuHandle, baseSrvIdx + 2);
+                             device->CreateShaderResourceView(gpuMgr.GetResource(result->normalMapGpuHandle), &srvDesc,
+                                                              cpuHandleDesc);
+                             normalHandle =
+                                 m_context->TextureMgr->RegisterTexture(result->normalMapGpuHandle, baseSrvIdx + 2);
                          }
                      }
                  }
-                 uint64_t payload = Event::MakeAssetLoadedPayload(requestId, handle.index, handle.generation);
-                 Event::MessageDispatcher::GetInstance()->PostEvent(
-                     static_cast<uint32_t>(Event::EventType::TerrainReadyEvent), 0, payload,
-                     Event::EventPriority::P2_Normal);
+
+                 // 创建 ECS 实体
+                 auto entity = reg.CreateEntity();
+                 reg.AddComponent<ECS::TransformComponent>(entity, XMFLOAT3(0, -50, 0), XMFLOAT3(0, 0, 0),
+                                                           XMFLOAT3(1, 1, 1));
+                 ECS::TerrainComponent terrainComp;
+                 terrainComp.geometryHandle = geoHandle;
+                 terrainComp.heightMapHandle = heightMapHandle;
+                 terrainComp.albedoHandle = albedoHandle;
+                 terrainComp.normalHandle = normalHandle;
+                 terrainComp.heightScale = result->maxHeight;
+                 reg.AddComponent<ECS::TerrainComponent>(entity, std::move(terrainComp));
+
+                 // 释放 AssetDataManager 中的数据
+                 assetMgr.ScheduleRelease(cpuHandle, 0);
+
+                 m_context->Logging->Info("[TerrainGPUCreate] Terrain entity created (handle={})",
+                                          static_cast<uint32_t>(cpuHandle));
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Main,
          .priority = TaskPriority::Normal,
-         .interestedMessages = {static_cast<uint32_t>(Event::EventType::TerrainLoadedEvent)}});
-
-    // System B: TerrainCombineSystem
-    SystemRegistry::Register({.name = "TerrainCombineSystem",
-                              .func =
-                                  [this](Registry &reg, const MessageContext &ctx) {
-                                      uint32_t requestId = 0, handleIdx = 0, handleGen = 0;
-                                      Event::DecodeAssetLoadedPayload(ctx.payload, requestId, handleIdx, handleGen);
-                                      auto entity = reg.CreateEntity();
-                                      m_terrainEntity = entity;
-                                      reg.AddComponent<ECS::TransformComponent>(entity, XMFLOAT3(0, -50, 0),
-                                                                                XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1));
-                                      ECS::TerrainComponent terrainComp;
-                                      terrainComp.geometryHandle = m_terrainGeometryHandle;
-                                      terrainComp.heightMapHandle = m_terrainTextureHandle;
-                                      terrainComp.albedoHandle = m_terrainAlbedoHandle;
-                                      terrainComp.normalHandle = m_terrainNormalHandle;
-                                      terrainComp.heightScale =
-                                          m_terrainLoadData ? m_terrainLoadData->maxHeight : 20.0f;
-                                      reg.AddComponent<ECS::TerrainComponent>(entity, std::move(terrainComp));
-                                      m_terrainReadyState.reset();
-                                  },
-                              .phase = TaskPhase::Render,
-                              .threadType = ThreadType::Main,
-                              .priority = TaskPriority::Normal,
-                              .interestedMessages = {static_cast<uint32_t>(Event::EventType::TerrainReadyEvent)}});
+         .interestedMessages = {static_cast<uint32_t>(Event::EventType::ResourceReadyEvent)}});
 }
 
 void GameWorld::RegisterTerrainRenderSystem() {

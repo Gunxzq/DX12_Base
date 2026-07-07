@@ -1,6 +1,6 @@
-#include "Async/BackgroundExecutor.h"
-#include "Async/ResourceTransitionTask.h"
-#include "Async/TerrainLoadTask.h"
+#include "Background/BackgroundExecutor.h"
+#include "Background/ResourceTransitionTask.h"
+#include "Background/TerrainLoadTask.h"
 #include "Boot/GameContext.h"
 #include "Common/ThrowHelper.h"
 #include "Common/d3dUtil.h"
@@ -14,9 +14,11 @@
 #include "Math/HashTypes.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
+#include "Renderer/Material/MaterialManager.h"
+#include "Renderer/Material/MaterialResource.h"
 #include "Renderer/Pipeline/WaterRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
-#include "Resource/AssetDataManager.h"
+#include "Core/SharedDataStore/SharedDataStore.h"
 #include "Resource/AssetLoader/AssetLoader.h"
 #include "Resource/AssetLoader/Loader/DDSLoader.h"
 #include "Resource/AssetLoader/Loader/M3dLoader.h"
@@ -24,9 +26,7 @@
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include "Renderer/Material/MaterialManager.h"
 #include "Resource/Manager/SkeletonManager.h"
-#include "Renderer/Material/MaterialResource.h"
 #include "Resource/Texture/TextureManager.h"
 #include <DirectXMath.h>
 #include <algorithm>
@@ -59,7 +59,9 @@ void GameWorld::LoadSoldierCharacter() {
 
     // 1. 解析 .m3d
     Resource::M3dMeshData meshData;
-    if (!Resource::M3dLoader::LoadFromFile("Content/Models/soldier.m3d", meshData)) {
+    std::wstring resolvedPath = m_context->ResolvePath(L"Content/Models/soldier.m3d");
+    if (!Resource::M3dLoader::LoadFromFile(
+            std::string(resolvedPath.begin(), resolvedPath.end()), meshData)) {
         m_context->Logging->Error("[GameWorld] Failed to load soldier.m3d");
         return;
     }
@@ -500,7 +502,6 @@ void GameWorld::CreateMaterials() {
     terrainMaterial.ambient = 0.8f;
     terrainMaterial.alpha = 1.0f;
     terrainMaterial.rendererTypeHash = TYPE_HASH("OpaquePBR");
-    m_terrainMaterialHandle = materialMgr->RegisterMaterial(terrainMaterial);
 
     // 水材质
     MaterialData waterMaterial;
@@ -803,25 +804,18 @@ void GameWorld::LoadTerrainAsync() {
 
     static std::atomic<uint32_t> s_nextRequestId{1};
     uint32_t requestId = s_nextRequestId++;
-    m_terrainRequestId = requestId;
 
     m_context->Logging->Info("[LoadTerrainAsync] Starting async terrain loading (request={})...", requestId);
-
-    m_terrainReadyState = std::make_shared<Async::TerrainReadyState>();
 
     Async::TerrainLoadTaskFactory::Input input;
     input.device = m_context->DeviceContext->GetDevice();
     input.cmdMgr = &m_context->DeviceContext->GetCommandManager();
-    input.descriptorHeaps = m_context->DescriptorHeaps;
-    input.readyState = m_terrainReadyState;
-    input.backgroundExecutor = m_backgroundExecutor.get();
 
     Async::TerrainLoadDataPtr terrainData;
-    auto loadTask = Async::TerrainLoadTaskFactory::Create(requestId, L"Content/Terrain/H_Source_heightmap.png", 256.0f,
-                                                          256.0f, 20.0f, 256, terrainData, input);
-    m_terrainLoadData = terrainData;
+    auto loadTask = Async::TerrainLoadTaskFactory::CreateLoadTask(requestId, L"Content/Terrain/H_Source_heightmap.png",
+                                                                  256.0f, 256.0f, 20.0f, 256, terrainData, input);
 
-    m_backgroundExecutor->Submit(std::move(loadTask));
+    m_backgroundExecutor->SubmitLoadTask(std::move(loadTask));
 
     m_context->Logging->Info("[LoadTerrainAsync] Task submitted to BackgroundExecutor (pending={}, total={})",
                              m_backgroundExecutor->GetPendingCount(), m_backgroundExecutor->GetTotalSubmitted());

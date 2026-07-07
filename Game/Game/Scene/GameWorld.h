@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Async/TerrainLoadTask.h"
 #include "ECS/Core/Entity.h"
 #include "Math/BoundingVolume.h"
 #include "Renderer/ApplicationRenderTargets.h"
@@ -20,7 +19,7 @@
 #include "Resource/Struct/DescriptorHandle.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Renderer/Material/MaterialHandle.h"
-#include "Resource/Struct/ResourceHandle.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Scheduler/Task.h"
 #include <memory>
@@ -140,20 +139,6 @@ private:
     std::unique_ptr<DX12Engine::Renderer::LightingRenderer> m_lightingRenderer;
 
     // 注册地形异步加载响应 System
-    // 架构：后台线程完成所有 GPU 资源创建 + 上传，主线程只注册句柄 + 创建 ECS 实体
-    //
-    // 数据流：
-    //   LoadTerrainAsync() → BackgroundExecutor::Submit(TerrainLoadTask)
-    //     后台线程: CPU加载 → 创建VB/IB (UPLOAD堆) → 创建纹理(DEFAULT堆)
-    //              → COPY队列上传 → ResourceTransition → 写入 TerrainReadyState
-    //              → PostEvent(TerrainLoaded)
-    //
-    //   TerrainGPUCreateSystem (主线程，响应 TerrainLoaded):
-    //     从 TerrainReadyState 读取 GpuResourceHandle + srvIndex → 注册 GeometryHandle/TextureHandle
-    //     → PostEvent(TerrainReady)
-    //
-    //   TerrainCombineSystem (主线程，响应 TerrainReady):
-    //     注册 LODMesh → 创建 ECS 实体
     void RegisterTerrainSystems();
 
 private:
@@ -210,19 +195,6 @@ private:
     DX12Engine::Resource::TextureHandle m_skyboxTextureHandle;   // 天空盒纹理 SRV
     DX12Engine::Resource::GeometryHandle m_skyboxGeometryHandle; // 天空盒几何体
     D3D12_GPU_VIRTUAL_ADDRESS m_skyboxObjectCBAddress = 0;       // 天空盒单位矩阵 CBV 地址
-
-    // 地形数据
-    DX12Engine::Resource::GeometryHandle m_terrainGeometryHandle;
-    DX12Engine::Resource::MaterialHandle m_terrainMaterialHandle;
-    DX12Engine::Resource::TextureHandle m_terrainTextureHandle = DX12Engine::Resource::TextureHandle::Invalid();
-    DX12Engine::Resource::TextureHandle m_terrainAlbedoHandle = DX12Engine::Resource::TextureHandle::Invalid();
-    DX12Engine::Resource::TextureHandle m_terrainNormalHandle = DX12Engine::Resource::TextureHandle::Invalid();
-    DX12Engine::ECS::Entity m_terrainEntity;
-
-    // 地形异步加载状态（后台线程写入 GPU 资源，主线程读取后注册句柄）
-    DX12Engine::Async::TerrainReadyStatePtr m_terrainReadyState; // 存储后台线程的资源
-    DX12Engine::Async::TerrainLoadDataPtr m_terrainLoadData;     // 存储几何体数据
-    uint32_t m_terrainRequestId = 0; // ID关联同一个地形加载请求的不同阶段，也就是说明后台线程是关联到那个任务和请求的
 
     // 水
     DX12Engine::Resource::MaterialHandle m_waterMaterialHandle;

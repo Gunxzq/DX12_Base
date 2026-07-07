@@ -39,114 +39,199 @@ find_package(GameNetworkingSockets CONFIG REQUIRED)
 find_package(protobuf CONFIG REQUIRED)
 
 # ========================================================================
-# 3. 构建引擎核心库 (Static Library)
+# 3. 拆分引擎模块 (Static Libraries)
+#    按目录划分，改一个模块不影响其他模块的重编译
 # ========================================================================
-# 收集 Engine 目录下的所有源文件和头文件
-file(GLOB_RECURSE ENGINE_SOURCES 
-    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/**/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/**/*.h"
+
+set(ENGINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Engine)
+set(FIDELITYFX_DIR ${ENGINE_DIR}/ThirdParty/FidelityFX)
+
+# FidelityFX 排他规则（所有模块共用）
+set(FX_EXCLUDES
+    ".*/FidelityFX/framegeneration/.*"
+    ".*/ffx_fsr2.*" ".*/ffx_provider_fsr2.*"
+    ".*/ffx_frameinterpolation.*" ".*/ffx_opticalflow.*"
+    ".*/ffx_fsr3upscaler_shaderblobs.cpp" ".*/ffx_fsr3upscaler.cpp"
+    ".*/ffx_provider_fsr3upscale.cpp" ".*/ffx_provider_registry.cpp"
+    ".*/ffx_api.cpp"
 )
 
-# ========================================================================
-# FidelityFX FSR SDK 配置
-# ========================================================================
-set(FIDELITYFX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/FidelityFX)
+macro(filter_fx SOURCES_LIST)
+    foreach(pattern ${FX_EXCLUDES})
+        list(FILTER ${SOURCES_LIST} EXCLUDE REGEX "${pattern}")
+    endforeach()
+endmacro()
 
 # ========================================================================
-# 过滤掉 FSR SDK 中不需要编译的源文件（帧生成、FSR2 等）
+# 3.1 DX12Core — 稳定基础层（Common/Core/Event/Math/ECS/Platform）
 # ========================================================================
-# 排除整个 framegeneration 目录
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/FidelityFX/framegeneration/.*")
-
-# 排除 FSR2 相关文件
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_fsr2.*")
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_provider_fsr2.*")
-
-# 排除帧生成相关的 shaderblobs
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_frameinterpolation.*")
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_opticalflow.*")
-
-# 排除 FSR3 Upscaler 实现文件和 shaderblobs（由 DLL 提供）
-# ffx_fsr3upscaler_shaderblobs.cpp 需要通过构建脚本生成的 permutation 头文件，
-# ffx_fsr3upscaler.cpp 依赖 shaderblobs 中的函数，两者必须同时存在或同时排除。
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_fsr3upscaler_shaderblobs.cpp")
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_fsr3upscaler.cpp")
-
-# 排除 provider 文件（由 DLL 提供）
-# ffx_provider_fsr3upscale.cpp 依赖 ffx_fsr3upscaler.cpp 中的符号
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_provider_fsr3upscale.cpp")
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_provider_registry.cpp")
-
-# 排除 ffx_api.cpp —— ffxCreateContext/ffxDispatch 等由 amd_fidelityfx_loader_dx12.dll 提供
-# 编译自己的 ffx_api.cpp 会覆盖 loader DLL 的实现，导致 provider 注册失败
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/ffx_api.cpp")
-
-
-
-# 创建静态库
-add_library(DX12EngineCore STATIC ${ENGINE_SOURCES})
-
-# 设置包含目录 (PUBLIC 使得链接此库的目标也能找到头文件)
-target_include_directories(DX12EngineCore PUBLIC 
-    ${CMAKE_CURRENT_SOURCE_DIR}/Engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/Content
-    ${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imgui
-    ${FIDELITYFX_DIR}/api/include
-    ${FIDELITYFX_DIR}/api/include/dx12
-    ${FIDELITYFX_DIR}/api/internal              # 内部头文件
-    ${FIDELITYFX_DIR}/backend/dx12
-    ${FIDELITYFX_DIR}/upscalers/include
-    ${FIDELITYFX_DIR}/upscalers/fsr3/include
-    ${FIDELITYFX_DIR}/upscalers/fsr3/internal   # 内部头文件
+file(GLOB_RECURSE CORE_SOURCES
+    "${ENGINE_DIR}/Common/*.cpp"    "${ENGINE_DIR}/Common/*.h"
+    "${ENGINE_DIR}/Boot/*.cpp"      "${ENGINE_DIR}/Boot/*.h"
+    "${ENGINE_DIR}/Core/*.cpp"      "${ENGINE_DIR}/Core/*.h"
+    "${ENGINE_DIR}/Event/*.cpp"     "${ENGINE_DIR}/Event/*.h"
+    "${ENGINE_DIR}/Framework/*.cpp" "${ENGINE_DIR}/Framework/*.h"
+    "${ENGINE_DIR}/Logger/*.cpp"    "${ENGINE_DIR}/Logger/*.h"
+    "${ENGINE_DIR}/Math/*.cpp"      "${ENGINE_DIR}/Math/*.h"
+    "${ENGINE_DIR}/ECS/*.cpp"       "${ENGINE_DIR}/ECS/*.h"
+    "${ENGINE_DIR}/Platform/*.cpp"  "${ENGINE_DIR}/Platform/*.h"
+    "${ENGINE_DIR}/Scheduler/*.cpp" "${ENGINE_DIR}/Scheduler/*.h"
 )
 
+add_library(DX12Core STATIC ${CORE_SOURCES})
 
+target_include_directories(DX12Core PUBLIC
+    ${ENGINE_DIR}
+    ${ENGINE_DIR}/ThirdParty/imgui
+    ${CMAKE_CURRENT_SOURCE_DIR}/Game/Application
+)
 
-
-
-# 确保引擎内部的所有代码都使用 mimalloc 的重载操作符
-target_compile_definitions(DX12EngineCore PRIVATE
-    UNICODE
-    _UNICODE
+target_compile_definitions(DX12Core PUBLIC
+    UNICODE _UNICODE
     MI_OVERRIDE=ON
     IMGUI_DEFINE_MATH_OPERATORS
 )
 
+target_compile_options(DX12Core PRIVATE /MP)
+target_precompile_headers(DX12Core PRIVATE "${ENGINE_DIR}/Common/Common.h")
 
-# 允许编译器同时使用多个核心进行编译，显著加快大型项目的构建速度
-target_compile_options(DX12EngineCore PRIVATE /MP)
-
-
-# 指定 Common.h 为预编译头，因为它是引擎中最基础且被广泛包含的头文件
-# 这将大幅减少每个 cpp文件重复解析 Windows.h, DirectXMath, STL 等重型头文件的时间
-target_precompile_headers(DX12EngineCore PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/Common/Common.h"
-)
-
-# 链接依赖库
-target_link_libraries(DX12EngineCore PUBLIC 
+target_link_libraries(DX12Core PUBLIC
     nlohmann_json::nlohmann_json
     concurrentqueue::concurrentqueue
     EnTT::EnTT
     spdlog::spdlog
-    d3d12.lib
-    dxgi.lib
-    dxguid.lib
-    d3dcompiler.lib
-    assimp::assimp
-    mimalloc-static
     Jolt::Jolt
-    Taskflow::Taskflow
+    mimalloc-static
     GameNetworkingSockets::static
     protobuf::libprotobuf
+)
+
+# ========================================================================
+# 3.2 DX12Resource — 资源管理（GPU资源/资产加载/格式定义）
+# ========================================================================
+file(GLOB_RECURSE RESOURCE_SOURCES
+    "${ENGINE_DIR}/Resource/*.cpp" "${ENGINE_DIR}/Resource/*.h"
+    "${ENGINE_DIR}/AssetDefinitions/*.cpp" "${ENGINE_DIR}/AssetDefinitions/*.h"
+)
+
+add_library(DX12Resource STATIC ${RESOURCE_SOURCES})
+
+target_include_directories(DX12Resource PUBLIC
+    ${ENGINE_DIR}
+)
+
+target_compile_definitions(DX12Resource PUBLIC
+    UNICODE _UNICODE
+    MI_OVERRIDE=ON
+)
+
+target_compile_options(DX12Resource PRIVATE /MP)
+target_precompile_headers(DX12Resource REUSE_FROM DX12Core)
+
+target_link_libraries(DX12Resource PUBLIC
+    DX12Core
+    d3d12.lib dxgi.lib dxguid.lib d3dcompiler.lib
+)
+
+# ========================================================================
+# 3.3 DX12Renderer — 渲染管线（最大模块，改动最频繁）
+# ========================================================================
+file(GLOB_RECURSE RENDERER_SOURCES
+    "${ENGINE_DIR}/Renderer/*.cpp" "${ENGINE_DIR}/Renderer/*.h"
+    "${ENGINE_DIR}/DebugUI/*.cpp"  "${ENGINE_DIR}/DebugUI/*.h"
+    # FidelityFX 源码（与渲染器绑定的第三方库）
+    "${ENGINE_DIR}/ThirdParty/FidelityFX/**/*.cpp"
+    "${ENGINE_DIR}/ThirdParty/FidelityFX/**/*.h"
+    # imgui 源码
+    "${ENGINE_DIR}/ThirdParty/imgui/*.cpp"
+    "${ENGINE_DIR}/ThirdParty/imgui/*.h"
+)
+
+filter_fx(RENDERER_SOURCES)
+
+add_library(DX12Renderer STATIC ${RENDERER_SOURCES})
+
+target_include_directories(DX12Renderer PUBLIC
+    ${ENGINE_DIR}
+    ${ENGINE_DIR}/ThirdParty/imgui
+    ${FIDELITYFX_DIR}/api/include
+    ${FIDELITYFX_DIR}/api/include/dx12
+    ${FIDELITYFX_DIR}/api/internal
+    ${FIDELITYFX_DIR}/backend/dx12
+    ${FIDELITYFX_DIR}/upscalers/include
+    ${FIDELITYFX_DIR}/upscalers/fsr3/include
+    ${FIDELITYFX_DIR}/upscalers/fsr3/internal
+)
+
+target_compile_definitions(DX12Renderer PUBLIC
+    UNICODE _UNICODE
+    MI_OVERRIDE=ON
+    IMGUI_DEFINE_MATH_OPERATORS
+    FFX_API_ENABLE_DX12=1
+)
+
+target_compile_options(DX12Renderer PRIVATE /MP)
+target_precompile_headers(DX12Renderer REUSE_FROM DX12Core)
+
+target_link_libraries(DX12Renderer PUBLIC
+    DX12Resource
+    DX12Core
     ${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_loader_dx12.lib
 )
 
+# ========================================================================
+# 3.4 DX12Background — 后台异步任务
+# ========================================================================
+file(GLOB_RECURSE BACKGROUND_SOURCES
+    "${ENGINE_DIR}/Background/*.cpp" "${ENGINE_DIR}/Background/*.h"
+)
 
-# 如果只在 Runtime 使用，也可以只加在 Runtime 上
-target_compile_definitions(DX12EngineCore PUBLIC
+add_library(DX12Background STATIC ${BACKGROUND_SOURCES})
+
+target_include_directories(DX12Background PUBLIC
+    ${ENGINE_DIR}
+)
+
+target_compile_definitions(DX12Background PUBLIC
+    UNICODE _UNICODE
+    MI_OVERRIDE=ON
+)
+
+target_compile_options(DX12Background PRIVATE /MP)
+target_precompile_headers(DX12Background REUSE_FROM DX12Core)
+
+target_link_libraries(DX12Background PUBLIC
+    DX12Resource
+    DX12Core
+    Taskflow::Taskflow
+)
+
+# ========================================================================
+# 3.5 DX12Network — 网络模块
+# ========================================================================
+file(GLOB_RECURSE NETWORK_SOURCES
+    "${ENGINE_DIR}/Network/*.cpp" "${ENGINE_DIR}/Network/*.h"
+)
+
+add_library(DX12Network STATIC ${NETWORK_SOURCES})
+
+target_include_directories(DX12Network PUBLIC
+    ${ENGINE_DIR}
+)
+
+target_compile_definitions(DX12Network PUBLIC
+    UNICODE _UNICODE
+    MI_OVERRIDE=ON
     STEAMNETWORKINGSOCKETS_STATIC_LINK
-    FFX_API_ENABLE_DX12=1
+)
+
+target_compile_options(DX12Network PRIVATE /MP)
+target_precompile_headers(DX12Network REUSE_FROM DX12Core)
+
+target_link_libraries(DX12Network PUBLIC
+    DX12Core
+    GameNetworkingSockets::static
+    protobuf::libprotobuf
 )
 
 
@@ -155,18 +240,18 @@ target_compile_definitions(DX12EngineCore PUBLIC
 # 4. 构建主程序 (Executable)
 # ========================================================================
 # 收集 Runtime 目录下的源文件
-file(GLOB_RECURSE RUNTIME_SOURCES 
-   "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/**/*.cpp"
-   "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/**/*.h"
+file(GLOB_RECURSE GAME_SOURCES 
+   "${CMAKE_CURRENT_SOURCE_DIR}/Game/**/*.cpp"
+   "${CMAKE_CURRENT_SOURCE_DIR}/Game/**/*.h"
 )
 
 
 
-set(RUNTIME_RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Content/DX12_Base.rc")
+set(GAME_RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Game/Application/DX12_Base.rc")
 
 # 【关键修改】添加 WIN32 关键字
 # 这告诉链接器这是一个 Windows GUI 程序，入口点是 wWinMain/WinMain，而不是 main
-add_executable(${PROJECT_NAME} WIN32 ${RUNTIME_SOURCES} ${RUNTIME_RESOURCES})
+add_executable(DX12_Game WIN32 ${GAME_SOURCES} ${GAME_RESOURCES})
 
 
 
@@ -175,7 +260,7 @@ add_executable(${PROJECT_NAME} WIN32 ${RUNTIME_SOURCES} ${RUNTIME_RESOURCES})
 # 主程序编译定义
 # 【关键】MI_OVERRIDE=ON 必须定义在最终可执行文件目标上
 # 静态库不保留宏定义，会导致 mimalloc 无法替换全局 new/malloc
-target_compile_definitions(${PROJECT_NAME} PRIVATE
+target_compile_definitions(DX12_Game PRIVATE
     UNICODE
     _UNICODE
     MI_OVERRIDE=ON
@@ -183,84 +268,133 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 # 【新增优化 3】为主程序也启用 /MP 和 PCH
 # 虽然主程序代码较少，但保持一致性并加速 Runtime 部分的编译
-target_compile_options(${PROJECT_NAME} PRIVATE /MP)
-target_precompile_headers(${PROJECT_NAME} REUSE_FROM DX12EngineCore)
+target_compile_options(DX12_Game PRIVATE /MP)
+target_precompile_headers(DX12_Game REUSE_FROM DX12Core)
 
-# 引擎库编译定义 (与 EXE 保持一致，确保 mimalloc 正确注入)
-target_compile_definitions(DX12EngineCore PRIVATE
-    UNICODE
-    _UNICODE
-    MI_OVERRIDE=ON
+set_source_files_properties(${GAME_RESOURCES} PROPERTIES
+    RC_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/Game/Application"
 )
 
-
-set_source_files_properties(${RUNTIME_RESOURCES} PROPERTIES 
-    RC_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/Content"
+# 主程序链接所有引擎模块库（链接顺序：底层在前）
+target_link_libraries(DX12_Game PRIVATE
+    DX12Renderer
+    DX12Background
+    DX12Network
+    DX12Resource
+    DX12Core
 )
 
-# 主程序链接引擎核心库
-target_link_libraries(${PROJECT_NAME} PRIVATE 
-    DX12EngineCore
+# 设置独立输出目录
+set_target_properties(DX12_Game PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Bin/x64/Debug/Game"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Bin/x64/Release/Game"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/Bin/x64/RelWithDebInfo/Game"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/Bin/x64/MinSizeRel/Game"
 )
 
 # 设置包含目录
-target_include_directories(${PROJECT_NAME} PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}/Runtime  
+target_include_directories(DX12_Game PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/Game/Game
+    ${CMAKE_CURRENT_SOURCE_DIR}/Game/Application
 )
 
 
-# 【建议】显式链接 Windows 基础库，防止某些环境下链接缺失
-target_link_libraries(${PROJECT_NAME} PRIVATE
-    user32.lib
-    gdi32.lib
-    shell32.lib
-    ole32.lib
-    oleaut32.lib
-    uuid.lib
+# 【建议】显式链接 Windows 基础库
+target_link_libraries(DX12_Game PRIVATE
+    user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib
 )
 
-# 为 RC 编译器添加包含目录，使其能找到 resource.h 和 targetver.h
-target_include_directories(${PROJECT_NAME} PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}/Content
-)
 
-# 复制 Content 文件夹到输出目录
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_SOURCE_DIR}/Content
-    $<TARGET_FILE_DIR:${PROJECT_NAME}>/Content
-)
+# FSR 和第三方依赖 DLL 由 vcpkg 和 FidelityFX 自动复制，无需额外 POST_BUILD
+# Content/Config/Shaders 通过 .dxproject.ini 在运行时动态定位，不复制的输出目录
 
 # 复制 FSR DLL 到输出目录（仅当 DLL 存在于 signedbin 时）
 if(EXISTS "${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_loader_dx12.dll")
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    add_custom_command(TARGET DX12_Game POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_loader_dx12.dll
-            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            $<TARGET_FILE_DIR:DX12_Game>
         COMMENT "Copying FSR loader DLL..."
     )
 endif()
+# 生成 ProjectConfig 头文件（编译时常量，替代运行时 ProjectConfig.ini）
+set(PROJECT_TYPE "game")
+set(PROJECT_CONFIG_ROOT "Game/Config")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/Engine/Core/ProjectConfigGenerated.h.in"
+    "${CMAKE_BINARY_DIR}/Generated/Game/ProjectConfigGenerated.h"
+)
+
+target_include_directories(DX12_Game PRIVATE
+    "${CMAKE_BINARY_DIR}/Generated/Game"
+)
+
+# 复制 Game 配置文件到输出目录
+add_custom_command(TARGET DX12_Game POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Game/Config
+    $<TARGET_FILE_DIR:DX12_Game>/Config
+)
+
+# ========================================================================
+# 5. 构建编辑器 (骨架)
+# ========================================================================
+add_executable(DX12_Editor WIN32 "${CMAKE_CURRENT_SOURCE_DIR}/Editor/Application/main.cpp")
+
+target_link_libraries(DX12_Editor PRIVATE DX12Core)
+
+target_compile_definitions(DX12_Editor PRIVATE UNICODE _UNICODE)
+
+# 生成 ProjectConfig 头文件（编译时常量，替代运行时 ProjectConfig.ini）
+set(PROJECT_TYPE "editor")
+set(PROJECT_CONFIG_ROOT "Editor/Config")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/Engine/Core/ProjectConfigGenerated.h.in"
+    "${CMAKE_BINARY_DIR}/Generated/Editor/ProjectConfigGenerated.h"
+)
+
+target_include_directories(DX12_Editor PRIVATE
+    "${CMAKE_BINARY_DIR}/Generated/Editor"
+)
+
+# 复制 Editor 配置文件到输出目录
+add_custom_command(TARGET DX12_Editor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Editor/Config
+    $<TARGET_FILE_DIR:DX12_Editor>/Config
+)
+
+# 复制 Shaders 到输出目录（各渲染器编译时依赖 ShaderRoot）
+add_custom_command(TARGET DX12_Game POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Shaders
+    $<TARGET_FILE_DIR:DX12_Game>/Shaders
+)
+add_custom_command(TARGET DX12_Editor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Shaders
+    $<TARGET_FILE_DIR:DX12_Editor>/Shaders
+)
+
+set_target_properties(DX12_Editor PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Bin/x64/Debug/Editor"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Bin/x64/Release/Editor"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/Bin/x64/RelWithDebInfo/Editor"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/Bin/x64/MinSizeRel/Editor"
+)
+
+target_link_libraries(DX12_Editor PRIVATE
+    user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib
+)
 if(EXISTS "${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_upscaler_dx12.dll")
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    add_custom_command(TARGET DX12_Game POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_upscaler_dx12.dll
-            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            $<TARGET_FILE_DIR:DX12_Game>
         COMMENT "Copying FSR upscaler DLL..."
     )
 endif()
 
-# 复制 Config 文件夹到输出目录
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_SOURCE_DIR}/Config
-    $<TARGET_FILE_DIR:${PROJECT_NAME}>/Config
-)
-
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_SOURCE_DIR}/Shaders
-    $<TARGET_FILE_DIR:${PROJECT_NAME}>/Shaders
-)
 
 # ========================================================================
 # 5. 集成 Google Test (通过 vcpkg) - 默认启用测试
@@ -283,18 +417,17 @@ if(BUILD_TESTS)
     if(TEST_SOURCES)
         add_executable(DX12Tests ${TEST_SOURCES})
 
-        # 链接 GTest 主库 和 引擎核心库
+        # 链接 GTest 主库 和 引擎模块
         target_link_libraries(DX12Tests PRIVATE 
             GTest::gtest_main 
-            DX12EngineCore
+            DX12Core DX12Resource
         )
 
         # 自动发现测试用例，以便 VS Test Explorer 识别
         include(GoogleTest)
         gtest_discover_tests(DX12Tests)
     endif()
-endif()
-
+    endif()
 
 # ========================================================================
 # 7. 构建网络测试程序 (Standalone Executable)
@@ -306,17 +439,17 @@ add_executable(NetworkTest
 )
 
 # 复用引擎核心的预编译头以加速编译
-target_precompile_headers(NetworkTest REUSE_FROM DX12EngineCore)
+target_precompile_headers(NetworkTest REUSE_FROM DX12Core)
 
-# 链接引擎核心库 (其中已包含 GameNetworkingSockets 等依赖)
+# 链接引擎模块库 (Network 已依赖 DX12Core)
 target_link_libraries(NetworkTest PRIVATE 
-    DX12EngineCore
+    DX12Network DX12Core
 )
 
 # 设置包含目录，确保能找到 "Network/..." 头文件
 target_include_directories(NetworkTest PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/Runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/Game
 )
 
 # 复制 Content/Config 等到 NetworkTest 的输出目录，确保运行时能找到资源（如果需要）
@@ -339,10 +472,10 @@ add_executable(NetworkP2PTest
 )
 
 target_link_libraries(NetworkP2PTest PRIVATE 
-    DX12EngineCore
+    DX12Network DX12Core
 )
 
 target_include_directories(NetworkP2PTest PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/Runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/Game
 )

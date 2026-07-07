@@ -1,0 +1,16 @@
+{
+    "shader": "PBR/Standard",
+    "params": {
+        "baseColor":      [0.8, 0.3, 0.3, 1.0],
+        "metallic":       0.05,
+        "roughness":      0.6,
+        "ao":             0.8,
+        "alphaCutoff":    0.0
+    },
+    "textures": {
+        "baseColor":      "Content/Textures/bricks.dds",
+        "normal":         "Content/Textures/bricks_nmap.dds",
+        "ao":             "Content/Textures/bricks2_OCC.dds",
+        "metallicRoughness": "Content/Textures/bricks2_SPEC.dds"
+    }
+}

@@ -1,0 +1,7 @@
+{
+    "shader": "Sky/Procedural",
+    "params": {
+        "baseColor":      [0.5, 0.7, 0.9, 1.0],
+        "emissive":       [0.3, 0.5, 0.8, 1.0]
+    }
+}

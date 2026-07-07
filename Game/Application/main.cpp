@@ -1,7 +1,8 @@
-﻿#include "DX12_Base.h"
+﻿#include "main.h"
 #include "Boot/Bootstrap.h"
 #include "Boot/GameContext.h"
-#include "Game/Game.h"
+#include "ProjectConfigGenerated.h"
+#include "Game.h"
 #include "framework.h"
 
 using namespace DX12Engine::Boot;
@@ -23,8 +24,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
     Bootstrap bootstrap;
 
     try {
-        // 初始化模块
-        bootstrap.Run();
+        // 从 CMake 生成的编译时常量获取项目配置
+        auto projectConfig = DX12Engine::Core::GetProjectConfig();
+
+        // 初始化模块（传入项目配置，不再依赖全局 ProjectPaths）
+        bootstrap.Run(projectConfig);
 
         GameContext *context = bootstrap.CreateContext();
 

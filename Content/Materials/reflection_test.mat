@@ -1,0 +1,10 @@
+{
+    "shader": "PBR/Standard",
+    "params": {
+        "baseColor":      [0.9, 0.9, 0.9, 1.0],
+        "metallic":       1.0,
+        "roughness":      0.1,
+        "ao":             1.0,
+        "alphaCutoff":    0.0
+    }
+}

@@ -1,0 +1,186 @@
+{
+    "$schema": "../../Schemas/scene.schema.json",
+    "version": 1,
+    "metadata": {
+        "name": "TestLevel",
+        "description": "参考实现，对齐 LightManager::CreateTestLights()"
+    },
+
+    "environment": {
+        "ambientLight": [0.25, 0.25, 0.35, 1.0]
+    },
+
+    "dependencies": {
+        "meshes": {
+            "cube": "Content/Meshes/cube.dxmesh",
+            "cylinder": "Content/Meshes/cylinder.dxmesh",
+            "torus": "Content/Meshes/torus.dxmesh",
+            "ground_plane": "Content/Meshes/ground_plane.dxmesh",
+            "skybox_sphere": "Content/Meshes/skybox_sphere.dxmesh",
+            "water_grid": "Content/Meshes/water_grid.dxmesh",
+            "soldier": "Content/Meshes/soldier.dxmesh"
+        },
+        "materials": {
+            "default": "Content/Materials/default.mat",
+            "brick": "Content/Materials/brick.mat",
+            "skybox": "Content/Materials/skybox.mat",
+            "water": "Content/Materials/water.mat",
+            "reflection_test": "Content/Materials/reflection_test.mat",
+            "soldier": "Content/Materials/soldier.mat"
+        },
+        "textures": {
+            "brick_diffuse": "Content/Textures/brick_diffuse.dds",
+            "brick_normal": "Content/Textures/brick_normal.dds",
+            "skybox_cubemap": "Content/Textures/skybox.dds"
+        }
+    },
+
+    "entities": [
+        {
+            "name": "Sun",
+            "components": {
+                "light": {
+                    "type": "directional",
+                    "color": [0.9, 0.85, 0.7, 1.0],
+                    "intensity": 1.0,
+                    "castsShadow": 1.0
+                }
+            }
+        },
+        {
+            "name": "WarmPointLight",
+            "components": {
+                "transform": { "position": [0, 40, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "light": {
+                    "type": "point",
+                    "color": [1.0, 0.7, 0.3, 1.0],
+                    "intensity": 1.0,
+                    "range": 20.0,
+                    "castsShadow": 1.0
+                }
+            }
+        },
+        {
+            "name": "SpotLight",
+            "components": {
+                "transform": { "position": [5, 45, -5], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "light": {
+                    "type": "spot",
+                    "color": [1.0, 0.95, 0.8, 1.0],
+                    "intensity": 0.8,
+                    "range": 30.0,
+                    "spotAngle": 45.0,
+                    "castsShadow": 1.0
+                }
+            }
+        },
+        {
+            "name": "Skybox",
+            "components": {
+                "transform": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "mesh": { "geometry": "skybox_sphere", "material": "skybox" },
+                "skybox": null
+            }
+        },
+        {
+            "name": "GroundPlane",
+            "components": {
+                "transform": { "position": [0, 30, 0], "rotation": [0, 0, 0, 1], "scale": [50, 1, 50] },
+                "mesh": { "geometry": "ground_plane", "material": "default", "receivesShadow": true },
+                "opaque": null
+            }
+        },
+        {
+            "name": "Statue",
+            "components": {
+                "transform": { "position": [0, 30, 0], "rotation": [0, 0, 0, 1], "scale": [0.05, 0.05, 0.05] },
+                "mesh": { "geometry": "soldier", "material": "soldier" },
+                "opaque": null
+            },
+            "children": [
+                {
+                    "name": "StatueShadowCaster",
+                    "components": {
+                        "transform": { "position": [0, -0.5, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                        "mesh": { "geometry": "ground_plane", "material": "default" },
+                        "opaque": null
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Cylinder",
+            "components": {
+                "transform": { "position": [4, 32, -3], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "mesh": { "geometry": "cylinder", "material": "brick", "receivesShadow": true },
+                "opaque": null
+            }
+        },
+        {
+            "name": "Torus",
+            "components": {
+                "transform": { "position": [0, 32, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "mesh": { "geometry": "torus", "material": "brick", "receivesShadow": true },
+                "opaque": null
+            }
+        },
+        {
+            "name": "ReflectionTestCube",
+            "components": {
+                "transform": { "position": [10, 32, 3], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "mesh": { "geometry": "cube", "material": "reflection_test", "receivesShadow": true },
+                "opaque": null
+            }
+        },
+        {
+            "name": "Water",
+            "components": {
+                "transform": { "position": [0, 10, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "mesh": { "geometry": "water_grid", "material": "water" },
+                "transparent": null
+            }
+        },
+        {
+            "name": "CubeGrid",
+            "components": {
+                "transform": { "position": [0, 32, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "mesh": { "geometry": "cube", "material": "default", "receivesShadow": true },
+                "opaque": null
+            },
+            "children": [
+                {
+                    "name": "Cube_0",
+                    "components": {
+                        "transform": { "position": [-7.5, 0.5, 7.5], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                        "mesh": { "geometry": "cube", "material": "default", "receivesShadow": true },
+                        "opaque": null
+                    }
+                },
+                {
+                    "name": "Cube_1",
+                    "components": {
+                        "transform": { "position": [-7.5, 0.5, -7.5], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                        "mesh": { "geometry": "cube", "material": "default", "receivesShadow": true },
+                        "opaque": null
+                    }
+                }
+            ]
+        },
+        {
+            "name": "BillboardTree_1",
+            "components": {
+                "transform": { "position": [-10, 30, -8], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "billboard": { "texture": "brick_diffuse", "width": 2, "height": 4, "mode": "axisY", "material": "default" },
+                "transparent": null
+            }
+        },
+        {
+            "name": "BillboardTree_2",
+            "components": {
+                "transform": { "position": [12, 30, 6], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "billboard": { "texture": "brick_diffuse", "width": 2.5, "height": 5, "mode": "axisY", "material": "default" },
+                "transparent": null
+            }
+        }
+    ]
+}

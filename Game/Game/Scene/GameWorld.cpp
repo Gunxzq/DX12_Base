@@ -1,9 +1,11 @@
 #include "GameWorld.h"
-#include "Async/BackgroundExecutor.h"
+#include "Background/BackgroundExecutor.h"
 #include "Boot/GameContext.h"
 #include "Common/ThrowHelper.h"
 #include "Common/d3dUtil.h"
 #include "ECS/Core/Registry.h"
+#include "Logger/Logger.h"
+#include "Resource/AssetLoader/SceneLoader.h"
 #include "Renderer/Core/LODSystem.h"
 #include "Renderer/Effects/AO/AmbientOcclusionManager.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
@@ -185,6 +187,51 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     LoadTerrainAsync();
     CreateWater();
     RegisterWaterConstantsCallback();
+
+    // ====================================================================
+    // 测试：加载并解析场景文件
+    // ====================================================================
+    {
+        auto logger = Logger::Logger::GetInstance();
+        std::filesystem::path scenePath = m_context->ResolvePath(L"Content/Scenes/test_scene.json");
+        if (std::filesystem::exists(scenePath)) {
+            logger->Info("[SceneTest] Loading scene file: Content/Scenes/test_scene.json");
+            try {
+                auto scene = Resource::SceneLoader::LoadFromFile(scenePath);
+                logger->Info("[SceneTest] Scene loaded: name='{}', version={}", scene.metadata.name, scene.version);
+                logger->Info("[SceneTest]   environment.ambientLight = [{:.2f}, {:.2f}, {:.2f}, {:.2f}]",
+                             scene.environment.ambientLight[0], scene.environment.ambientLight[1],
+                             scene.environment.ambientLight[2], scene.environment.ambientLight[3]);
+                logger->Info("[SceneTest]   dependencies: meshes={}, materials={}, textures={}, terrains={}",
+                             scene.dependencies.meshes.size(), scene.dependencies.materials.size(),
+                             scene.dependencies.textures.size(), scene.dependencies.terrains.size());
+                logger->Info("[SceneTest]   entities: {} (top-level)", scene.entities.size());
+
+                for (size_t i = 0; i < scene.entities.size(); ++i) {
+                    auto &e = scene.entities[i];
+                    std::string comps;
+                    if (e.transform)    comps += " transform";
+                    if (e.mesh)         comps += " mesh(" + e.mesh->geometry + ")";
+                    if (e.light)        comps += " light(" + e.light->type + ")";
+                    if (e.terrain)      comps += " terrain";
+                    if (e.billboard)    comps += " billboard";
+                    if (e.camera)       comps += " camera";
+                    if (e.skinned)      comps += " skinned";
+                    if (e.reflectionProbe) comps += " reflection_probe";
+                    if (e.opaque)       comps += " opaque";
+                    if (e.transparent)  comps += " transparent";
+                    if (e.skybox)       comps += " skybox";
+                    logger->Info("[SceneTest]   entity[{}]: name='{}', components=[{} ]", i, e.name.c_str(), comps.c_str());
+                }
+                logger->Info("[SceneTest] Scene file test PASSED");
+            } catch (const std::exception &e) {
+                logger->Error("[SceneTest] Scene file test FAILED: {}", e.what());
+            }
+        } else {
+            logger->Warn("[SceneTest] Scene file not found: Content/Scenes/test_scene.json, skipping test");
+        }
+    }
+
     RegisterTerrainImmediateCallback();
 
     m_skinnedBuilder = std::make_unique<SkinnedRenderItemBuilder>(m_context->FrameResourceManager,
