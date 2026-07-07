@@ -6,7 +6,7 @@
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Renderer/Material/MaterialManager.h"
-#include <d3dcompiler.h>
+#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DirectX;
 using namespace DX12Engine::Resource;
@@ -136,8 +136,7 @@ void TerrainRenderer::LoadShaders() {
     HRESULT hr;
 
     // Vertex Shader（标准版，地形不需要实例化）
-    hr = D3DCompileFromFile(L"Shaders/Terrain.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
-                            compileFlags, 0, &m_vs, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Terrain.hlsl", "VS", "vs_5_1", compileFlags, m_vs, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -146,8 +145,7 @@ void TerrainRenderer::LoadShaders() {
     }
 
     // Hull Shader（曲面细分必需）
-    hr = D3DCompileFromFile(L"Shaders/Terrain.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "HS", "hs_5_1",
-                            compileFlags, 0, &m_hs, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Terrain.hlsl", "HS", "hs_5_1", compileFlags, m_hs, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -156,8 +154,7 @@ void TerrainRenderer::LoadShaders() {
     }
 
     // Domain Shader（曲面细分必需）
-    hr = D3DCompileFromFile(L"Shaders/Terrain.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "DS", "ds_5_1",
-                            compileFlags, 0, &m_ds, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Terrain.hlsl", "DS", "ds_5_1", compileFlags, m_ds, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -166,8 +163,7 @@ void TerrainRenderer::LoadShaders() {
     }
 
     // Pixel Shader
-    hr = D3DCompileFromFile(L"Shaders/Terrain.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1",
-                            compileFlags, 0, &m_ps, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Terrain.hlsl", "PS", "ps_5_1", compileFlags, m_ps, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -308,8 +304,7 @@ void TerrainRenderer::CreatePSO() {
 void TerrainRenderer::LoadGBufferShader() {
     UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
-    HRESULT hr = D3DCompileFromFile(L"Shaders/Terrain.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                                    "PS_GBuffer", "ps_5_1", compileFlags, 0, &m_psGBuffer, &errors);
+    HRESULT hr = CompileShaderFromFile(L"Shaders/Terrain.hlsl", "PS_GBuffer", "ps_5_1", compileFlags, m_psGBuffer, &errors);
     if (FAILED(hr)) {
         if (errors) OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         throw std::runtime_error("TerrainRenderer: Failed to compile PS_GBuffer");

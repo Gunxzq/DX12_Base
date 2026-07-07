@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Event/EventTypes.h"
-#include "Resource.h"
 
 namespace DX12Engine {
 

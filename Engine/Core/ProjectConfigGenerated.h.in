@@ -1,0 +1,23 @@
+#pragma once
+// 由 CMake 生成，请勿手动编辑
+// Generated from ProjectConfigGenerated.h.in
+
+#include "Core/ProjectConfig.h"
+
+namespace DX12Engine::Core {
+
+// ============================================================================
+// CMake 编译时常量（每个目标（Game/Editor）各自生成一份）
+// ============================================================================
+inline ProjectConfig GetProjectConfig() {
+    ProjectConfig cfg;
+    cfg.Name        = "${PROJECT_NAME}";
+    cfg.Type        = "${PROJECT_TYPE}";
+    cfg.Root        = "${CMAKE_SOURCE_DIR}";
+    cfg.ConfigRoot  = "${PROJECT_CONFIG_ROOT}";
+    cfg.ContentRoot = std::string("${CMAKE_SOURCE_DIR}") + "/Content";
+    cfg.ShaderRoot  = std::string("${CMAKE_SOURCE_DIR}") + "/Shaders";
+    return cfg;
+}
+
+} // namespace DX12Engine::Core

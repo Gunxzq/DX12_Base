@@ -3,11 +3,11 @@
 #include "ECS/Core/Components.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Utils/GeometryGenerator.h"
+#include "Renderer/Utils/ShaderUtils.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include <DirectXMath.h>
-#include <d3dcompiler.h>
 #include <entt/entt.hpp>
 
 using namespace DirectX;
@@ -30,10 +30,10 @@ void OpaqueRenderer::Initialize() {
 
     // 编译顶点着色器（G-buffer PSO 共用）
     {
-        UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
+        UINT compileFlags =
+            D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
         Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
-        HRESULT hr = D3DCompileFromFile(L"Shaders/color.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
-                                        compileFlags, 0, &m_vsBlob, &errors);
+        HRESULT hr = CompileShaderFromFile(L"Shaders/color.hlsl", "VS", "vs_5_1", compileFlags, m_vsBlob, &errors);
         if (FAILED(hr)) {
             if (errors) {
                 const char *errMsg = reinterpret_cast<const char *>(errors->GetBufferPointer());
@@ -96,18 +96,21 @@ void OpaqueRenderer::BeginFrameGBuffer(CommandList &cmdList, D3D12_GPU_VIRTUAL_A
 void OpaqueRenderer::DrawInstancedGBuffer(CommandList &cmdList, GeometryHandle geometryHandle,
                                           D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount,
                                           uint32_t startIndex, int32_t startVertex, uint32_t indexCount) {
-    if (!m_geometryManager) return;
+    if (!m_geometryManager)
+        return;
 
     const TriangleMesh *mesh = m_geometryManager->GetGeometry<TriangleMesh>(geometryHandle);
-    if (!mesh || !mesh->isGpuReady) return;
+    if (!mesh || !mesh->isGpuReady)
+        return;
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Resource *vb = gpuMgr.GetResource(mesh->vertexBufferHandle);
     ID3D12Resource *ib = gpuMgr.GetResource(mesh->indexBufferHandle);
-    if (!vb || !ib) return;
+    if (!vb || !ib)
+        return;
 
-    D3D12_VERTEX_BUFFER_VIEW vbView = {vb->GetGPUVirtualAddress(),
-                                       (UINT)(mesh->vertexCount * mesh->vertexStride), mesh->vertexStride};
+    D3D12_VERTEX_BUFFER_VIEW vbView = {vb->GetGPUVirtualAddress(), (UINT)(mesh->vertexCount * mesh->vertexStride),
+                                       mesh->vertexStride};
     D3D12_INDEX_BUFFER_VIEW ibView = {ib->GetGPUVirtualAddress(),
                                       (UINT)(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2)),
                                       mesh->indexFormat};
@@ -133,8 +136,7 @@ void OpaqueRenderer::LoadGBufferShader() {
     Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
     HRESULT hr;
 
-    hr = D3DCompileFromFile(L"Shaders/color.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS_GBuffer", "ps_5_1",
-                            compileFlags, 0, &m_psGBufferBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/color.hlsl", "PS_GBuffer", "ps_5_1", compileFlags, m_psGBufferBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             const char *errMsg = reinterpret_cast<const char *>(errors->GetBufferPointer());
@@ -224,10 +226,10 @@ void OpaqueRenderer::CreateGBufferPSO() {
 
     // 4 个 MRT + 深度
     psoDesc.NumRenderTargets = 4;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;      // Albedo
-    psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT;  // Normal
-    psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;      // Material
-    psoDesc.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT;  // WorldPos
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;     // Albedo
+    psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Normal
+    psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;     // Material
+    psoDesc.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT; // WorldPos
     psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleDesc.Count = 1;
 

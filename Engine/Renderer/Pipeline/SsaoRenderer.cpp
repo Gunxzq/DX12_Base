@@ -1,4 +1,5 @@
 #include "SsaoRenderer.h"
+#include "Renderer/Utils/ShaderUtils.h"
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
@@ -271,15 +272,13 @@ void SsaoRenderer::CreatePipelines() {
     Microsoft::WRL::ComPtr<ID3DBlob> vsSSAO, psSSAO, vsBlur, psBlur, errors;
 
     // SSAO
-    HRESULT hr = D3DCompileFromFile(L"Shaders/Ssao.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
-                                    flags, 0, &vsSSAO, &errors);
+    HRESULT hr = CompileShaderFromFile(L"Shaders/Ssao.hlsl", "VS", "vs_5_1", flags, vsSSAO, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA((const char *)errors->GetBufferPointer());
         return;
     }
-    hr = D3DCompileFromFile(L"Shaders/Ssao.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1", flags, 0,
-                            &psSSAO, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Ssao.hlsl", "PS", "ps_5_1", flags, psSSAO, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA((const char *)errors->GetBufferPointer());
@@ -287,15 +286,13 @@ void SsaoRenderer::CreatePipelines() {
     }
 
     // Blur
-    hr = D3DCompileFromFile(L"Shaders/SsaoBlur.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1", flags,
-                            0, &vsBlur, &errors);
+    hr = CompileShaderFromFile(L"Shaders/SsaoBlur.hlsl", "VS", "vs_5_1", flags, vsBlur, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA((const char *)errors->GetBufferPointer());
         return;
     }
-    hr = D3DCompileFromFile(L"Shaders/SsaoBlur.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1", flags,
-                            0, &psBlur, &errors);
+    hr = CompileShaderFromFile(L"Shaders/SsaoBlur.hlsl", "PS", "ps_5_1", flags, psBlur, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA((const char *)errors->GetBufferPointer());

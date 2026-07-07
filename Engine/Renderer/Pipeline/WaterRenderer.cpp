@@ -5,7 +5,7 @@
 #include "Resource/Geometry/GridGeometry.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include <d3dcompiler.h>
+#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;
@@ -128,8 +128,7 @@ void WaterRenderer::LoadShaders() {
     Microsoft::WRL::ComPtr<ID3DBlob> errors = nullptr;
     HRESULT hr;
 
-    hr = D3DCompileFromFile(L"Shaders/water.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
-                            compileFlags, 0, &m_vsBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/water.hlsl", "VS", "vs_5_1", compileFlags, m_vsBlob, &errors);
 
     if (FAILED(hr)) {
         if (errors) {
@@ -142,8 +141,7 @@ void WaterRenderer::LoadShaders() {
     }
 
     errors = nullptr;
-    hr = D3DCompileFromFile(L"Shaders/water.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1",
-                            compileFlags, 0, &m_psBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/water.hlsl", "PS", "ps_5_1", compileFlags, m_psBlob, &errors);
 
     if (FAILED(hr)) {
         if (errors) {

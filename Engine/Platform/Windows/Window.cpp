@@ -1,6 +1,7 @@
 #include "Window.h"
 
 #include "Common/Common.h"
+#include "Resource.h"
 
 #include "Core/Config/ConfigTypes/WindowConfig.h"
 #include "Event/MessageDispatcher.h"

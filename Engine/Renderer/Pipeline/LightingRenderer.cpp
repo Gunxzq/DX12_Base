@@ -1,6 +1,6 @@
 #include "LightingRenderer.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
-#include <d3dcompiler.h>
+#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DX12Engine::Renderer;
 
@@ -41,8 +41,7 @@ void LightingRenderer::LoadShaders() {
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
     HRESULT hr;
 
-    hr = D3DCompileFromFile(L"Shaders/lighting.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                            "VS", "vs_5_1", compileFlags, 0, &m_vsBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/lighting.hlsl", "VS", "vs_5_1", compileFlags, m_vsBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             const char *errMsg = reinterpret_cast<const char *>(errors->GetBufferPointer());
@@ -54,8 +53,7 @@ void LightingRenderer::LoadShaders() {
     }
 
     errors = nullptr;
-    hr = D3DCompileFromFile(L"Shaders/lighting.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                            "PS", "ps_5_1", compileFlags, 0, &m_psBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/lighting.hlsl", "PS", "ps_5_1", compileFlags, m_psBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             const char *errMsg = reinterpret_cast<const char *>(errors->GetBufferPointer());

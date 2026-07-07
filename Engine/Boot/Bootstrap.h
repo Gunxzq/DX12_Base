@@ -4,6 +4,7 @@
 #include "Core/Config/ConfigTypes/LoggerConfig.h"
 #include "Core/Config/ConfigTypes/RendererConfig.h"
 #include "Core/Config/ConfigTypes/WindowConfig.h"
+#include "Core/ProjectConfig.h"
 #include "DebugUI/DebugUIManager.h"
 #include "ECS/Core/Registry.h"
 #include "GameTimer.h"
@@ -58,7 +59,8 @@ public:
     Bootstrap &operator=(Bootstrap &&) = delete;
 
     // ── 生命周期 ──
-    void Run();
+    /// @param config 项目配置（由 main.cpp 从 CMake 生成的头文件填充）
+    void Run(const Core::ProjectConfig &config);
     void Shutdown();
 
     // 注入 GameContext
@@ -78,6 +80,7 @@ private:
     void InitializeModules();
 
     // ── 成员变量 ──
+    Core::ProjectConfig m_projectConfig;                  // 项目配置（路径等）
     std::unique_ptr<Platform::Window> m_window;                    // 窗口
     std::unique_ptr<GameContext> m_context;                        // 游戏上下文
     std::unique_ptr<GameTimer> m_mainTimer;                        // 主计时器

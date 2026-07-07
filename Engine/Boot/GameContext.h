@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/ProjectConfig.h"
 #include "ECS/Core/Entity.h"
 #include "GameTimer.h"
 #include "Logger/Logger.h"
@@ -8,9 +9,9 @@
 #include "Renderer/Core/VisibleRaycaster.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
+#include "Resource/Manager/SkeletonManager.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Resource/Texture/TextureManager.h"
-#include "Resource/Manager/SkeletonManager.h"
 
 // 前向声明 Renderer 命名空间中的类型
 namespace DX12Engine::Renderer {
@@ -84,6 +85,7 @@ public:
     GameContext &operator=(GameContext &&) = delete;
 
     // ── 基础设施子系统指针 ──
+    const Core::ProjectConfig *ProjectConfig = nullptr;  // 项目配置（路径等）
     Platform::Window *Window = nullptr;
     ConfigManager *Config = nullptr;
     Logger::Logger *Logging = nullptr;
@@ -127,6 +129,9 @@ public:
     bool IsValid() const;
     const char *GetInvalidReason() const;
 
+    /// 获取项目配置引用
+    const Core::ProjectConfig &GetProjectConfig() const;
+
     mutable const char *m_invalidReason = nullptr;
 
     UINT GetBackBufferIndex() const;
@@ -169,6 +174,10 @@ public:
     void ReleaseAllocator(const typename Renderer::CommandAllocatorPool<Type>::Handle &handle, uint64_t fenceValue);
 
     uint64_t GetNextSequence();
+
+    // ── 路径解析 ──
+    /// 将相对路径（如 "Content/Textures/xxx.dds"）解析为基于项目根的绝对路径
+    std::wstring ResolvePath(const std::wstring &relativePath) const;
 };
 
 } // namespace Boot

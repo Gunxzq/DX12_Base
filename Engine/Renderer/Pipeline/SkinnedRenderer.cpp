@@ -5,7 +5,7 @@
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include <DirectXMath.h>
-#include <d3dcompiler.h>
+#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;
@@ -28,8 +28,7 @@ void SkinnedRenderer::Initialize() {
     {
         UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
         Microsoft::WRL::ComPtr<ID3DBlob> errors;
-        HRESULT hr = D3DCompileFromFile(L"Shaders/skinned.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                                        "VS", "vs_5_1", compileFlags, 0, &m_vsBlob, &errors);
+        HRESULT hr = CompileShaderFromFile(L"Shaders/skinned.hlsl", "VS", "vs_5_1", compileFlags, m_vsBlob, &errors);
         if (FAILED(hr)) {
             if (errors) OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
             ThrowIfFailed(hr);
@@ -56,8 +55,7 @@ void SkinnedRenderer::Update(float deltaTime) { (void)deltaTime; }
 void SkinnedRenderer::LoadGBufferShader() {
     UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
-    HRESULT hr = D3DCompileFromFile(L"Shaders/skinned.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                                    "PS_GBuffer", "ps_5_1", compileFlags, 0, &m_psGBufferBlob, &errors);
+    HRESULT hr = CompileShaderFromFile(L"Shaders/skinned.hlsl", "PS_GBuffer", "ps_5_1", compileFlags, m_psGBufferBlob, &errors);
     if (FAILED(hr)) {
         if (errors) OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         ThrowIfFailed(hr);

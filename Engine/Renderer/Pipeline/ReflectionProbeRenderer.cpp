@@ -3,7 +3,7 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include <d3dcompiler.h>
+#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DX12Engine::Resource;
 
@@ -53,8 +53,7 @@ void ReflectionProbeRenderer::LoadShaders() {
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
     HRESULT hr;
 
-    hr = D3DCompileFromFile(L"Shaders/probe_capture.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
-                            compileFlags, 0, &m_vsBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/probe_capture.hlsl", "VS", "vs_5_1", compileFlags, m_vsBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(static_cast<const char *>(errors->GetBufferPointer()));
@@ -63,8 +62,7 @@ void ReflectionProbeRenderer::LoadShaders() {
     }
 
     errors = nullptr;
-    hr = D3DCompileFromFile(L"Shaders/probe_capture.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "GS", "gs_5_1",
-                            compileFlags, 0, &m_gsBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/probe_capture.hlsl", "GS", "gs_5_1", compileFlags, m_gsBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(static_cast<const char *>(errors->GetBufferPointer()));
@@ -73,8 +71,7 @@ void ReflectionProbeRenderer::LoadShaders() {
     }
 
     errors = nullptr;
-    hr = D3DCompileFromFile(L"Shaders/probe_capture.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1",
-                            compileFlags, 0, &m_psBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/probe_capture.hlsl", "PS", "ps_5_1", compileFlags, m_psBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(static_cast<const char *>(errors->GetBufferPointer()));

@@ -2,7 +2,7 @@
 #include "BillboardRenderer.h"
 #include "Common/d3dUtil.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
-#include <d3dcompiler.h>
+#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DirectX;
 using namespace DX12Engine::Resource;
@@ -115,8 +115,7 @@ void BillboardRenderer::LoadShaders() {
     HRESULT hr;
 
     // 顶点着色器
-    hr = D3DCompileFromFile(L"Shaders/Billboard.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1",
-                            compileFlags, 0, &m_vs, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Billboard.hlsl", "VS", "vs_5_1", compileFlags, m_vs, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -125,8 +124,7 @@ void BillboardRenderer::LoadShaders() {
     }
 
     // 几何着色器
-    hr = D3DCompileFromFile(L"Shaders/Billboard.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "GS", "gs_5_1",
-                            compileFlags, 0, &m_gs, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Billboard.hlsl", "GS", "gs_5_1", compileFlags, m_gs, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -135,8 +133,7 @@ void BillboardRenderer::LoadShaders() {
     }
 
     // 像素着色器
-    hr = D3DCompileFromFile(L"Shaders/Billboard.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PS", "ps_5_1",
-                            compileFlags, 0, &m_ps, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Billboard.hlsl", "PS", "ps_5_1", compileFlags, m_ps, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));

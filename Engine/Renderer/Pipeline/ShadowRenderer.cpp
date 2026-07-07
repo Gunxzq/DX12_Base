@@ -4,7 +4,7 @@
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include <d3dcompiler.h>
+#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DirectX;
 using namespace DX12Engine::Resource;
@@ -221,8 +221,7 @@ void ShadowRenderer::LoadShaders() {
     HRESULT hr;
 
     // 方向光 VS — 统一实例化模式
-    hr = D3DCompileFromFile(L"Shaders/Shadow.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "DirShadowVS", "vs_5_1",
-                            compileFlags, 0, &m_vsBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "DirShadowVS", "vs_5_1", compileFlags, m_vsBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -231,8 +230,7 @@ void ShadowRenderer::LoadShaders() {
     }
 
     // 阴影 PS (入口: ShadowPS)
-    hr = D3DCompileFromFile(L"Shaders/Shadow.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "ShadowPS", "ps_5_1",
-                            compileFlags, 0, &m_psBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "ShadowPS", "ps_5_1", compileFlags, m_psBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -329,8 +327,7 @@ void ShadowRenderer::LoadPointInstancedShaders() {
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
 
     HRESULT hr =
-        D3DCompileFromFile(L"Shaders/Shadow.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                           "PointShadowVS_Instanced", "vs_5_1", compileFlags, 0, &m_pointInstancedVSBlob, &errors);
+        CompileShaderFromFile(L"Shaders/Shadow.hlsl", "PointShadowVS_Instanced", "vs_5_1", compileFlags, m_pointInstancedVSBlob, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -388,24 +385,21 @@ void ShadowRenderer::LoadPointGSShaders() {
 
     HRESULT hr;
 
-    hr = D3DCompileFromFile(L"Shaders/Shadow.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PointShadowVS_GS",
-                            "vs_5_1", compileFlags, 0, &m_pointGSVSBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "PointShadowVS_GS", "vs_5_1", compileFlags, m_pointGSVSBlob, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         throw std::runtime_error("ShadowRenderer: Failed to compile PointShadowVS_GS");
     }
 
-    hr = D3DCompileFromFile(L"Shaders/Shadow.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PointShadowGS",
-                            "gs_5_1", compileFlags, 0, &m_pointGSGSBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "PointShadowGS", "gs_5_1", compileFlags, m_pointGSGSBlob, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         throw std::runtime_error("ShadowRenderer: Failed to compile PointShadowGS");
     }
 
-    hr = D3DCompileFromFile(L"Shaders/Shadow.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "ShadowPS_Point",
-                            "ps_5_1", compileFlags, 0, &m_pointGSPSBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "ShadowPS_Point", "ps_5_1", compileFlags, m_pointGSPSBlob, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -461,8 +455,7 @@ void ShadowRenderer::LoadSpotShaders() {
     compileFlags |= D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
 
-    HRESULT hr = D3DCompileFromFile(L"Shaders/Shadow.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                                    "SpotShadowVS_Instanced", "vs_5_1", compileFlags, 0, &m_spotVSBlob, &errors);
+    HRESULT hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "SpotShadowVS_Instanced", "vs_5_1", compileFlags, m_spotVSBlob, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));

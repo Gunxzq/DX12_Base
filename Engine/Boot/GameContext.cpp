@@ -43,6 +43,11 @@ bool GameContext::IsValid() const {
 
 const char *GameContext::GetInvalidReason() const { return m_invalidReason ? m_invalidReason : "All fields are valid"; }
 
+const Core::ProjectConfig &GameContext::GetProjectConfig() const {
+    static Core::ProjectConfig s_empty;
+    return ProjectConfig ? *ProjectConfig : s_empty;
+}
+
 /**
  * @brief 获取当前后台缓冲区索引
  * @return UINT
@@ -164,6 +169,11 @@ uint64_t GameContext::GetNextSequence() {
         return DeviceContext->GetCommandManager().GetNextSequence();
     }
     return 0;
+}
+
+std::wstring GameContext::ResolvePath(const std::wstring &relativePath) const {
+    if (!ProjectConfig) return relativePath;
+    return (std::filesystem::path(ProjectConfig->Root) / relativePath.c_str()).wstring();
 }
 
 // 显式实例化常用类型

@@ -7,6 +7,7 @@
 #include "ECS/Core/Registry.h"
 #include "Event/MessageDispatcher.h"
 #include "GameContext.h"
+#include "Renderer/Utils/ShaderUtils.h"
 #include "Logger/DebugOverlay.h"
 #include "Logger/Logger.h"
 #include "Platform/Input/InputManager.h"
@@ -19,6 +20,7 @@
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Pool/DepthStencilPool.h"
 #include "Resource/Pool/RenderTargetPool.h"
+#include "Resource/AssetLoader/AssetLoader.h"
 #include "Scheduler/FrameDriver.h"
 #include <steam/isteamnetworkingutils.h>
 #include <steam/steamnetworkingsockets.h>
@@ -284,8 +286,16 @@ void Bootstrap::InitializeFrameDriver() {
 
 void Bootstrap::InitializeModules() {
     try {
-        // 1. 配置 (基础)
-        InitializeConfigManager("Config");
+        // 0. 项目路径（在所有模块之前初始化）
+        EarlyLog("[Bootstrap] Project root: " + m_projectConfig.Root);
+
+        // 设置着色器根目录（ShaderUtils 全局缓存）
+        // 注意：传入项目根目录，因为渲染器的文件名包含 "Shaders/" 前缀
+        Renderer::SetShaderRoot(m_projectConfig.Root);
+
+        // 1. 配置 (基础) — ConfigRoot 是相对项目根的路径，拼接为绝对路径
+        auto configDir = (std::filesystem::path(m_projectConfig.Root) / m_projectConfig.ConfigRoot).string();
+        InitializeConfigManager(configDir);
 
         // 2. 日志 (依赖配置)
         InitializeLogging();
@@ -393,6 +403,10 @@ void Bootstrap::InitializeModules() {
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing MaterialManager...");
         m_materialManager.Initialize(1024);
         EngineLogger::GetInstance()->Info("[Bootstrap] MaterialManager initialized.");
+
+        // 初始化 AssetLoader（注入项目根目录，传入的路径已含 Content/ 前缀）
+        Resource::AssetLoader::GetInstance().Initialize(m_projectConfig.Root);
+        EngineLogger::GetInstance()->Info("[Bootstrap] AssetLoader initialized (root: {})", m_projectConfig.Root);
 
         // ====================================================================
         // 初始化 TextureManager
@@ -508,6 +522,7 @@ GameContext *Bootstrap::CreateContext() {
     m_mainTimer = std::make_unique<GameTimer>();
 
     m_context = std::make_unique<GameContext>();
+    m_context->ProjectConfig = &m_projectConfig;                // 项目配置
     m_context->Config = &ConfigManager::GetInstance();
     m_context->Logging = EngineLogger::GetInstance();
     m_context->Window = m_window.get();
@@ -556,7 +571,8 @@ GameContext *Bootstrap::CreateContext() {
     return m_context.get();
 }
 
-void Bootstrap::Run() {
+void Bootstrap::Run(const Core::ProjectConfig &config) {
+    m_projectConfig = config;
     InitializeModules();
     m_isInitialized = true;
 }
