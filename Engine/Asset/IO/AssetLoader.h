@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Resource/AssetLoader/Loader/DDSLoader.h"
-#include "Resource/AssetLoader/Loader/TerrainLoader.h"
+#include "Asset/IO/Loader/DDSLoader.h"
+#include "Asset/IO/Loader/TerrainLoader.h"
 #include <string>
 #include <vector>
 
@@ -10,6 +10,10 @@ namespace DX12Engine::Resource {
 class AssetLoader {
 public:
     static AssetLoader &GetInstance();
+
+    // 初始化资产加载器
+    // @param contentRoot Content 目录绝对路径（如 "D:/project/DX12_Base/Content"）
+    void Initialize(const std::string &contentRoot);
 
     // 从文件加载，返回解析后的纹理信息
     bool LoadTextureFromFile(const std::wstring &path, DDSTextureInfo &outInfo);
@@ -25,6 +29,8 @@ public:
                                uint32_t segments, TerrainMeshData &outMesh);
 
 private:
+    std::string m_contentRoot; // Content 目录绝对路径
+
     // 根据扩展名获取解析器（未来扩展）
 };
 

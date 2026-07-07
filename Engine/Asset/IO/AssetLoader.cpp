@@ -1,4 +1,6 @@
 #include "AssetLoader.h"
+#include "Logger/Logger.h"
+#include <filesystem>
 #include <fstream>
 
 namespace DX12Engine::Resource {
@@ -8,9 +10,23 @@ AssetLoader &AssetLoader::GetInstance() {
     return instance;
 }
 
+void AssetLoader::Initialize(const std::string &contentRoot) {
+    m_contentRoot = contentRoot;
+}
+
+// 将相对路径解析为基于 ContentRoot 的完整路径
+// 调用方传入的是相对 Content 的路径，如 "Textures/bricks.dds"
+static std::wstring ResolveAssetPath(const std::wstring &path, const std::string &contentRoot) {
+    if (std::filesystem::path(path).is_absolute())
+        return path;
+    return (std::filesystem::path(contentRoot) / path.c_str()).wstring();
+}
+
 bool AssetLoader::LoadTextureFromFile(const std::wstring &path, DDSTextureInfo &outInfo) {
+    std::wstring fullPath = ResolveAssetPath(path, m_contentRoot);
+    Logger::Logger::GetInstance()->Info("[AssetLoader] Loading texture: {}", std::string(fullPath.begin(), fullPath.end()));
     // 1. 打开文件
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    std::ifstream file(fullPath, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         ErrorReporter::Report("AssetLoader: Failed to open file");
         return false;
@@ -41,7 +57,8 @@ bool AssetLoader::LoadTextureFromMemory(const uint8_t *data, size_t dataSize, DD
 
 bool AssetLoader::LoadTerrainFromFile(const std::wstring &path, float width, float depth, float maxHeight,
                                       uint32_t segments, TerrainMeshData &outMesh) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    std::wstring fullPath = ResolveAssetPath(path, m_contentRoot);
+    std::ifstream file(fullPath, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         ErrorReporter::Report("AssetLoader: Failed to open terrain file");
         return false;

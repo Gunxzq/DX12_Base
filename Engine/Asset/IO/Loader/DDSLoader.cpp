@@ -1,5 +1,5 @@
 #include "DDSLoader.h"
-#include "AssetDefinitions/Texture/DDS/DDSUtils.cpp"
+#include "Asset/Definitions/Texture/DDS/DDSUtils.cpp"
 #include <algorithm>
 #include <cstring>
 #include <d3d12.h>

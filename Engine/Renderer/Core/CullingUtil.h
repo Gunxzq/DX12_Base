@@ -4,7 +4,7 @@
 #include "Math/BoundingVolume.h"
 #include "Renderer/Core/LODConfig.h"
 #include "Renderer/Scene/Struct/Frustum.h"
-#include "Resource/Asset/LODMesh.h"
+#include "Renderer/Core/LODMesh.h"
 #include "Resource/Struct/LODMeshHandle.h"
 #include <DirectXMath.h>
 

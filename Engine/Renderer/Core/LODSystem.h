@@ -3,7 +3,7 @@
 #include "ECS/Core/Registry.h"
 #include "Renderer/Core/LODConfig.h"
 #include "Renderer/Scene/CameraManager.h"
-#include "Resource/Asset/LODMesh.h"
+#include "Renderer/Core/LODMesh.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Struct/LODMeshHandle.h"
 

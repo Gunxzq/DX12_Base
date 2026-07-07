@@ -1,4 +1,4 @@
-// Resource/Asset/LODMesh.h
+// Renderer/Core/LODMesh.h
 #pragma once
 #include "Resource/Struct/GeometryHandle.h"
 #include <cstdint>
