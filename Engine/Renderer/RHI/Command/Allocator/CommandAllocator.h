@@ -37,6 +37,8 @@ public:
 
     ID3D12CommandAllocator *Get() const { return m_allocator.Get(); }
 
+    bool IsValid() const { return m_allocator != nullptr; }
+
     void Reset() {
         // 注意：Reset 必须在 GPU 不再使用该 allocator 时调用
         ThrowIfFailed(m_allocator->Reset());

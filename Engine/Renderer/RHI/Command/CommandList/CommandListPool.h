@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cassert>
 #include <d3d12.h>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -116,7 +117,7 @@ private:
         }
     };
 
-    std::vector<Entry> m_pool;
+    std::deque<Entry> m_pool;
     std::atomic<size_t> m_nextIndex{0};
 
     ID3D12Device *m_device = nullptr;

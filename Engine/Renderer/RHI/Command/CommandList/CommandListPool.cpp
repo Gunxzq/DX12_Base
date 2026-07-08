@@ -43,6 +43,11 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
             if (!entry.inUse.load(std::memory_order_relaxed)) {
                 if (entry.inUse.compare_exchange_strong(expectedInUse, true, std::memory_order_acquire)) {
                     CommandList cmdList(entry.cmdList.Get());
+                    if (!cmdList.Get()) {
+                        char buf[256];
+                        sprintf_s(buf, "[CmdListPool] FAST PATH: entry %zu cmdList is NULL! type=%d\n", idx, (int)Type);
+                        OutputDebugStringA(buf);
+                    }
                     PrepareCommandList(cmdList, allocator, entry);
                     return {idx};
                 }
@@ -53,13 +58,18 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
     // 2. 慢速路径：没有空闲项，需要扩容（加锁）
     std::lock_guard<std::mutex> lock(m_expandMutex);
 
-    // 双重检查：防止其他线程在等待锁期间已经创建了新的项或释放了旧的项
+    // 双重检查
     for (size_t i = 0; i < m_pool.size(); ++i) {
         Entry &entry = m_pool[i];
         if (!entry.inUse.load(std::memory_order_relaxed)) {
             bool expectedInUse = false;
             if (entry.inUse.compare_exchange_strong(expectedInUse, true, std::memory_order_acquire)) {
                 CommandList cmdList(entry.cmdList.Get());
+                if (!cmdList.Get()) {
+                    char buf[256];
+                    sprintf_s(buf, "[CmdListPool] SLOW PATH: entry %zu cmdList is NULL! type=%d\n", i, (int)Type);
+                    OutputDebugStringA(buf);
+                }
                 PrepareCommandList(cmdList, allocator, entry);
                 return {i};
             }
@@ -70,14 +80,21 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
     size_t newIndex = m_pool.size();
     m_pool.emplace_back();
 
-    HRESULT hr = m_device->CreateCommandList(0, m_type, allocator, nullptr, IID_PPV_ARGS(&m_pool[newIndex].cmdList));
-    if (FAILED(hr)) {
-        m_pool.pop_back(); // 回滚
-        throw std::runtime_error("Failed to create CommandList in Pool");
-    }
-    // 设置初始状态
+    // 立即标记 inUse，防止其他线程的快速路径读到未初始化的条目
     m_pool[newIndex].inUse.store(true, std::memory_order_relaxed);
     m_pool[newIndex].needsClose.store(false, std::memory_order_release);
+
+    HRESULT hr = m_device->CreateCommandList(0, m_type, allocator, nullptr, IID_PPV_ARGS(&m_pool[newIndex].cmdList));
+    if (FAILED(hr)) {
+        m_pool.pop_back();
+        throw std::runtime_error("Failed to create CommandList in Pool");
+    }
+
+    {
+        char buf[256];
+        sprintf_s(buf, "[CmdListPool] NEW entry %zu created type=%d\n", newIndex, (int)Type);
+        OutputDebugStringA(buf);
+    }
 
     return {newIndex};
 }
@@ -86,7 +103,14 @@ template <D3D12_COMMAND_LIST_TYPE Type> CommandList CommandListPool<Type>::GetCo
     assert(handle.IsValid());
     assert(handle.index < m_pool.size());
 
-    return CommandList(m_pool[handle.index].cmdList.Get());
+    auto *raw = m_pool[handle.index].cmdList.Get();
+    if (!raw) {
+        char buf[256];
+        sprintf_s(buf, "[CmdListPool] GetCommandList: entry %zu cmdList is NULL! type=%d\n", (size_t)handle.index,
+                  (int)Type);
+        OutputDebugStringA(buf);
+    }
+    return CommandList(raw);
 }
 
 // ========================================================================
@@ -103,8 +127,9 @@ void CommandListPool<Type>::PrepareCommandList(CommandList &cmdList, ID3D12Comma
     // 此时 CommandList 一定是 Closed 状态，可以安全地 Reset
     cmdList.Reset(allocator, nullptr);
 
-    // 清除残留的渲染目标绑定
-    cmdList.Get()->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
+    // OMSetRenderTargets 注释：D3D12 Reset 已清空所有 GPU 状态，无需额外清除。
+    // 此调用对 COPY 列表非法（#932），且对 DIRECT/COMPUTE 也无实际作用。
+    // cmdList.Get()->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
 
     // 标记为使用后需要 Close
     entry.needsClose.store(true, std::memory_order_release);
