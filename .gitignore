@@ -42,3 +42,6 @@ desktop.ini
 
 # 忽略日志
 logs/
+
+# --- 生成资产 (Generated Assets) ---
+Content/
