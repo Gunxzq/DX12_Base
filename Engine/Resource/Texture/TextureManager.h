@@ -20,6 +20,10 @@ public:
     uint32_t GetSRVIndex(TextureHandle handle) const;
     TextureHandle RegisterTexture(GpuResourceHandle gpuHandle, uint32_t srvIndex);
 
+    /// 增加引用（ECS 组件拷贝时调用）
+    void Retain(TextureHandle handle);
+
+    /// 减少引用，归零时加入待释放队列
     void Release(TextureHandle handle, uint64_t fenceValue);
     void Reclaim(uint64_t completedFence);
 
@@ -44,6 +48,7 @@ private:
         GpuResourceHandle gpuHandle; // 引用 GPU 资源管理器中的资源
         uint32_t srvIndex = UINT32_MAX;
         uint32_t generation = 0;
+        uint32_t refCount = 0; // 引用计数
         bool inUse = false;
     };
 

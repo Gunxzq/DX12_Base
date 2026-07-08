@@ -56,6 +56,7 @@ GeometryHandle GeometryResourceManager::RegisterGeometryVariant(const GeometryVa
     Entry &entry = m_entries[index];
     entry.geometry = geometry;
     entry.generation = m_nextGeneration++;
+    entry.refCount = 1; // 首次注册引用计数为 1
     entry.inUse = true;
 
     GeometryHandle handle;
@@ -132,11 +133,28 @@ const Math::BoundingVolumeVariant *GeometryResourceManager::GetBounds(GeometryHa
 }
 
 // ============================================================================
-// 释放
+// 释放与引用计数
 // ============================================================================
+
+void GeometryResourceManager::Retain(GeometryHandle handle) {
+    if (!IsValid(handle)) {
+        return;
+    }
+    m_entries[handle.index].refCount++;
+}
 
 void GeometryResourceManager::Release(GeometryHandle handle, uint64_t fenceValue) {
     if (!IsValid(handle)) {
+        return;
+    }
+
+    Entry &entry = m_entries[handle.index];
+    if (entry.refCount > 0) {
+        entry.refCount--;
+    }
+
+    // 仍有引用，不释放
+    if (entry.refCount > 0) {
         return;
     }
 
@@ -147,7 +165,6 @@ void GeometryResourceManager::Release(GeometryHandle handle, uint64_t fenceValue
     pending.fenceValue = fenceValue;
     m_pendingReleases.push_back(pending);
 
-    Entry &entry = m_entries[handle.index];
     entry.inUse = false;
 }
 

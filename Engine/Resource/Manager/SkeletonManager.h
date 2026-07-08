@@ -48,8 +48,12 @@ public:
     float GetClipDuration(SkeletonHandle handle, const std::string &clipName) const;
 
     // ========================================================================
-    // 释放
+    // 释放与引用计数
     // ========================================================================
+    /// 增加引用（ECS 组件拷贝时调用）
+    void Retain(SkeletonHandle handle);
+
+    /// 减少引用，归零时加入待释放队列
     void Release(SkeletonHandle handle, uint64_t fenceValue);
     void Reclaim(uint64_t completedFence);
 
@@ -63,6 +67,7 @@ private:
     struct Entry {
         SkeletonData data;
         uint32_t generation = 0;
+        uint32_t refCount = 0; // 引用计数
         bool inUse = false;
     };
 

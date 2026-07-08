@@ -105,6 +105,15 @@ uint32_t TextureManager::GetSRVIndex(TextureHandle handle) const {
     return entry.srvIndex;
 }
 
+void TextureManager::Retain(TextureHandle handle) {
+    if (!handle.IsValid() || handle.index >= m_capacity)
+        return;
+    TextureEntry &entry = m_entries[handle.index];
+    if (!entry.inUse || entry.generation != handle.generation)
+        return;
+    entry.refCount++;
+}
+
 void TextureManager::Release(TextureHandle handle, uint64_t fenceValue) {
     if (!handle.IsValid() || handle.index >= m_capacity) {
         return;
@@ -114,6 +123,11 @@ void TextureManager::Release(TextureHandle handle, uint64_t fenceValue) {
     if (!entry.inUse || entry.generation != handle.generation) {
         return;
     }
+
+    if (entry.refCount > 0)
+        entry.refCount--;
+    if (entry.refCount > 0)
+        return;
 
     entry.inUse = false;
 
@@ -262,6 +276,7 @@ TextureHandle TextureManager::RegisterTexture(GpuResourceHandle gpuHandle, uint3
     entry.gpuHandle = gpuHandle;
     entry.srvIndex = srvIndex;
     entry.generation = m_nextGeneration++;
+    entry.refCount = 1; // 首次注册引用计数为 1
     entry.inUse = true;
 
     TextureHandle handle;

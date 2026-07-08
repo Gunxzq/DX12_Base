@@ -76,8 +76,12 @@ public:
     const Math::BoundingVolumeVariant *GetBounds(GeometryHandle handle) const;
 
     // ========================================================================
-    // 几何体释放
+    // 几何体释放与引用计数
     // ========================================================================
+    /// 增加引用（ECS 组件拷贝时调用）
+    void Retain(GeometryHandle handle);
+
+    /// 减少引用，归零时加入待释放队列
     void Release(GeometryHandle handle, uint64_t fenceValue);
     void Reclaim(uint64_t completedFence);
 
@@ -93,6 +97,7 @@ private:
     struct Entry {
         GeometryVariant geometry; // 几何体数据
         uint32_t generation = 0;  // 世代号（用于句柄验证）
+        uint32_t refCount = 0;    // 引用计数（Register=1, Retain++ ,Release--, 归零时加入待释放）
         bool inUse = false;       // 是否使用中
     };
 

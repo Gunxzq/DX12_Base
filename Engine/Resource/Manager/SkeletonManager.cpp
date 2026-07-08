@@ -86,6 +86,7 @@ SkeletonHandle SkeletonManager::RegisterSkeleton(const SkeletonData &data) {
     Entry &entry = m_entries[index];
     entry.data = data;
     entry.generation = m_nextGeneration++;
+    entry.refCount = 1; // 首次注册引用计数为 1
     entry.inUse = true;
 
     SkeletonHandle handle;
@@ -308,13 +309,26 @@ float SkeletonManager::GetClipDuration(SkeletonHandle handle, const std::string 
 }
 
 // ============================================================================
-// 释放
+// 释放与引用计数
 // ============================================================================
+
+void SkeletonManager::Retain(SkeletonHandle handle) {
+    if (!IsValid(handle))
+        return;
+    m_entries[handle.index].refCount++;
+}
 
 void SkeletonManager::Release(SkeletonHandle handle, uint64_t fenceValue) {
     if (!IsValid(handle)) {
         return;
     }
+
+    Entry &entry = m_entries[handle.index];
+    if (entry.refCount > 0)
+        entry.refCount--;
+    if (entry.refCount > 0)
+        return;
+
     m_pendingReleases.push_back({handle.index, handle.generation, fenceValue});
 }
 
