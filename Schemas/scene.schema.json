@@ -1,0 +1,312 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://dx12engine.dev/schemas/scene.schema.json",
+    "title": "Scene File",
+    "description": "场景文件格式定义。场景由环境参数 + 依赖声明 + 实体列表组成，实体的类型由其组件组合决定。",
+    "type": "object",
+    "required": ["version", "entities"],
+
+    "properties": {
+        "version": {
+            "description": "场景格式版本号，用于格式迁移",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1
+        },
+        "baseURL": {
+            "description": "所有依赖路径的前缀（相对项目根），如 \"Content/City\"。引擎加载时拼接为 root + baseURL + depPath",
+            "type": "string"
+        },
+        "metadata": {
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "场景名称" },
+                "description": { "type": "string", "description": "场景描述" }
+            }
+        },
+        "environment": {
+            "description": "世界级环境参数",
+            "type": "object",
+            "properties": {
+                "ambientLight": {
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "description": "环境光颜色 [r, g, b, a]"
+                },
+                "directionalLight": { "$ref": "#/definitions/LightComponent" }
+            }
+        },
+        "dependencies": {
+            "description": "资产依赖声明。entities 中的引用指向此处的 key。加载器先收集此节确定所有依赖。",
+            "type": "object",
+            "properties": {
+                "meshes": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string", "description": "网格资产路径" }
+                },
+                "textures": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string", "description": "纹理资产路径" }
+                },
+                "terrains": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string", "description": "地形资产路径" }
+                }
+            }
+        },
+        "materials": {
+            "description": "材质定义（内联）。key 被 entities 中的 mesh.material 引用。纹理引用指向 dependencies.textures 中的 key。",
+            "type": "object",
+            "additionalProperties": { "$ref": "#/definitions/MaterialDefinition" }
+        },
+        "entities": {
+            "description": "场景实体列表。加载时展平为扁平 ECS，子实体递归遍历并累积变换。",
+            "type": "array",
+            "items": { "$ref": "#/definitions/Entity" }
+        }
+    },
+
+    "definitions": {
+        "Entity": {
+            "description": "一个实体由其组件组合定义。不同的组件组合产生不同的实体类型。\n典型组合：\n  - 不透明网格: transform + mesh + opaque\n  - 透明网格:   transform + mesh + transparent\n  - 公告牌:     transform + billboard + transparent\n  - 地形:       transform + terrain + opaque\n  - 光源:       light（transform 可选）\n  - 相机:       transform + camera",
+            "type": "object",
+            "required": ["components"],
+            "properties": {
+                "name": { "type": "string", "description": "实体名称（调试用）" },
+                "components": {
+                    "type": "object",
+                    "properties": {
+                        "transform":   { "$ref": "#/definitions/TransformComponent" },
+                        "mesh":        { "$ref": "#/definitions/MeshComponent" },
+                        "terrain":     { "$ref": "#/definitions/TerrainComponent" },
+                        "billboard":   { "$ref": "#/definitions/BillboardComponent" },
+                        "light":       { "$ref": "#/definitions/LightComponent" },
+                        "camera":      { "$ref": "#/definitions/CameraComponent" },
+                        "skinned":     { "$ref": "#/definitions/SkinnedComponent" },
+                        "opaque":      { "$ref": "#/definitions/TagComponent" },
+                        "transparent": { "$ref": "#/definitions/TagComponent" },
+                        "skybox":      { "$ref": "#/definitions/TagComponent" },
+                        "reflection_probe": { "$ref": "#/definitions/ReflectionProbeComponent" }
+                    },
+                    "allOf": [
+                        {
+                            "description": "不透明网格: transform + mesh + opaque",
+                            "if": { "required": ["mesh", "opaque"] },
+                            "then": { "required": ["transform"] }
+                        },
+                        {
+                            "description": "透明网格: transform + mesh + transparent",
+                            "if": { "required": ["mesh", "transparent"] },
+                            "then": { "required": ["transform"] }
+                        },
+                        {
+                            "description": "地形: transform + terrain + opaque",
+                            "if": { "required": ["terrain"] },
+                            "then": { "required": ["transform", "opaque"] }
+                        },
+                        {
+                            "description": "公告牌: transform + billboard + transparent",
+                            "if": { "required": ["billboard"] },
+                            "then": { "required": ["transform", "transparent"] }
+                        },
+                        {
+                            "description": "蒙皮网格: transform + mesh + skinned + opaque/transparent",
+                            "if": { "required": ["skinned"] },
+                            "then": { "required": ["transform", "mesh"] }
+                        },
+                        {
+                            "description": "mesh 和 terrain/billboard 互斥",
+                            "if": { "required": ["mesh"] },
+                            "then": {
+                                "not": { "required": ["terrain", "billboard"] }
+                            }
+                        }
+                    ]
+                },
+                "children": {
+                    "description": "嵌套子实体，加载时展平并累积变换。允许任意深度。",
+                    "type": "array",
+                    "items": { "$ref": "#/definitions/Entity" }
+                }
+            }
+        },
+
+        "TransformComponent": {
+            "type": "object",
+            "properties": {
+                "position": {
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "default": [0, 0, 0]
+                },
+                "rotation": {
+                    "description": "四元数 [x, y, z, w]",
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "default": [0, 0, 0, 1]
+                },
+                "scale": {
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "default": [1, 1, 1]
+                }
+            }
+        },
+
+        "MeshComponent": {
+            "type": "object",
+            "required": ["geometry", "material"],
+            "properties": {
+                "geometry": {
+                    "type": "string",
+                    "description": "引用 dependencies.meshes 中的 key"
+                },
+                "material": {
+                    "type": "string",
+                    "description": "引用 materials 中的 key"
+                },
+                "receivesShadow": {
+                    "type": "boolean",
+                    "default": true
+                }
+            }
+        },
+
+        "TerrainComponent": {
+            "type": "object",
+            "required": ["heightmap"],
+            "properties": {
+                "heightmap": {
+                    "type": "string",
+                    "description": "引用 dependencies.terrains 或 textures 中的 key"
+                },
+                "heightScale": { "type": "number", "default": 20.0 },
+                "albedo": { "type": "string", "description": "可选漫反射纹理 key" },
+                "normal": { "type": "string", "description": "可选法线贴图 key" }
+            }
+        },
+
+        "BillboardComponent": {
+            "type": "object",
+            "required": ["texture"],
+            "properties": {
+                "texture": {
+                    "type": "string",
+                    "description": "引用 dependencies.textures 中的 key"
+                },
+                "width": { "type": "number", "default": 2.0 },
+                "height": { "type": "number", "default": 4.0 },
+                "mode": {
+                    "type": "string",
+                    "enum": ["axisY", "full", "spherical"],
+                    "default": "axisY"
+                },
+                "material": {
+                    "type": "string",
+                    "description": "可选材质 key"
+                }
+            }
+        },
+
+        "LightComponent": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["directional", "point", "spot"]
+                },
+                "color": {
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 3,
+                    "maxItems": 4,
+                    "default": [1, 1, 1, 1]
+                },
+                "intensity": { "type": "number", "minimum": 0, "default": 1.0 },
+                "range": { "type": "number", "minimum": 0, "description": "point/spot 光源衰减范围" },
+                "spotAngle": { "type": "number", "minimum": 0, "maximum": 180, "description": "spot 光源锥角" },
+                "castsShadow": { "type": "number", "minimum": 0, "maximum": 1, "default": 1.0 }
+            }
+        },
+
+        "CameraComponent": {
+            "type": "object",
+            "properties": {
+                "fov": { "type": "number", "minimum": 1, "maximum": 179, "default": 60 },
+                "nearPlane": { "type": "number", "minimum": 0.01, "default": 0.1 },
+                "farPlane": { "type": "number", "minimum": 0.1, "default": 1000.0 },
+                "isMain": { "type": "boolean", "default": false }
+            }
+        },
+
+        "SkinnedComponent": {
+            "type": "object",
+            "properties": {
+                "skeleton": {
+                    "type": "string",
+                    "description": "引用 dependencies.meshes 中的 key（含骨骼的网格资产）"
+                },
+                "animationClip": {
+                    "type": "string",
+                    "description": "默认动画片段名"
+                }
+            }
+        },
+
+        "TagComponent": {
+            "description": "标记组件，无数据字段，仅表达存在/不存在（null JSON 即可表达存在）",
+            "type": "null"
+        },
+
+        "ReflectionProbeComponent": {
+            "type": "object",
+            "properties": {
+                "range": { "type": "number", "default": 50.0 },
+                "resolution": { "type": "integer", "default": 256 }
+            }
+        },
+
+        "MaterialDefinition": {
+            "description": "材质定义。内联于场景 JSON 的 materials 节，不依赖独立 .mat 文件。\n纹理引用指向 dependencies.textures 中的 key（非文件路径）。",
+            "type": "object",
+            "required": ["shader", "params"],
+            "properties": {
+                "shader": {
+                    "type": "string",
+                    "description": "渲染器类型哈希，如 PBR/Standard、Sky/Procedural、Water/Sim"
+                },
+                "params": {
+                    "type": "object",
+                    "properties": {
+                        "baseColor":       { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "default": [1,1,1,1] },
+                        "metallic":        { "type": "number", "minimum": 0, "maximum": 1, "default": 0 },
+                        "roughness":       { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 },
+                        "ao":              { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+                        "emissive":        { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "default": [0,0,0,0] },
+                        "alphaCutoff":     { "type": "number", "minimum": 0, "default": 0 }
+                    }
+                },
+                "textures": {
+                    "type": "object",
+                    "description": "纹理引用。值为 dependencies.textures 中的 key（字符串），或空字符串表示无纹理。",
+                    "properties": {
+                        "baseColor":         { "type": "string", "default": "" },
+                        "normal":            { "type": "string", "default": "" },
+                        "metallicRoughness": { "type": "string", "default": "" },
+                        "ao":                { "type": "string", "default": "" },
+                        "emissive":          { "type": "string", "default": "" }
+                    }
+                }
+            }
+        }
+    }
+}

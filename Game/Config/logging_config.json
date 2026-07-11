@@ -14,10 +14,6 @@
         "Enabled": false,
         "Level": "Debug"
       },
-      "LogWindow": {
-        "Enabled": true,
-        "Level": "Debug"
-      },
       "File": {
         "Enabled": true,
         "Level": "Debug",

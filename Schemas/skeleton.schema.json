@@ -1,0 +1,102 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://dx12engine.dev/schemas/skeleton.schema.json",
+    "title": "Skeleton File",
+    "description": "骨骼/骨架文件格式定义。骨骼由一组有序的骨头(bones)组成，每块骨头通过 parent 字段建立父子层级，变换以 TRS（位置/旋转/缩放）表达。",
+    "type": "object",
+    "required": ["version", "bones"],
+
+    "properties": {
+        "version": {
+            "description": "骨骼格式版本号",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1
+        },
+        "name": {
+            "description": "骨骼名称（对应机体名称）",
+            "type": "string"
+        },
+        "boneCount": {
+            "description": "骨骼数量",
+            "type": "integer",
+            "minimum": 1
+        },
+        "bones": {
+            "description": "骨骼列表，按深度优先顺序排列。根骨骼在 index 0。",
+            "type": "array",
+            "items": { "$ref": "#/definitions/Bone" }
+        },
+        "metadata": {
+            "description": "可选元数据（源文件路径、原始格式等）",
+            "type": "object",
+            "properties": {
+                "source": { "type": "string" },
+                "sourceFormat": { "type": "string", "enum": ["hod", "ani", "gltf", "fbx"] }
+            }
+        }
+    },
+
+    "definitions": {
+        "Bone": {
+            "description": "一块骨骼（joint/bone），含变换和层级信息。",
+            "type": "object",
+            "required": ["index", "name", "parent", "position", "rotation", "scale"],
+            "properties": {
+                "index": {
+                    "description": "骨骼在 bones 数组中的索引",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "name": {
+                    "description": "骨骼名称。应与蒙皮网格中的骨骼命名一致。",
+                    "type": "string"
+                },
+                "parent": {
+                    "description": "父骨骼索引。-1 表示根骨骼（无父级）。",
+                    "type": "integer",
+                    "minimum": -1
+                },
+                "position": {
+                    "description": "局部位置 [x, y, z]。相对父骨骼的平移。",
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 3,
+                    "maxItems": 3
+                },
+                "rotation": {
+                    "description": "局部旋转四元数 [x, y, z, w]。相对父骨骼的旋转。",
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 4,
+                    "maxItems": 4
+                },
+                "scale": {
+                    "description": "局部缩放 [x, y, z]。相对父骨骼的缩放。",
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "default": [1, 1, 1]
+                },
+                "matrix": {
+                    "description": "原始 4×4 变换矩阵（行主序），可选。用于保留逆向时的原始精度。",
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "minItems": 4,
+                        "maxItems": 4
+                    },
+                    "minItems": 4,
+                    "maxItems": 4
+                },
+                "children": {
+                    "description": "子骨骼索引列表。加载器可用此重建树形结构，也可通过遍历 parent 推导。",
+                    "type": "array",
+                    "items": { "type": "integer", "minimum": 0 }
+                }
+            }
+        }
+    }
+}

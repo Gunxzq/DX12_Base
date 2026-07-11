@@ -35,9 +35,6 @@ TEST(LogConfigTest, DeserializeFromManualJson) {
     j["Sinks"]["DebugOutput"]["Enabled"] = false;
     j["Sinks"]["DebugOutput"]["Level"] = "debug";
 
-    j["Sinks"]["LogWindow"]["Enabled"] = true;
-    j["Sinks"]["LogWindow"]["Level"] = "debug";
-
     j["Sinks"]["Async"]["Enabled"] = true;
     j["Sinks"]["Async"]["QueueSize"] = 8192;
     j["Sinks"]["Async"]["OverflowPolicy"] = "discard";
