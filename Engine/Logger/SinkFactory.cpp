@@ -3,9 +3,7 @@
 #include "Common/Common.h"
 
 #include "Core/Config/ConfigTypes/LoggerConfig.h"
-#include "Logger/DebugOverlay.h"
 #include "Logger/Skinks/DebugOutputSink.h"
-#include "Logger/Skinks/LogWindowSink.h"
 #include "Logger/Skinks/NullSink.h"
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -34,13 +32,6 @@ std::vector<std::shared_ptr<spdlog::sinks::sink>> SinkFactory::CreateSinks(const
     // 3. Debug Output
     if (config.Sinks.DebugOutput.Enabled) {
         auto sink = CreateDebugOutputSink(config);
-        if (sink)
-            sinks.push_back(sink);
-    }
-
-    // 4. Log Window (UI Dependent)
-    if (config.Sinks.LogWindow.Enabled) {
-        auto sink = CreateLogWindowSink(config);
         if (sink)
             sinks.push_back(sink);
     }
@@ -106,30 +97,6 @@ std::shared_ptr<spdlog::sinks::sink> SinkFactory::CreateDebugOutputSink(const Lo
         return sink;
     } catch (const std::exception &e) {
         fprintf(stderr, "[SinkFactory] Failed to create DebugOutput Sink: %s\n", e.what());
-        return nullptr;
-    }
-}
-
-std::shared_ptr<spdlog::sinks::sink> SinkFactory::CreateLogWindowSink(const LogConfig &config) {
-    try {
-
-        // 显示窗口
-        if (auto overlay = DebugOverlay::GetInstance()) {
-            overlay->Show();
-        }
-
-        // 创建带回调的 Sink
-        auto callback = [](int level, const char *payload, const std::string &text) {
-            if (auto overlay = DebugOverlay::GetInstance()) {
-                overlay->PushLog(static_cast<LogEntry::Level>(level), payload, text);
-            }
-        };
-
-        auto sink = std::make_shared<log_window_sink_mt>(callback);
-        sink->set_level(static_cast<spdlog::level::level_enum>(static_cast<int>(config.Sinks.LogWindow.Level)));
-        return sink;
-    } catch (const std::exception &e) {
-        fprintf(stderr, "[SinkFactory] Failed to create LogWindow Sink: %s\n", e.what());
         return nullptr;
     }
 }

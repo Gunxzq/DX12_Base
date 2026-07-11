@@ -37,7 +37,6 @@ private:
     static std::shared_ptr<spdlog::sinks::sink> CreateConsoleSink(const Boot::LogConfig &config);
     static std::shared_ptr<spdlog::sinks::sink> CreateFileSink(const Boot::LogConfig &config);
     static std::shared_ptr<spdlog::sinks::sink> CreateDebugOutputSink(const Boot::LogConfig &config);
-    static std::shared_ptr<spdlog::sinks::sink> CreateLogWindowSink(const Boot::LogConfig &config);
 };
 
 } // namespace Logger

@@ -29,7 +29,7 @@ struct MaterialData {
     float alphaCutoff = 0.5f;
 
     // ── 纹理 ID（逻辑索引，非 GPU 描述符）──
-    uint32_t baseColorTextureId = 0;                  // 基础颜色纹理 ID
+    uint32_t baseColorTextureId = 0xFFFFFFFF;         // 基础颜色纹理 ID
     uint32_t normalTextureId = 0xFFFFFFFF;            // 法线纹理 ID
     uint32_t metallicRoughnessTextureId = 0xFFFFFFFF; // 金属度/粗糙度贴图
     uint32_t emissiveTextureId = 0xFFFFFFFF;          // 自发光贴图

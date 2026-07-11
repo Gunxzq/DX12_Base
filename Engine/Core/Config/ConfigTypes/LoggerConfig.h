@@ -84,17 +84,6 @@ struct DebugOutputSinkConfig {
 };
 
 // ========================================================================
-// Log Window Sink 配置结构体 (独立日志窗口)
-// ========================================================================
-
-struct LogWindowSinkConfig {
-    bool Enabled = true;
-    LogLevel Level = LogLevel::Debug;
-
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(LogWindowSinkConfig, Enabled, Level)
-};
-
-// ========================================================================
 // 所有 Sinks 的聚合配置
 // ========================================================================
 
@@ -102,10 +91,9 @@ struct SinksConfig {
     ConsoleSinkConfig Console;
     FileSinkConfig File;
     DebugOutputSinkConfig DebugOutput;
-    LogWindowSinkConfig LogWindow;
     AsyncConfig Async;
 
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(SinksConfig, Console, File, DebugOutput, LogWindow, Async)
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(SinksConfig, Console, File, DebugOutput, Async)
 };
 
 // ========================================================================
