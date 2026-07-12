@@ -131,6 +131,9 @@ static std::vector<BindingSource> ExtractSourcesFromComplexItem(const json &item
                 // 暂时复用 Axis_Mouse_X/Y
                 sources.push_back({EKeyCode::Axis_Mouse_X, EKeyCode::None, BindingSource::AxisType::X, 1.0f});
                 sources.push_back({EKeyCode::Axis_Mouse_Y, EKeyCode::None, BindingSource::AxisType::Y, 1.0f});
+            } else if (item.contains("axis") && item["axis"] == "Wheel") {
+                // 鼠标滚轮
+                sources.push_back({EKeyCode::Axis_Wheel, EKeyCode::None, BindingSource::AxisType::Wheel, 1.0f});
             } else if (item.contains("button")) {
                 std::string btnName = "Mouse_" + item["button"].get<std::string>(); // e.g., Mouse_Left
                 BindingSource src;

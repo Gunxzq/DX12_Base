@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Config/ConfigTypes/WindowConfig.h"
 #include "Event/EventTypes.h"
 
 namespace DX12Engine {
@@ -47,11 +48,17 @@ public:
 
     void SetInputManager(Input::InputManager *inputMgr);
 
+    /// 设置输入处理优先级（true=ImGui先处理, false=InputManager先处理）
+    void SetInputPriority(bool isImGuiFirst) { m_inputPriorityIsImGuiFirst = isImGuiFirst; }
+
 private:
     // 静态 WndProc，用于接收 Windows 消息
     static LRESULT CALLBACK WndProcStatic(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
     // 成员 WndProc，处理具体逻辑
     LRESULT WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    // 处理输入消息（键盘、鼠标），由 WndProcHandler 根据优先级调用
+    void ProcessInputMessage(UINT msg, WPARAM wParam, LPARAM lParam);
 
     // 发送窗口大小变化事件
     void PostWindowResizeEvent(uint32_t width, uint32_t height);
@@ -86,6 +93,7 @@ private:
     bool m_SizeChangedDuringMove = false;
 
     Input::InputManager *m_inputMgr = nullptr;
+    bool m_inputPriorityIsImGuiFirst = true;
 };
 
 } // namespace Platform

@@ -18,6 +18,7 @@ struct WindowConfig {
     std::string mode = "windowed";
     bool resizable = true;
     bool maximizable = true;
+    bool inputPriorityIsImGuiFirst = true; // true=ImGui先处理, false=InputManager先处理
 };
 
 } // namespace Boot
