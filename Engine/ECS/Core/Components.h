@@ -10,6 +10,7 @@
 #include "Common/Common.h"
 
 #include "Components/Animation.h"
+#include "Components/Grid.h"
 #include "Components/Light.h"
 #include "Components/Misc.h"
 #include "Components/ReflectionProbe.h"

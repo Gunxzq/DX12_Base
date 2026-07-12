@@ -143,6 +143,9 @@ bool DDSLoader::ParseDDS(const uint8_t *fileData, size_t fileSize, DDSTextureInf
             }
             arraySize = dxt10Header->arraySize;
             isCubeMap = (dxt10Header->miscFlag & 0x4) != 0; // D3D11_RESOURCE_MISC_TEXTURECUBE
+            // NVIDIA 导出的 cubemap 的 DX10 header 中 arraySize 可能为 1，强制设为 6
+            if (isCubeMap && arraySize < 6)
+                arraySize = 6;
         } else {
             if ((header->caps2 & DDS_CUBEMAP) && (header->caps2 & DDS_CUBEMAP_ALLFACES) == DDS_CUBEMAP_ALLFACES) {
                 arraySize = 6;
