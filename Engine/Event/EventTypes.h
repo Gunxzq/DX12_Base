@@ -239,8 +239,7 @@ struct ResourceLoadCompleteEvent {
     EVENT_HEADER_FIELDS
     static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::ResourceLoadCompleteEvent);
 
-    explicit ResourceLoadCompleteEvent(EventPriority prio = EventPriority::P4_Background)
-        : INIT_EVENT_HEADER(prio) {}
+    explicit ResourceLoadCompleteEvent(EventPriority prio = EventPriority::P4_Background) : INIT_EVENT_HEADER(prio) {}
 
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
@@ -249,8 +248,7 @@ struct ResourceUploadCompleteEvent {
     EVENT_HEADER_FIELDS
     static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::ResourceUploadCompleteEvent);
 
-    explicit ResourceUploadCompleteEvent(EventPriority prio = EventPriority::P4_Background)
-        : INIT_EVENT_HEADER(prio) {}
+    explicit ResourceUploadCompleteEvent(EventPriority prio = EventPriority::P4_Background) : INIT_EVENT_HEADER(prio) {}
 
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
@@ -259,8 +257,16 @@ struct ResourceReadyEvent {
     EVENT_HEADER_FIELDS
     static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::ResourceReadyEvent);
 
-    explicit ResourceReadyEvent(EventPriority prio = EventPriority::P3_Low)
-        : INIT_EVENT_HEADER(prio) {}
+    explicit ResourceReadyEvent(EventPriority prio = EventPriority::P3_Low) : INIT_EVENT_HEADER(prio) {}
+
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
+struct SceneConstructReadyEvent {
+    EVENT_HEADER_FIELDS
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::SceneConstructReadyEvent);
+
+    explicit SceneConstructReadyEvent(EventPriority prio = EventPriority::P2_Normal) : INIT_EVENT_HEADER(prio) {}
 
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
@@ -269,8 +275,7 @@ struct ResourceLoadFailedEvent {
     EVENT_HEADER_FIELDS
     static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::ResourceLoadFailedEvent);
 
-    explicit ResourceLoadFailedEvent(EventPriority prio = EventPriority::P4_Background)
-        : INIT_EVENT_HEADER(prio) {}
+    explicit ResourceLoadFailedEvent(EventPriority prio = EventPriority::P4_Background) : INIT_EVENT_HEADER(prio) {}
 
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
@@ -279,8 +284,7 @@ struct RequestLoadEvent {
     EVENT_HEADER_FIELDS
     static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::RequestLoadEvent);
 
-    explicit RequestLoadEvent(EventPriority prio = EventPriority::P2_Normal)
-        : INIT_EVENT_HEADER(prio) {}
+    explicit RequestLoadEvent(EventPriority prio = EventPriority::P2_Normal) : INIT_EVENT_HEADER(prio) {}
 
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
@@ -289,8 +293,7 @@ struct CombineCompleteEvent {
     EVENT_HEADER_FIELDS
     static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::CombineCompleteEvent);
 
-    explicit CombineCompleteEvent(EventPriority prio = EventPriority::P2_Normal)
-        : INIT_EVENT_HEADER(prio) {}
+    explicit CombineCompleteEvent(EventPriority prio = EventPriority::P2_Normal) : INIT_EVENT_HEADER(prio) {}
 
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };

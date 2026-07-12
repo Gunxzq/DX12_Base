@@ -24,6 +24,8 @@ namespace Event {
     X(ResourceUploadCompleteEvent, 0x00000300, P4_Background)                                                          \
     /* Step 4: 围栏通过 → ResourceReady（通用事件，高位编码具体类型） */                          \
     X(ResourceReadyEvent, 0x00000400, P3_Low)                                                                          \
+    /* 场景构造完成（高优先级，一次性构建，不同于流式加载） */                               \
+    X(SceneConstructReadyEvent, 0x00000500, P2_Normal)                                                                 \
     /* 失败事件 */                                                                                                 \
     X(ResourceLoadFailedEvent, 0x00000220, P4_Background)                                                              \
     /* 加载请求 */                                                                                                 \

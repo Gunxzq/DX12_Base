@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Background/BackgroundExecutor.h"
 #include "Core/Config/ConfigManager.h"
 #include "Core/Config/ConfigTypes/LoggerConfig.h"
 #include "Core/Config/ConfigTypes/RendererConfig.h"
@@ -14,11 +15,11 @@
 #include "Renderer/Core/VisibleRaycaster.h"
 #include "Renderer/Effects/AO/AmbientOcclusionManager.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
+#include "Renderer/Material/MaterialManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include "Renderer/Material/MaterialManager.h"
 #include "Resource/Manager/SkeletonManager.h"
 #include "Resource/Texture/TextureManager.h"
 #include <filesystem>
@@ -80,13 +81,14 @@ private:
     void InitializeModules();
 
     // ── 成员变量 ──
-    Core::ProjectConfig m_projectConfig;                  // 项目配置（路径等）
-    std::unique_ptr<Platform::Window> m_window;                    // 窗口
-    std::unique_ptr<GameContext> m_context;                        // 游戏上下文
-    std::unique_ptr<GameTimer> m_mainTimer;                        // 主计时器
-    std::unique_ptr<Renderer::D3D12DeviceContext> m_deviceContext; // D3D12 设备上下文
-    std::unique_ptr<ECS::Registry> m_registry;                     // ECS Registry
-    Scheduler::FrameDriver *m_frameDriver;                         // FrameDriver (由基础设施层创建)
+    Core::ProjectConfig m_projectConfig;                             // 项目配置（路径等）
+    std::unique_ptr<Platform::Window> m_window;                      // 窗口
+    std::unique_ptr<GameContext> m_context;                          // 游戏上下文
+    std::unique_ptr<GameTimer> m_mainTimer;                          // 主计时器
+    std::unique_ptr<Renderer::D3D12DeviceContext> m_deviceContext;   // D3D12 设备上下文
+    std::unique_ptr<ECS::Registry> m_registry;                       // ECS Registry
+    Scheduler::FrameDriver *m_frameDriver;                           // FrameDriver (由基础设施层创建)
+    std::unique_ptr<Async::BackgroundExecutor> m_backgroundExecutor; // 后台任务执行器
 
     // 配置数据（由 ConfigManager 托管注册，Register 时自动加载）
     Boot::RendererConfig m_rendererConfig;

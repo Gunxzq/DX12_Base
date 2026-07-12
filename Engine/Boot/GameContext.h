@@ -56,6 +56,10 @@ namespace Logger {
 class Logger;
 }
 
+namespace Async {
+class BackgroundExecutor;
+}
+
 namespace Platform {
 class Window;
 }
@@ -85,7 +89,7 @@ public:
     GameContext &operator=(GameContext &&) = delete;
 
     // ── 基础设施子系统指针 ──
-    const Core::ProjectConfig *ProjectConfig = nullptr;  // 项目配置（路径等）
+    const Core::ProjectConfig *ProjectConfig = nullptr; // 项目配置（路径等）
     Platform::Window *Window = nullptr;
     ConfigManager *Config = nullptr;
     Logger::Logger *Logging = nullptr;
@@ -94,6 +98,7 @@ public:
 
     // ── 调度与数据层指针 ──
     Scheduler::FrameDriver *FrameDriver = nullptr;
+    Async::BackgroundExecutor *BackgroundExecutor = nullptr;
     ECS::Registry *Registry = nullptr;
 
     // ── 渲染子系统指针 ──

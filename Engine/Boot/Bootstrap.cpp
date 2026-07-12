@@ -2,13 +2,13 @@
 
 #include "Common/Common.h"
 
+#include "Asset/IO/AssetLoader.h"
 #include "Core/Config/ConfigManager.h"
 #include "Core/Config/ConfigTypes/ResourceConfig.h"
+#include "Core/SharedDataStore/SharedDataStore.h"
 #include "ECS/Core/Registry.h"
 #include "Event/MessageDispatcher.h"
 #include "GameContext.h"
-#include "Renderer/Utils/ShaderUtils.h"
-#include "Logger/DebugOverlay.h"
 #include "Logger/Logger.h"
 #include "Platform/Input/InputManager.h"
 #include "Platform/Windows/Window.h"
@@ -16,11 +16,12 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
-#include "Core/SharedDataStore/SharedDataStore.h"
+#include "Renderer/Utils/ShaderUtils.h"
+#include "Resource/AssetManager/AssetManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
+#include "Resource/GpuResourceManager.h"
 #include "Resource/Pool/DepthStencilPool.h"
 #include "Resource/Pool/RenderTargetPool.h"
-#include "Resource/AssetLoader/AssetLoader.h"
 #include "Scheduler/FrameDriver.h"
 #include <steam/isteamnetworkingutils.h>
 #include <steam/steamnetworkingsockets.h>
@@ -165,6 +166,8 @@ void Bootstrap::InitializeConfigManager(const std::filesystem::path &configDir) 
                          m_windowConfig.resizable = w["resizable"].get<bool>();
                      if (w.contains("maximizable") && w["maximizable"].is_boolean())
                          m_windowConfig.maximizable = w["maximizable"].get<bool>();
+                     if (w.contains("inputPriorityIsImGuiFirst") && w["inputPriorityIsImGuiFirst"].is_boolean())
+                         m_windowConfig.inputPriorityIsImGuiFirst = w["inputPriorityIsImGuiFirst"].get<bool>();
                  });
 
     cfg.Register("logging", {configDir / "logging_config.json", ConfigManager::ConfigFormat::JSON, true},
@@ -316,6 +319,9 @@ void Bootstrap::InitializeModules() {
         }
 
         m_window->SetInputManager(&inputMgr);
+        m_window->SetInputPriority(m_windowConfig.inputPriorityIsImGuiFirst);
+        EngineLogger::GetInstance()->Info("[Bootstrap] Window inputPriorityIsImGuiFirst={}",
+                                          m_windowConfig.inputPriorityIsImGuiFirst);
 
         // 4. D3D12 设备上下文 (依赖窗口句柄)
         if (!InitializeD3DDeviceContext()) {
@@ -342,8 +348,14 @@ void Bootstrap::InitializeModules() {
             // Sampler 堆（固定 2048，GPU 可见）
             {D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048, 2048, Resource::DescriptorSlotFlags::LinearAlloc, true}};
 
-        m_descriptorHeaps.Initialize(m_deviceContext->GetDevice(), heapConfigs);
+        bool isEditor = (m_projectConfig.Type == "editor");
+
+        m_descriptorHeaps.Initialize(m_deviceContext->GetDevice(), heapConfigs,
+                                     isEditor ? Resource::HeapMode::Multi : Resource::HeapMode::Single);
         EngineLogger::GetInstance()->Info("[Bootstrap] DescriptorHeapCollection initialized.");
+
+        // 初始化 GPU 资源管理器（全局分配器，Game/Editor 共用）
+        Resource::GpuResourceManager::GetInstance().Initialize();
 
         // 将描述符堆集合挂到 D3D12DeviceContext（供深度 SRV 等惰性创建使用）
         m_deviceContext->SetDescriptorHeapCollection(&m_descriptorHeaps);
@@ -363,6 +375,22 @@ void Bootstrap::InitializeModules() {
         m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Shadow, 98304,
                                        1024);
         EngineLogger::GetInstance()->Info("[Bootstrap] Shadow partition created: base=98304, size=1024");
+
+        // 多堆模式下为每个非 Default 标签创建相同的分区
+        if (isEditor && m_descriptorHeaps.GetMode() == Resource::HeapMode::Multi) {
+            for (uint32_t t = static_cast<uint32_t>(Resource::HeapTag::Default) + 1;
+                 t < static_cast<uint32_t>(Resource::HeapTag::Count); ++t) {
+                auto tag = static_cast<Resource::HeapTag>(t);
+                m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Texture,
+                                               0, 16384, tag);
+                m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Buffer,
+                                               16384, 81920, tag);
+                m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Shadow,
+                                               98304, 1024, tag);
+                EngineLogger::GetInstance()->Info("[Bootstrap] Partitions created for HeapTag::%s",
+                                                  Resource::HeapTagToString(tag));
+            }
+        }
 
         // 初始化主深度缓冲 SRV（供后处理 Pass 只读采样）
         m_deviceContext->InitDepthSRV();
@@ -482,6 +510,19 @@ void Bootstrap::InitializeModules() {
         // 7. FrameDriver (调度层核心，由基础设施层创建)
         InitializeFrameDriver();
 
+        // 8. 后台任务执行器（异步资产加载等）
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing BackgroundExecutor...");
+        m_backgroundExecutor = std::make_unique<Async::BackgroundExecutor>(2);
+        m_backgroundExecutor->SetCommandManager(&m_deviceContext->GetCommandManager());
+        EngineLogger::GetInstance()->Info("[Bootstrap] BackgroundExecutor initialized.");
+
+        // 9. AssetManager（统一异步加载入口）
+        EngineLogger::GetInstance()->Info("[Bootstrap] Initializing AssetManager...");
+        Resource::AssetManager::GetInstance().Initialize(m_deviceContext.get(), m_backgroundExecutor.get(),
+                                                         &m_geometryResourceManager, &m_materialManager,
+                                                         &m_textureManager, &m_descriptorHeaps);
+        EngineLogger::GetInstance()->Info("[Bootstrap] AssetManager initialized.");
+
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing GameNetworkingSockets...");
         SteamNetworkingErrMsg errMsg;
         if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
@@ -522,7 +563,7 @@ GameContext *Bootstrap::CreateContext() {
     m_mainTimer = std::make_unique<GameTimer>();
 
     m_context = std::make_unique<GameContext>();
-    m_context->ProjectConfig = &m_projectConfig;                // 项目配置
+    m_context->ProjectConfig = &m_projectConfig; // 项目配置
     m_context->Config = &ConfigManager::GetInstance();
     m_context->Logging = EngineLogger::GetInstance();
     m_context->Window = m_window.get();
@@ -530,6 +571,7 @@ GameContext *Bootstrap::CreateContext() {
     m_context->Dispatcher = Event::MessageDispatcher::GetInstance();
     m_context->Registry = m_registry.get();
     m_context->FrameDriver = m_frameDriver;
+    m_context->BackgroundExecutor = m_backgroundExecutor.get();
     m_context->DeviceContext = m_deviceContext.get();
 
     m_context->CameraMgr = &DX12Engine::Renderer::CameraManager::GetInstance();
