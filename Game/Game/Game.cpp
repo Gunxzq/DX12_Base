@@ -1,4 +1,6 @@
 #include "Game.h"
+#include "Asset/IO/AssetLoader.h"
+#include "Asset/IO/Loader/DDSLoader.h"
 #include "DebugUI/DebugUIManager.h"
 #include "Event/MessageDispatcher.h"
 #include "Framework/SystemRegistry.h"
@@ -9,9 +11,9 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Renderer/Scene/ReflectionProbeManager/ReflectionProbeManager.h"
+#include "Renderer/Scene/SkyboxManager.h"
 #include "Renderer/Scene/Struct/Frustum.h"
-#include "Resource/AssetLoader/AssetLoader.h"
-#include "Resource/AssetLoader/Loader/DDSLoader.h"
+#include "Renderer/Scene/WaterManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
@@ -43,10 +45,7 @@ bool Game::Initialize() {
 
     m_context->Logging->Info("[Game] Initializing game...");
 
-    // 1. 初始化 GPU 资源管理器
-    Resource::GpuResourceManager::GetInstance().Initialize();
-
-    // 2. 创建渲染器
+    // 1. 创建渲染器
     m_opaqueRenderer = std::make_unique<OpaqueRenderer>();
     m_opaqueRenderer->SetDeviceContext(m_context->DeviceContext);
     m_opaqueRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
@@ -54,18 +53,26 @@ bool Game::Initialize() {
     m_opaqueRenderer->Initialize();
 
     // 4. 初始化相机
-    // 场景物体在 y=30 平面，x∈[-100,100], z∈[-100,100]
-    // 相机放在场景前方，平视平面以看到 soldier 角色
+    // Moon 地图 tile 范围：X=1350~1620, Z=1350~1620
+    // 相机放在城市中心上空，45° 俯视
     if (m_context->CameraMgr) {
         auto &mainCamera = m_context->CameraMgr->GetMainCamera();
-        mainCamera.Position = DirectX::XMFLOAT3(0.0f, 25.0f, -30.0f);
-        mainCamera.Rotation = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f);
+        mainCamera.Position = DirectX::XMFLOAT3(1500.0f, 200.0f, 1500.0f);
+        mainCamera.Rotation = DirectX::XMFLOAT3(XMConvertToRadians(-45.0f), 0.0f, 0.0f);
         m_context->CameraMgr->UpdateMainCamera();
     }
 
     // 初始化 LightManager
     LightManager::GetInstance().Initialize(m_context->DeviceContext->GetDevice(), m_context->DescriptorHeaps);
     LightManager::GetInstance().CreateTestLights(); // 创建测试光源
+
+    // 初始化 SkyboxManager（天空盒由 SceneConstructor 异步加载后通过 SetSkybox 注入）
+    SkyboxManager::GetInstance().Initialize(m_context->DeviceContext->GetDevice(), m_context->DescriptorHeaps);
+    m_context->Logging->Info("[Game] SkyboxManager initialized");
+
+    // 初始化 WaterManager（水体由 SceneConstructor 异步加载后通过 SetWater 注入）
+    WaterManager::GetInstance().Initialize(m_context->DeviceContext->GetDevice());
+    m_context->Logging->Info("[Game] WaterManager initialized");
 
     // 初始化环境光遮蔽管理器（SSAO 资源分配 + SsaoRenderer）
     {
@@ -161,10 +168,11 @@ bool Game::Initialize() {
                 passConstants.FrameCount = m_context->FrameDriver->GetFrameStats().frameNumber;
 
                 // ========================================================================
-                // 上传光源数据到 GPU（使用 UpdateAndUpload，内部脏标记自动判断是否更新）
-                // 传入相机位置用于方向光阴影矩阵计算
-                // ========================================================================
+                // 上传光源数据到 GPU
                 LightManager::GetInstance().UpdateAndUpload(m_context->GetNextFence(), camera);
+
+                // 上传水常量到 GPU（WaterManager 自管 RingBuffer）
+                WaterManager::GetInstance().UpdateAndUpload(m_context->GetNextFence());
 
                 m_context->FrameResourceManager->UpdatePassConstants();
             },

@@ -1,14 +1,16 @@
 #include "GameWorld.h"
+#include "Asset/IO/Loader/SceneLoader.h"
 #include "Background/BackgroundExecutor.h"
 #include "Boot/GameContext.h"
 #include "Common/ThrowHelper.h"
 #include "Common/d3dUtil.h"
 #include "ECS/Core/Registry.h"
 #include "Logger/Logger.h"
-#include "Resource/AssetLoader/SceneLoader.h"
 #include "Renderer/Core/LODSystem.h"
 #include "Renderer/Effects/AO/AmbientOcclusionManager.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
+#include "Renderer/Material/MaterialManager.h"
+#include "Renderer/Material/MaterialResource.h"
 #include "Renderer/Pipeline/BillboardRenderer.h"
 #include "Renderer/Pipeline/OpaqueRenderer.h"
 #include "Renderer/Pipeline/ShadowRenderer.h"
@@ -16,6 +18,7 @@
 #include "Renderer/Pipeline/TerrainRenderer.h"
 #include "Renderer/Pipeline/WaterRenderer.h"
 #include "Renderer/RHI/Command/CommandManager.h"
+#include "Renderer/RHI/Command/Fence/FenceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/RenderItemBuilder/OpaqueRenderItemBuilder.h"
 #include "Renderer/RenderItemBuilder/TerrainRenderItemBuilder.h"
@@ -24,7 +27,10 @@
 #include "Renderer/Scene/TerrainManager/TerrainManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
+#include "Resource/Pool/DepthStencilPool.h"
+#include "Resource/Pool/RenderTargetPool.h"
 #include "Resource/Texture/TextureManager.h"
+#include "Scene/SceneConstructor.h"
 #include "Scheduler/FrameDriver.h"
 #include <DirectXMath.h>
 #include <wrl/client.h>
@@ -79,9 +85,6 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_terrainBuilder =
         std::make_unique<TerrainRenderItemBuilder>(m_context->FrameResourceManager, m_context->TextureMgr);
 
-    LoadTestTexture();
-    LoadBrickTextures();
-
     m_probeBuilder =
         std::make_unique<ProbeBuilder>(m_context->FrameResourceManager, m_context->MaterialMgr, m_context->TextureMgr);
     m_probeRenderer = std::make_unique<ReflectionProbeRenderer>();
@@ -89,7 +92,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_probeRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
     m_probeRenderer->SetMaterialManager(m_context->MaterialMgr);
     m_probeRenderer->Initialize();
-    LoadWaterTexture();
+    // LoadWaterTexture(); // 已迁移
 
     // 创建 1x1 纯白纹理
     {
@@ -167,68 +170,23 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
         }
     }
 
-    TestM3dLoader();
-    LoadSoldierCharacter();
-    CreateMaterials();
-    CreateSkybox();
-    CreateGroundPlane();
-    CreateTestCube();
-    CreateTestCylinder();
-    CreateTestTorus();
-    CreateStressTestScene();
+    // LoadSoldierCharacter(); // 已迁移：soldier 应由 AssetTool 导出为 .dxmesh 后通过 JSON 加载
 
-    LoadBillboardTextures();
-    CreateBillboardTrees();
-
-    m_backgroundExecutor = std::make_unique<BackgroundExecutor>(2);
-    m_backgroundExecutor->SetCommandManager(&m_context->DeviceContext->GetCommandManager());
-
-    RegisterTerrainSystems();
-    LoadTerrainAsync();
-    CreateWater();
-    RegisterWaterConstantsCallback();
+    // LoadBillboardTextures(); // 公告牌由 JSON 场景后需接入
+    // CreateBillboardTrees();
 
     // ====================================================================
-    // 测试：加载并解析场景文件
+    // SceneConstructor 异步加载测试
     // ====================================================================
     {
-        auto logger = Logger::Logger::GetInstance();
-        std::filesystem::path scenePath = m_context->ResolvePath(L"Content/Scenes/test_scene.json");
-        if (std::filesystem::exists(scenePath)) {
-            logger->Info("[SceneTest] Loading scene file: Content/Scenes/test_scene.json");
-            try {
-                auto scene = Resource::SceneLoader::LoadFromFile(scenePath);
-                logger->Info("[SceneTest] Scene loaded: name='{}', version={}", scene.metadata.name, scene.version);
-                logger->Info("[SceneTest]   environment.ambientLight = [{:.2f}, {:.2f}, {:.2f}, {:.2f}]",
-                             scene.environment.ambientLight[0], scene.environment.ambientLight[1],
-                             scene.environment.ambientLight[2], scene.environment.ambientLight[3]);
-                logger->Info("[SceneTest]   dependencies: meshes={}, materials={}, textures={}, terrains={}",
-                             scene.dependencies.meshes.size(), scene.dependencies.materials.size(),
-                             scene.dependencies.textures.size(), scene.dependencies.terrains.size());
-                logger->Info("[SceneTest]   entities: {} (top-level)", scene.entities.size());
-
-                for (size_t i = 0; i < scene.entities.size(); ++i) {
-                    auto &e = scene.entities[i];
-                    std::string comps;
-                    if (e.transform)    comps += " transform";
-                    if (e.mesh)         comps += " mesh(" + e.mesh->geometry + ")";
-                    if (e.light)        comps += " light(" + e.light->type + ")";
-                    if (e.terrain)      comps += " terrain";
-                    if (e.billboard)    comps += " billboard";
-                    if (e.camera)       comps += " camera";
-                    if (e.skinned)      comps += " skinned";
-                    if (e.reflectionProbe) comps += " reflection_probe";
-                    if (e.opaque)       comps += " opaque";
-                    if (e.transparent)  comps += " transparent";
-                    if (e.skybox)       comps += " skybox";
-                    logger->Info("[SceneTest]   entity[{}]: name='{}', components=[{} ]", i, e.name.c_str(), comps.c_str());
-                }
-                logger->Info("[SceneTest] Scene file test PASSED");
-            } catch (const std::exception &e) {
-                logger->Error("[SceneTest] Scene file test FAILED: {}", e.what());
-            }
+        std::error_code ec;
+        std::filesystem::path asyncPath = m_context->ResolvePath(L"Content/map/city/city.scene.json");
+        if (std::filesystem::exists(asyncPath, ec)) {
+            m_asyncScenePath = asyncPath.string();
+            m_asyncLoadDelay = 1; // 下一帧立即触发
+            m_context->Logging->Info("[GameWorld] Async scene load scheduled");
         } else {
-            logger->Warn("[SceneTest] Scene file not found: Content/Scenes/test_scene.json, skipping test");
+            m_context->Logging->Warn("[GameWorld] async_test.json not found");
         }
     }
 
@@ -242,6 +200,28 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     m_skinnedRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
     m_skinnedRenderer->SetMaterialManager(m_context->MaterialMgr);
     m_skinnedRenderer->Initialize();
+
+    // 预触 entt 组件存储池——确保 Worker 线程首次 view<> 时不与主线程竞态
+    // 覆盖所有 Builder 系统可能访问的组件类型
+    m_registry->view<MeshComponent>();
+    m_registry->view<TransformComponent>();
+    m_registry->view<OpaqueTag>();
+    m_registry->view<TransparentTag>();
+    m_registry->view<SkinnedTag>();
+    m_registry->view<SkinnedComponent>();
+    m_registry->view<TerrainComponent>();
+    m_registry->view<BillboardComponent>();
+    m_registry->view<WaterComponent>();
+
+    // 水构建器
+    m_waterBuilder = std::make_unique<WaterRenderItemBuilder>(m_context->FrameResourceManager, m_context->MaterialMgr,
+                                                              m_context->CameraMgr);
+
+    // 天空盒渲染器（由 SkyboxManager 提供数据，与硬编码 CreateSkybox 解耦）
+    m_skyRenderer = std::make_unique<SkyRenderer>();
+    m_skyRenderer->SetDeviceContext(m_context->DeviceContext);
+    m_skyRenderer->SetGeometryResourceManager(m_context->GeometryResourceManager);
+    m_skyRenderer->Initialize();
 
     // G-buffer 写入由 OpaqueRenderer 的 G-buffer 通道完成
     // 初始化延迟光照渲染器
@@ -262,6 +242,7 @@ void GameWorld::Initialize(GameContext *context, OpaqueRenderer *renderer) {
     RegisterOpaqueRenderSystem();
     RegisterPointShadowRenderSystem();
     RegisterLightingPass();
+    RegisterSceneConstructSystem();
     // 天空盒（主渲染最后阶段，提交到 PostProcess）
     RegisterSkyboxSystem();
     // [GBuffer 调试] 注释其他渲染 Pass，避免干扰
@@ -292,19 +273,7 @@ void GameWorld::Clear() {
         m_registry->DestroyEntity(entity);
     };
 
-    for (auto entity : m_cubeEntities) {
-        DestroyEntityWithCleanup(entity);
-    }
-    m_cubeEntities.clear();
-    m_cubeEntity = INVALID_ENTITY;
-
-    DestroyEntityWithCleanup(m_groundPlaneEntity);
-    m_groundPlaneEntity = INVALID_ENTITY;
-
-    for (auto entity : m_stressEntities) {
-        DestroyEntityWithCleanup(entity);
-    }
-    m_stressEntities.clear();
+    // 地面平面已由 JSON 场景管理，不再需要手动清理
 }
 
 void GameWorld::OnResize(uint32_t width, uint32_t height) {
@@ -316,7 +285,44 @@ void GameWorld::OnResize(uint32_t width, uint32_t height) {
 
 void GameWorld::Update() {
 
-    if (m_backgroundExecutor) {
-        m_backgroundExecutor->Tick();
+    if (m_context->BackgroundExecutor) {
+        m_context->BackgroundExecutor->Tick();
+    }
+
+    // ── 统一回收所有延迟释放的 GPU 资源（主线程，每帧） ──
+    {
+        auto &cmdMgr = m_context->DeviceContext->GetCommandManager();
+        auto &fenceMgr = cmdMgr.GetFenceManager();
+        auto *directFence = fenceMgr.GetFence(D3D12_COMMAND_LIST_TYPE_DIRECT);
+        uint64_t completedFence = directFence ? directFence->Get()->GetCompletedValue() : 0;
+
+        if (completedFence > 0) {
+            Resource::GpuResourceManager::GetInstance().Update(completedFence);
+            Resource::DepthStencilPool::GetInstance().Reclaim(completedFence);
+            Resource::RenderTargetPool::GetInstance().Reclaim(completedFence);
+
+            if (m_context->TextureMgr)
+                m_context->TextureMgr->Reclaim(completedFence);
+            if (m_context->GeometryResourceManager)
+                m_context->GeometryResourceManager->Reclaim(completedFence);
+            if (m_context->SkeletonMgr)
+                m_context->SkeletonMgr->Reclaim(completedFence);
+        }
+    }
+
+    // 延迟触发异步场景加载（让引擎先跑几帧，实体"后出现"）
+    if (m_asyncLoadDelay > 0) {
+        m_asyncLoadDelay--;
+        if (m_asyncLoadDelay == 0 && !m_asyncScenePath.empty()) {
+            try {
+                m_sceneConstructor = std::make_unique<Scene::SceneConstructor>();
+                auto desc = Resource::SceneLoader::LoadFromFile(std::filesystem::path(m_asyncScenePath));
+                m_sceneConstructor->LoadScene(desc, m_context, [ctx = m_context](bool ok) {
+                    ctx->Logging->Info("[SceneConstructor] Async scene test {}", ok ? "PASSED" : "FAILED");
+                });
+            } catch (const std::exception &e) {
+                m_context->Logging->Error("[SceneConstructor] Failed: {}", e.what());
+            }
+        }
     }
 }

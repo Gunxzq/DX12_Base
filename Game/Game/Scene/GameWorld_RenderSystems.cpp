@@ -21,11 +21,14 @@
 #include "Renderer/RHI/Command/CommandManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/LightManager/LightManager.h"
+#include "Renderer/Scene/SkyboxManager.h"
+#include "Renderer/Scene/WaterManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Pool/RenderTargetPool.h"
 #include "Resource/Texture/TextureManager.h"
+#include "Scene/SceneConstructor.h"
 #include "Scheduler/FrameDriver.h"
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
@@ -91,10 +94,7 @@ void GameWorld::RegisterLightingPass() {
                  cmd.Get()->SetDescriptorHeaps(1, heaps);
 
                  // 渲染
-                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};
-                 if (m_skyboxTextureHandle.IsValid()) {
-                     envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
-                 }
+                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = SkyboxManager::GetInstance().GetCubeSRV();
                  D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySRV = m_context->ReflectionProbeMgr->GetProbeCubemapArraySRV();
 
                  auto &lightMgr = LightManager::GetInstance();
@@ -326,7 +326,8 @@ void GameWorld::RegisterSkyboxSystem() {
         {.name = "SkyboxRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
-                 if (!m_skyRenderer || !m_skyboxGeometryHandle.IsValid()) {
+                 auto &skyMgr = SkyboxManager::GetInstance();
+                 if (!m_skyRenderer || !skyMgr.IsValid()) {
                      return;
                  }
 
@@ -340,11 +341,6 @@ void GameWorld::RegisterSkyboxSystem() {
                  auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
                  auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
                  D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
-
-                 D3D12_GPU_DESCRIPTOR_HANDLE skySRV = {0};
-                 if (m_skyboxTextureHandle.IsValid()) {
-                     skySRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
-                 }
 
                  D3D12_RESOURCE_BARRIER barrier = {};
                  barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -364,8 +360,9 @@ void GameWorld::RegisterSkyboxSystem() {
                      m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
                  cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
 
-                 m_skyRenderer->BeginFrame(cmdList, passCBAddr, skySRV);
-                 m_skyRenderer->DrawSky(cmdList, m_skyboxGeometryHandle, m_skyboxObjectCBAddress);
+                 // 从 SkyboxManager 直接读取数据
+                 m_skyRenderer->BeginFrame(cmdList, passCBAddr, skyMgr.GetCubeSRV());
+                 m_skyRenderer->DrawSky(cmdList, skyMgr.GetGeometry(), skyMgr.GetObjectCBAddress());
                  m_skyRenderer->EndFrame();
 
                  barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -390,7 +387,7 @@ void GameWorld::RegisterWaterRenderSystem() {
         {.name = "WaterRenderSystem",
          .func =
              [this](Registry &registry, const MessageContext &ctx) {
-                 if (m_transparentQueue.Empty()) {
+                 if (m_waterQueue.Empty()) {
                      return;
                  }
 
@@ -426,16 +423,26 @@ void GameWorld::RegisterWaterRenderSystem() {
                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
 
-                 m_waterRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, m_waterCBAddress);
+                 m_waterRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV,
+                                             WaterManager::GetInstance().GetWaterCBAddress());
 
-                 // 遍历透明物体队列（使用新的 TRenderQueue<TransparentRenderItem>）
-                 for (const auto &item : m_transparentQueue.GetItems()) {
+                 // 消费 WaterRenderItem 队列（由 WaterRenderItemBuilder 在 PreRender 阶段构建）
+                 auto &waterMgr = WaterManager::GetInstance();
+                 D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = waterMgr.GetEnvironmentMap();
+
+                 // 按深度排序（远到近）
+                 auto &items = m_waterQueue.GetItems();
+                 std::vector<size_t> indices(items.size());
+                 for (size_t i = 0; i < indices.size(); ++i)
+                     indices[i] = i;
+                 std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
+                     return items[a].depth > items[b].depth; // 远→近
+                 });
+
+                 for (size_t idx : indices) {
+                     const auto &item = items[idx];
                      if (!item.IsValid())
                          continue;
-                     D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV = {};
-                     if (m_skyboxTextureHandle.IsValid()) {
-                         envMapSRV = m_context->TextureMgr->GetSRV(m_skyboxTextureHandle);
-                     }
                      m_waterRenderer->DrawWater(cmdList, item.geometryHandle, item.worldMatrix, item.objectCBAddress,
                                                 envMapSRV);
                  }
@@ -458,122 +465,48 @@ void GameWorld::RegisterWaterRenderSystem() {
          .alwaysRun = true});
 }
 
-void GameWorld::RegisterTerrainSystems() {
-    // 合并 System：从 SharedDataStore 读取 TerrainGPUResult → 注册 GPU 资源 → 创建 ECS 实体
-    //
-    // 数据流：
-    //   事件 payload (低位 32 bits) = DataSlotHandle → SharedDataStore::GetData()
-    //   → TerrainGPUResult* → 注册 GeometryHandle/TextureHandle → 创建 Entity
-    //   高位 32 bits = 资源类型标识（0=地形），用于区分不同资源类型
+void GameWorld::RegisterSceneConstructSystem() {
     SystemRegistry::Register(
-        {.name = "TerrainGPUCreateSystem",
+        {.name = "SceneConstructSystem",
          .func =
              [this](Registry &reg, const MessageContext &ctx) {
-                 // 从 payload 低位解码 DataSlotHandle
-                 auto cpuHandle = Core::DataSlotHandle::FromUint32(static_cast<uint32_t>(ctx.payload & 0xFFFFFFFF));
-                 uint32_t flags = static_cast<uint32_t>(ctx.payload >> 32);
-                 m_context->Logging->Info("[TerrainGPUCreate] Triggered (handle={}, flags={})",
-                                          static_cast<uint32_t>(cpuHandle), flags);
+                 // payload 低位 = sceneId
+                 uint32_t sceneId = static_cast<uint32_t>(ctx.payload & 0xFFFFFFFF);
+                 std::string storeKey = "scene_construct_" + std::to_string(sceneId);
+                 m_context->Logging->Info("[SceneConstructSystem] Triggered (id={}, key={})", sceneId, storeKey);
 
-                 auto &assetMgr = Core::SharedDataStore::GetInstance();
-                 auto *result = static_cast<const Async::TerrainGPUResult *>(assetMgr.GetData(cpuHandle));
-                 if (!result) {
-                     m_context->Logging->Error("[TerrainGPUCreate] Invalid handle from AssetDataManager");
+                 auto &store = Core::SharedDataStore::GetInstance();
+                 auto sceneData = store.GetTypedData<Scene::SceneConstructData>(storeKey);
+                 if (!sceneData) {
+                     m_context->Logging->Error("[SceneConstructSystem] Scene data not found: {}", storeKey);
                      return;
                  }
 
-                 // 注册几何体（PatchMesh）
-                 Resource::PatchMesh mesh;
-                 mesh.vertexBufferHandle = result->vbHandle;
-                 mesh.indexBufferHandle = result->ibHandle;
-                 mesh.vertexCount = result->vertexCount;
-                 mesh.indexCount = result->indexCount;
-                 mesh.patchCount = result->indexCount / 4;
-                 mesh.vertexStride = sizeof(GeometryGenerator::Vertex);
-                 mesh.indexFormat = DXGI_FORMAT_R32_UINT;
-                 mesh.patchType = Resource::PatchType::Quad;
-                 mesh.isGpuReady = true;
-                 mesh.localBounds = result->bounds;
-                 auto geoHandle = m_context->GeometryResourceManager->RegisterGeometry<PatchMesh>(mesh);
+                 m_context->Logging->Info("[SceneConstructSystem] Found data: entities={}, geoMap={}, matMap={}",
+                                          sceneData->entities.size(), sceneData->geoMap.size(),
+                                          sceneData->matMap.size());
 
-                 // 创建纹理 SRV
-                 TextureHandle heightMapHandle = TextureHandle::Invalid();
-                 TextureHandle albedoHandle = TextureHandle::Invalid();
-                 TextureHandle normalHandle = TextureHandle::Invalid();
-                 if (result->heightMapGpuHandle.IsValid() || result->albedoGpuHandle.IsValid() ||
-                     result->normalMapGpuHandle.IsValid()) {
-                     uint32_t baseSrvIdx = m_context->DescriptorHeaps->AllocateConsecutive(PartitionType::Texture, 3);
-                     if (baseSrvIdx != UINT32_MAX) {
-                         auto device = m_context->DeviceContext->GetDevice();
-                         auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
-
-                         if (result->heightMapGpuHandle.IsValid()) {
-                             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                             srvDesc.Format = result->heightMapDesc.Format;
-                             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                             srvDesc.Texture2D.MostDetailedMip = 0;
-                             srvDesc.Texture2D.MipLevels = result->heightMapDesc.MipLevels;
-                             auto cpuHandleDesc = m_context->DescriptorHeaps->GetCpuHandle(
-                                 D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, baseSrvIdx);
-                             device->CreateShaderResourceView(gpuMgr.GetResource(result->heightMapGpuHandle), &srvDesc,
-                                                              cpuHandleDesc);
-                             heightMapHandle =
-                                 m_context->TextureMgr->RegisterTexture(result->heightMapGpuHandle, baseSrvIdx);
-                         }
-                         if (result->albedoGpuHandle.IsValid()) {
-                             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                             srvDesc.Format = result->albedoDesc.Format;
-                             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                             srvDesc.Texture2D.MostDetailedMip = 0;
-                             srvDesc.Texture2D.MipLevels = result->albedoDesc.MipLevels;
-                             auto cpuHandleDesc = m_context->DescriptorHeaps->GetCpuHandle(
-                                 D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, baseSrvIdx + 1);
-                             device->CreateShaderResourceView(gpuMgr.GetResource(result->albedoGpuHandle), &srvDesc,
-                                                              cpuHandleDesc);
-                             albedoHandle =
-                                 m_context->TextureMgr->RegisterTexture(result->albedoGpuHandle, baseSrvIdx + 1);
-                         }
-                         if (result->normalMapGpuHandle.IsValid()) {
-                             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                             srvDesc.Format = result->normalMapDesc.Format;
-                             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                             srvDesc.Texture2D.MostDetailedMip = 0;
-                             srvDesc.Texture2D.MipLevels = result->normalMapDesc.MipLevels;
-                             auto cpuHandleDesc = m_context->DescriptorHeaps->GetCpuHandle(
-                                 D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, baseSrvIdx + 2);
-                             device->CreateShaderResourceView(gpuMgr.GetResource(result->normalMapGpuHandle), &srvDesc,
-                                                              cpuHandleDesc);
-                             normalHandle =
-                                 m_context->TextureMgr->RegisterTexture(result->normalMapGpuHandle, baseSrvIdx + 2);
-                         }
-                     }
+                 // 构造 ECS 实体
+                 uint32_t constructed = 0;
+                 for (const auto &eDesc : sceneData->entities) {
+                     ECS::Entity entity = reg.CreateEntity();
+                     m_context->Logging->Info(
+                         "[SceneConstructSystem] Creating entity '{}' with geometry='{}' material='{}'", eDesc.name,
+                         eDesc.mesh ? eDesc.mesh->geometry : "(none)", eDesc.mesh ? eDesc.mesh->material : "(none)");
+                     Scene::SceneConstructor::ConstructEntity(entity, eDesc, sceneData->geoMap, sceneData->matMap, &reg,
+                                                              m_context);
+                     constructed++;
                  }
 
-                 // 创建 ECS 实体
-                 auto entity = reg.CreateEntity();
-                 reg.AddComponent<ECS::TransformComponent>(entity, XMFLOAT3(0, -50, 0), XMFLOAT3(0, 0, 0),
-                                                           XMFLOAT3(1, 1, 1));
-                 ECS::TerrainComponent terrainComp;
-                 terrainComp.geometryHandle = geoHandle;
-                 terrainComp.heightMapHandle = heightMapHandle;
-                 terrainComp.albedoHandle = albedoHandle;
-                 terrainComp.normalHandle = normalHandle;
-                 terrainComp.heightScale = result->maxHeight;
-                 reg.AddComponent<ECS::TerrainComponent>(entity, std::move(terrainComp));
+                 m_context->Logging->Info("[SceneConstructSystem] Scene '{}' constructed: {} entities",
+                                          sceneData->sceneName, constructed);
 
-                 // 释放 AssetDataManager 中的数据
-                 assetMgr.ScheduleRelease(cpuHandle, 0);
-
-                 m_context->Logging->Info("[TerrainGPUCreate] Terrain entity created (handle={})",
-                                          static_cast<uint32_t>(cpuHandle));
+                 store.RemoveTypedData(storeKey);
              },
          .phase = TaskPhase::Render,
          .threadType = ThreadType::Main,
          .priority = TaskPriority::Normal,
-         .interestedMessages = {static_cast<uint32_t>(Event::EventType::ResourceReadyEvent)}});
+         .interestedMessages = {static_cast<uint32_t>(Event::EventType::SceneConstructReadyEvent)}});
 }
 
 void GameWorld::RegisterTerrainRenderSystem() {
@@ -1058,85 +991,5 @@ void GameWorld::RegisterProbeCaptureSystem() {
          .threadType = ThreadType::Render,
          .priority = TaskPriority::Normal,
          .renderPhase = RenderPhase::PrePass,
-         .alwaysRun = true});
-}
-
-void GameWorld::RegisterBillboardRenderSystem() {
-    SystemRegistry::Register(
-        {.name = "BillboardRenderSystem",
-         .func =
-             [this](Registry &registry, const MessageContext &ctx) {
-                 if (m_billboardQueue.Empty()) {
-                     return;
-                 }
-
-                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-                 auto allocatorHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
-                 auto allocator = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle);
-                 auto cmdListHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocator);
-                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdListHandle);
-
-                 auto backBuffer = m_context->GetBackBuffer();
-
-                 D3D12_RESOURCE_BARRIER beginBarrier = {};
-                 beginBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                 beginBarrier.Transition.pResource = backBuffer;
-                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 beginBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
-
-                 const auto &viewport = m_context->DeviceContext->GetViewport();
-                 const auto &scissorRect = m_context->DeviceContext->GetScissorRect();
-                 cmdList.Get()->RSSetViewports(1, &viewport);
-                 cmdList.Get()->RSSetScissorRects(1, &scissorRect);
-
-                 auto rtvHandle = m_context->DeviceContext->GetCurrentBackBufferView();
-                 auto dsvHandle = m_context->DeviceContext->GetDepthStencilView();
-                 cmdList.Get()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-                 ID3D12DescriptorHeap *descriptorHeaps[] = {
-                     m_context->DescriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)};
-                 cmdList.Get()->SetDescriptorHeaps(1, descriptorHeaps);
-
-                 // 获取 Pass Constant Buffer 和 Light CB 地址
-                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
-                 D3D12_GPU_VIRTUAL_ADDRESS lightCBAddr = LightManager::GetInstance().GetLightCBAddress();
-                 D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV = m_context->MaterialMgr->GetMaterialBufferSRV();
-
-                 // 获取纹理数组堆起始 GPU handle（TextureSrv 分区起始）
-                 D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart =
-                     m_context->DescriptorHeaps->GetPartitionGpuHandle(PartitionType::Texture, 0);
-
-                 // 获取公告牌 Texture2DArray 的 SRV（slot 5: t20）
-                 D3D12_GPU_DESCRIPTOR_HANDLE billboardTexSRV =
-                     m_context->TextureMgr->GetSRV(m_billboardTextureHandles[0]);
-
-                 // 开始公告牌渲染
-                 m_billboardRenderer->BeginFrame(cmdList, passCBAddr, lightCBAddr, materialBufferSRV, textureHeapStart,
-                                                 billboardTexSRV);
-
-                 // 遍历公告牌队列
-                 for (const auto &item : m_billboardQueue.GetItems()) {
-                     if (!item.IsValid())
-                         continue;
-                     m_billboardRenderer->DrawBillboard(cmdList, item);
-                 }
-
-                 // 屏障：转换回 PRESENT 状态
-                 beginBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                 beginBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-                 cmdList.Get()->ResourceBarrier(1, &beginBarrier);
-
-                 cmdList.Close();
-                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::Billboard, cmdListHandle);
-
-                 uint64_t sequence = m_context->GetNextSequence();
-                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocatorHandle, sequence);
-             },
-         .phase = TaskPhase::Render,
-         .threadType = ThreadType::Render,
-         .priority = TaskPriority::Normal,
-         .renderPhase = RenderPhase::Opaque,
          .alwaysRun = true});
 }

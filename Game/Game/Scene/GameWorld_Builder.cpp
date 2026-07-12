@@ -82,14 +82,16 @@ void GameWorld::RegisterBuilderSystems() {
 
             if (m_terrainBuilder)
                 m_terrainBuilder->SetFrustum(&frustum);
-            if (m_billboardBuilder) {
-                m_billboardBuilder->SetFrustum(&frustum);
-                m_billboardBuilder->SetCameraPos(camPos);
-            }
             if (m_probeBuilder && m_activeProbeCount > 0) {
                 m_probeBuilder->SetFrustum(&frustum);
                 m_probeBuilder->SetCameraPos(camPos);
                 m_probeBuilder->SetLODSystem(m_context->LODSystem);
+            }
+
+            // 水构建器
+            if (m_waterBuilder) {
+                m_waterBuilder->SetFrustum(&frustum);
+                m_waterBuilder->SetCameraPos(camPos);
             }
         })
         .AlwaysRun()
@@ -129,16 +131,6 @@ void GameWorld::RegisterBuilderSystems() {
             .Build();
     }
 
-    if (m_billboardBuilder) {
-        REGISTER_SYSTEM(BuildBillboard, PreRender, Worker)
-            .Func([this](Registry &reg, const MessageContext &) {
-                m_billboardBuilder->BuildTyped(reg, m_billboardQueue);
-            })
-            .AlwaysRun()
-            .DependsOn("BuilderUpload")
-            .Build();
-    }
-
     if (m_probeBuilder && m_context->ReflectionProbeMgr) {
         REGISTER_SYSTEM(BuildProbes, PreRender, Worker)
             .Func([this](Registry &reg, const MessageContext &) {
@@ -152,6 +144,13 @@ void GameWorld::RegisterBuilderSystems() {
             .DependsOn("BuilderUpload")
             .Build();
     }
+
+    // 水构建器
+    REGISTER_SYSTEM(BuildWater, PreRender, Worker)
+        .Func([this](Registry &reg, const MessageContext &) { m_waterBuilder->BuildTyped(reg, m_waterQueue); })
+        .AlwaysRun()
+        .DependsOn("BuilderUpload")
+        .Build();
 
     // =========================================================================
     // FrameSync 回调：统一上传所有临时数据到 GPU RingBuffer
@@ -170,9 +169,9 @@ void GameWorld::RegisterBuilderSystems() {
                     for (auto &batch : batches) {
                         if (batch.queueIndex >= queue.Size() || batch.instances.empty())
                             continue;
-                        D3D12_GPU_VIRTUAL_ADDRESS addr = frameRes->Allocate("Instance",
-                            batch.instances.data(),
-                            static_cast<uint32_t>(batch.instances.size() * sizeof(InstanceData)));
+                        D3D12_GPU_VIRTUAL_ADDRESS addr =
+                            frameRes->Allocate("Instance", batch.instances.data(),
+                                               static_cast<uint32_t>(batch.instances.size() * sizeof(InstanceData)));
                         queue[batch.queueIndex].instanceBuffer = addr;
                     }
                     batches.clear();
@@ -185,9 +184,9 @@ void GameWorld::RegisterBuilderSystems() {
                     for (auto &batch : batches) {
                         if (batch.queueIndex >= queue.Size() || batch.instances.empty())
                             continue;
-                        D3D12_GPU_VIRTUAL_ADDRESS addr = frameRes->Allocate("Instance",
-                            batch.instances.data(),
-                            static_cast<uint32_t>(batch.instances.size() * sizeof(InstanceData)));
+                        D3D12_GPU_VIRTUAL_ADDRESS addr =
+                            frameRes->Allocate("Instance", batch.instances.data(),
+                                               static_cast<uint32_t>(batch.instances.size() * sizeof(InstanceData)));
                         queue[batch.queueIndex].instanceBuffer = addr;
                     }
                     batches.clear();
@@ -209,31 +208,6 @@ void GameWorld::RegisterBuilderSystems() {
             },
             "FrameSync_UploadInstanceData");
     }
-}
-
-void GameWorld::RegisterWaterConstantsCallback() {
-    if (!m_context || !m_context->FrameDriver)
-        return;
-
-    m_context->FrameDriver->RegisterImmediateCallback([this]() {
-        const auto &passConstants = m_context->FrameResourceManager->GetPassConstants();
-
-        WaterConstants waterCB;
-        waterCB.Time = passConstants.TotalTime;
-        waterCB.WaveAmplitude = 0.5f + sin(passConstants.TotalTime * 0.5f) * 0.2f;
-        waterCB.WaveSpeed = 1.5f;
-        waterCB.WaveFrequency = 2.0f;
-        waterCB.RefractionStrength = 0.3f;
-        waterCB.FresnelPower = 2.0f;
-        waterCB.FoamIntensity = 0.5f;
-        waterCB.ReflectionTextureIndex = 0;
-        waterCB.RefractionTextureIndex = 0;
-        waterCB.DepthTextureIndex = 0;
-        waterCB.NormalTextureIndex = 0;
-        waterCB.Pad = 0;
-
-        m_waterCBAddress = m_context->FrameResourceManager->Allocate("WaterCB", &waterCB, sizeof(WaterConstants));
-    });
 }
 
 void GameWorld::RegisterAnimationAdvancer() {
