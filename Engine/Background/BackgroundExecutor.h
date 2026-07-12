@@ -31,8 +31,8 @@ struct GpuWorkItem {
     Renderer::CommandListPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle directCmdListHandle;
     Renderer::CommandAllocatorPool<D3D12_COMMAND_LIST_TYPE_DIRECT>::Handle directAllocatorHandle;
 
-    // 上传缓冲区（COPY 提交后可释放）
-    Resource::GpuResourceHandle uploadBufferHandle = Resource::GpuResourceHandle::Invalid();
+    // 上传缓冲区句柄列表（COPY 提交后可释放）
+    std::vector<Resource::GpuResourceHandle> uploadBufferHandles;
 
     // GPU 提交完成后的回调（主线程执行）
     // 参数: bool success
@@ -40,6 +40,10 @@ struct GpuWorkItem {
 
     // 标识：此项是否有效
     std::atomic<bool> ready{false};
+
+    // ── 围栏值（ProcessGpuWork Signal 后写入，供外部查询 GPU 完成状态） ──
+    uint64_t copyFenceValue = 0;   // COPY 队列 Signal fence
+    uint64_t directFenceValue = 0; // DIRECT 队列 Signal fence
 };
 
 using GpuWorkItemPtr = std::shared_ptr<GpuWorkItem>;
@@ -86,7 +90,7 @@ struct LoadTask {
  *   后台线程: 加载文件 → 创建GPU资源 → 录制命令列表(Close不Submit) → 写入GpuWorkItem
  *   主线程Tick: 收集就绪的GpuWorkItem → Submit COPY → Signal COPY fence
  *              → Submit DIRECT(Wait COPY fence) → Signal DIRECT fence
- *              → 等待 DIRECT fence → 调用 onComplete 回调
+ *              → 非阻塞检查 DIRECT fence → 调用 onComplete 回调
  */
 class BackgroundExecutor {
 public:
@@ -149,8 +153,9 @@ public:
      * 执行流程（类比 FrameDriver::Tick）：
      *   1. 清理已完成的 CPU taskflow（原有逻辑）
      *   2. 收集就绪的 GpuWorkItem
-     *   3. 按序提交：Submit COPY → Signal COPY → Submit DIRECT(Wait COPY) → Signal DIRECT
-     *   4. 等待 DIRECT fence → 调用 onComplete 回调 → 释放命令列表/分配器
+     *   3. 按序提交：Submit COPY → Signal COPY → Submit DIRECT(Wait COPY) → Signal DIRECT（不阻塞）
+     *   4. 非阻塞检查 pending DIRECT fence → 释放上传缓冲区 → 调用 onComplete
+     *   5. 执行延后的主线程回调（纯 CPU 任务）
      */
     void Tick();
 
@@ -183,10 +188,31 @@ private:
     std::atomic<size_t> m_totalSubmitted{0};
     std::atomic<size_t> m_totalCompleted{0};
 
+    // ── GPU 待完成队列（ProcessGpuWork Submit 后不阻塞，移入此队列） ──
+    struct PendingCompletion {
+        GpuWorkItemPtr item;
+        uint64_t directFenceValue = 0;
+    };
+    mutable std::mutex m_pendingCompletionMutex;
+    std::vector<PendingCompletion> m_pendingCompletion;
+
+    // ── 主线程延后回调队列（无 gpuWork 任务的后处理） ──
+    mutable std::mutex m_deferredMutex;
+    std::vector<std::function<void()>> m_deferredCallbacks;
+
     Renderer::CommandManager *m_cmdMgr = nullptr;
 
-    /// 处理单个 GPU 工作项（主线程调用）
+    /// 处理单个 GPU 工作项（主线程调用，只 Submit + Signal，不阻塞）
     void ProcessGpuWork(const GpuWorkItemPtr &item);
+
+    /// 非阻塞检查 GPU 完成（Tick Phase 4）
+    void CheckPendingCompletions();
+
+    /// 延后回调到主线程（无 gpuWork 任务用）
+    void DeferToMainThread(std::function<void()> callback);
+
+    /// 执行延后的主线程回调（Tick Phase 5）
+    void ExecuteDeferredCallbacks();
 };
 
 } // namespace DX12Engine::Async

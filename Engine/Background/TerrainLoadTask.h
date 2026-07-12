@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Asset/IO/AssetLoader.h"
+#include "Asset/IO/Loader/TerrainLoader.h"
 #include "BackgroundExecutor.h"
 #include "Core/SharedDataStore/SharedDataStore.h"
 #include "Event/EventRegistry.h"
@@ -8,10 +10,9 @@
 #include "Logger/Logger.h"
 #include "Math/BoundingVolume.h"
 #include "Renderer/RHI/Command/CommandManager.h"
+#include "Renderer/RHI/Command/Utils/CmdTextureUpload.h"
 #include "Renderer/RHI/Command/Utils/GpuUpload.h"
 #include "Renderer/Utils/GeometryGenerator.h"
-#include "Resource/AssetLoader/AssetLoader.h"
-#include "Resource/AssetLoader/Loader/TerrainLoader.h"
 #include "Resource/AssetManager/ResourceType.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Core/GpuHandlePool.h"
@@ -325,7 +326,7 @@ public:
 
                 // 获取 COPY + DIRECT 命令列表
                 auto item = std::make_shared<GpuWorkItem>();
-                item->uploadBufferHandle = uploadHandle;
+                item->uploadBufferHandles.push_back(uploadHandle);
 
                 uint64_t fence = cmdMgr->GetNextSequence();
 
@@ -413,17 +414,18 @@ public:
         task.onComplete = [state](bool success) {
             if (success && !state->failed.load(std::memory_order_acquire)) {
                 // Payload: 低位 32 bits = DataSlotHandle, 高位 32 bits = 资源类型标识
-                uint64_t payload =
-                    (static_cast<uint64_t>(Resource::ResourceType::Terrain) << 32) | static_cast<uint32_t>(state->resultHandle);
+                uint64_t payload = (static_cast<uint64_t>(Resource::ResourceType::Terrain) << 32) |
+                                   static_cast<uint32_t>(state->resultHandle);
                 Event::MessageDispatcher::GetInstance()->PostEvent(
                     static_cast<uint32_t>(Event::EventType::ResourceReadyEvent), 0, payload,
                     Event::EventPriority::P4_Background);
                 auto *logger = Logger::Logger::GetInstance();
                 logger->Info("[TerrainLoadTask] PostEvent ResourceReady: type={} handle={} (request={})",
-                             static_cast<uint32_t>(Resource::ResourceType::Terrain), static_cast<uint32_t>(state->resultHandle), state->requestId);
+                             static_cast<uint32_t>(Resource::ResourceType::Terrain),
+                             static_cast<uint32_t>(state->resultHandle), state->requestId);
             } else {
-                uint64_t payload =
-                    (static_cast<uint64_t>(Resource::ResourceType::Terrain) << 32) | static_cast<uint64_t>(state->requestId) << 0;
+                uint64_t payload = (static_cast<uint64_t>(Resource::ResourceType::Terrain) << 32) |
+                                   static_cast<uint64_t>(state->requestId) << 0;
                 Event::MessageDispatcher::GetInstance()->PostEvent(RESOURCE_LOAD_FAILED_EVENT_HASH, 0, payload,
                                                                    Event::EventPriority::P4_Background);
             }

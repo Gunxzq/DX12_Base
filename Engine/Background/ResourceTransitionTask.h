@@ -1,10 +1,10 @@
 // Engine/Async/ResourceTransitionTask.h
 #pragma once
 
+#include "Core/SharedDataStore/SharedDataStore.h"
 #include "Event/EventRegistry.h"
 #include "Event/EventTypes.h"
 #include "Renderer/RHI/Command/CommandManager.h"
-#include "Core/SharedDataStore/SharedDataStore.h"
 #include "Resource/GpuResourceManager.h"
 #include <memory>
 #include <string>
@@ -38,13 +38,9 @@ public:
      * @param fenceKey     用于存储 transitionFence 的 SharedDataStore key
      * @return transitionFence 值（0 表示失败）
      */
-    static uint64_t SubmitTransition(ID3D12Device *device,
-                                     Renderer::CommandManager &cmdMgr,
-                                     ID3D12Resource *resource,
-                                     D3D12_RESOURCE_STATES stateBefore,
-                                     D3D12_RESOURCE_STATES stateAfter,
-                                     uint64_t waitFence,
-                                     const std::string &fenceKey) {
+    static uint64_t SubmitTransition(ID3D12Device *device, Renderer::CommandManager &cmdMgr, ID3D12Resource *resource,
+                                     D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter,
+                                     uint64_t waitFence, const std::string &fenceKey) {
         if (!device || !resource) {
             return 0;
         }
@@ -76,14 +72,13 @@ public:
 
         // Signal 并记录 fence value
         uint64_t transitionFence = cmdMgr.GetNextSequence();
-        cmdMgr.GetFenceManager().Signal(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                         cmdMgr.GetGraphicsQueue()->Get(),
-                                         transitionFence);
+        cmdMgr.GetFenceManager().Signal(D3D12_COMMAND_LIST_TYPE_DIRECT, cmdMgr.GetGraphicsQueue()->Get(),
+                                        transitionFence);
 
         // 将 fence value 存入 SharedDataStore，供后续 System 检查
         if (!fenceKey.empty()) {
-            Core::SharedDataStore::GetInstance().StoreTypedData<uint64_t>(
-                fenceKey, std::make_shared<uint64_t>(transitionFence));
+            Core::SharedDataStore::GetInstance().StoreTypedData<uint64_t>(fenceKey,
+                                                                          std::make_shared<uint64_t>(transitionFence));
         }
 
         return transitionFence;
