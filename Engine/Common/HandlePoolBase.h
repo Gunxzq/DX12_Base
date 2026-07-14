@@ -8,7 +8,7 @@
 
 namespace DX12Engine {
 
-template <typename HandleType, typename StateEnum, typename TypeEnum> class HandlePoolBase {
+template <typename HandleType, typename StateEnum> class HandlePoolBase {
 public:
     static constexpr uint32_t INITIAL_CAPACITY = 4096;
 
@@ -19,13 +19,13 @@ public:
 
     virtual ~HandlePoolBase() = default;
 
-    virtual HandleType AllocateSlot(TypeEnum type, uint8_t poolId, StateEnum initialState) = 0;
+    virtual HandleType AllocateSlot(uint8_t poolId, StateEnum initialState) = 0;
     virtual void FreeSlot(HandleType handle) = 0;
 
     void Initialize(const InitConfig &config = {}) {
         std::lock_guard<std::mutex> lock(m_mutex);
         uint32_t cap = m_capacity.load(std::memory_order_relaxed);
-        if (!m_initialized || cap == 0 || m_types.empty() || !m_states) {
+        if (!m_initialized || cap == 0 || !m_states) {
             uint32_t targetCapacity = config.maxTotalHandles > 0 ? config.maxTotalHandles : INITIAL_CAPACITY;
             if (targetCapacity > cap) {
                 Preallocate_Locked(targetCapacity);
@@ -37,7 +37,6 @@ public:
     void Shutdown() {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_initialized = false;
-        m_types.clear();
         m_freeIndices.clear();
         m_states.reset();
         m_dataPtrs.reset();
@@ -130,7 +129,6 @@ public:
 
 protected:
     mutable std::mutex m_mutex;
-    std::vector<TypeEnum> m_types;
     std::shared_ptr<std::atomic<StateEnum>[]> m_states;
     std::shared_ptr<std::atomic<uint32_t>[]> m_generations;
     std::shared_ptr<std::atomic<void *>[]> m_dataPtrs;
@@ -140,7 +138,7 @@ protected:
 
     void ExpandCapacity() {
         uint32_t oldCapacity;
-        if (!m_states || m_types.empty()) {
+        if (!m_states) {
             oldCapacity = 0;
         } else {
             oldCapacity = m_capacity.load(std::memory_order_relaxed);
@@ -163,9 +161,6 @@ protected:
         auto newDataPtrs = std::make_shared<std::atomic<void *>[]>(newCapacity);
         auto newGenerations = std::make_shared<std::atomic<uint32_t>[]>(newCapacity);
 
-        std::vector<TypeEnum> newTypes;
-        newTypes.reserve(newCapacity);
-
         size_t estimatedFreeCount = oldCapacity > 0 ? m_freeIndices.size() + (newCapacity - oldCapacity) : newCapacity;
         std::vector<uint32_t> newFreeIndices;
         newFreeIndices.reserve(estimatedFreeCount);
@@ -174,18 +169,15 @@ protected:
             newStates[i].store(m_states[i].load(std::memory_order_acquire), std::memory_order_release);
             newDataPtrs[i].store(m_dataPtrs[i].load(std::memory_order_acquire), std::memory_order_release);
             newGenerations[i].store(m_generations[i].load(std::memory_order_acquire), std::memory_order_release);
-            newTypes.push_back(m_types[i]);
         }
 
         for (uint32_t i = oldCapacity; i < newCapacity; ++i) {
-            newTypes.push_back(TypeEnum::Unknown);
             newFreeIndices.push_back(i);
         }
 
         m_states = std::move(newStates);
         m_dataPtrs = std::move(newDataPtrs);
         m_generations = std::move(newGenerations);
-        m_types = std::move(newTypes);
 
         for (uint32_t idx : m_freeIndices) {
             newFreeIndices.push_back(idx);
@@ -215,9 +207,6 @@ protected:
             auto newDataPtrs = std::make_shared<std::atomic<void *>[]>(newCapacity);
             auto newGenerations = std::make_shared<std::atomic<uint32_t>[]>(newCapacity);
 
-            std::vector<TypeEnum> newTypes;
-            newTypes.reserve(newCapacity);
-
             size_t estimatedFreeCount =
                 oldCapacity > 0 ? m_freeIndices.size() + (newCapacity - oldCapacity) : newCapacity;
             std::vector<uint32_t> newFreeIndices;
@@ -227,18 +216,15 @@ protected:
                 newStates[i].store(m_states[i].load(std::memory_order_acquire), std::memory_order_release);
                 newDataPtrs[i].store(m_dataPtrs[i].load(std::memory_order_acquire), std::memory_order_release);
                 newGenerations[i].store(m_generations[i].load(std::memory_order_acquire), std::memory_order_release);
-                newTypes.push_back(m_types[i]);
             }
 
             for (uint32_t i = oldCapacity; i < newCapacity; ++i) {
-                newTypes.push_back(TypeEnum::Unknown);
                 newFreeIndices.push_back(i);
             }
 
             m_states = std::move(newStates);
             m_dataPtrs = std::move(newDataPtrs);
             m_generations = std::move(newGenerations);
-            m_types = std::move(newTypes);
 
             for (uint32_t idx : m_freeIndices) {
                 newFreeIndices.push_back(idx);

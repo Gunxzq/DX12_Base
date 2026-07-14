@@ -1,9 +1,9 @@
 // SharedDataStore.h — 事件系统的多线程安全数据中转站
 #pragma once
 #include "Core/Config/ConfigTypes/ResourceConfig.h"
-#include "Core/SharedDataStore/DataSlotPool.h"
 #include "Core/SharedDataStore/DataPool.h"
 #include "Core/SharedDataStore/DataPoolContext.h"
+#include "Core/SharedDataStore/DataSlotPool.h"
 #include <any>
 #include <cstdint>
 #include <memory>
@@ -35,7 +35,7 @@ public:
     // ------------------------------------------------------------------
     // 槽位管理
     // ------------------------------------------------------------------
-    DataSlotHandle AllocateSlot(DataSlotType type, uint8_t poolId);
+    DataSlotHandle AllocateSlot(uint8_t poolId);
     void RegisterData(DataSlotHandle handle, void *dataPtr, size_t size);
 
     /**
@@ -57,7 +57,7 @@ public:
     // ------------------------------------------------------------------
     // 路径管理
     // ------------------------------------------------------------------
-    DataSlotHandle RegisterPath(const std::string &path, DataSlotType type, uint8_t poolId);
+    DataSlotHandle RegisterPath(const std::string &path, uint8_t poolId);
     void UnregisterPath(const std::string &path);
     std::vector<std::string> GetPendingPaths() const;
 

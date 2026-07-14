@@ -7,14 +7,11 @@
 namespace DX12Engine::Core {
 
 // ============================================================================
-// 数据槽位类型定义
+// 数据槽位状态定义
 // ============================================================================
 
 // 数据槽位状态机：Empty → Loading → Ready → PendingRelease → (Reclaim)
 enum class DataSlotState : uint8_t { Empty, Loading, Ready, Error, PendingRelease };
-
-// 数据槽位类型
-enum class DataSlotType : uint8_t { Unknown, Mesh, Texture, Audio, Shader, UploadBuffer, ReadbackBuffer };
 
 // 数据槽位句柄：18位索引 + 10位世代号 + 4位池ID
 struct DataSlotHandle {
@@ -42,13 +39,12 @@ struct DataSlotHandle {
 // DataSlotPool — 基于 HandlePoolBase 的槽位池（含 TLS 缓存）
 // ============================================================================
 
-class DataSlotPool : public HandlePoolBase<DataSlotHandle, DataSlotState, DataSlotType> {
+class DataSlotPool : public HandlePoolBase<DataSlotHandle, DataSlotState> {
 
     friend struct TLSCache;
 
 public:
-    DataSlotHandle AllocateSlot(DataSlotType type, uint8_t poolId = 0,
-                                DataSlotState initialState = DataSlotState::Loading) override;
+    DataSlotHandle AllocateSlot(uint8_t poolId = 0, DataSlotState initialState = DataSlotState::Loading) override;
 
     void FreeSlot(DataSlotHandle handle) override;
 };

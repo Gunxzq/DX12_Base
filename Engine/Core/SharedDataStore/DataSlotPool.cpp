@@ -30,7 +30,7 @@ struct TLSCache {
 
 static thread_local TLSCache t_tlsCache;
 
-DataSlotHandle DataSlotPool::AllocateSlot(DataSlotType type, uint8_t poolId, DataSlotState initialState) {
+DataSlotHandle DataSlotPool::AllocateSlot(uint8_t poolId, DataSlotState initialState) {
     uint32_t index = 0;
 
     t_tlsCache.owner = this;
@@ -83,7 +83,6 @@ DataSlotHandle DataSlotPool::AllocateSlot(DataSlotType type, uint8_t poolId, Dat
     auto dataPtrs = this->m_dataPtrs;
     auto generations = this->m_generations;
 
-    this->m_types[index] = type;
     states[index].store(initialState, std::memory_order_relaxed);
     dataPtrs[index].store(nullptr, std::memory_order_relaxed);
 

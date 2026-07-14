@@ -39,14 +39,13 @@ void GpuResourceManager::Shutdown() {
 }
 
 GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t size, const std::wstring &name,
-                                                   D3D12_HEAP_TYPE heapType,
-                                                   D3D12_RESOURCE_STATES initialState) {
+                                                   D3D12_HEAP_TYPE heapType, D3D12_RESOURCE_STATES initialState) {
     if (!m_initialized || !device) {
         return GpuResourceHandle::Invalid();
     }
 
     // 1. 分配句柄
-    GpuResourceHandle handle = m_handlePool.AllocateSlot(GpuResourceType::Buffer, 0);
+    GpuResourceHandle handle = m_handlePool.AllocateSlot(0);
 
     // 2. 创建 D3D12 资源
     CD3DX12_HEAP_PROPERTIES heapProps(heapType);
@@ -80,8 +79,7 @@ GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t 
 }
 
 GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
-                                                      const std::wstring &name,
-                                                      D3D12_RESOURCE_STATES initialState) {
+                                                      const std::wstring &name, D3D12_RESOURCE_STATES initialState) {
     if (!m_initialized || !device) {
         return GpuResourceHandle::Invalid();
     }
@@ -91,7 +89,7 @@ GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, cons
         return GpuResourceHandle::Invalid();
     }
 
-    GpuResourceHandle handle = m_handlePool.AllocateSlot(GpuResourceType::Texture2D, 0xFF);
+    GpuResourceHandle handle = m_handlePool.AllocateSlot(0xFF);
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
 
@@ -124,8 +122,7 @@ GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, cons
 }
 
 GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, const D3D12_RESOURCE_DESC &desc,
-                                                      const D3D12_CLEAR_VALUE &clearValue,
-                                                      const std::wstring &name,
+                                                      const D3D12_CLEAR_VALUE &clearValue, const std::wstring &name,
                                                       D3D12_RESOURCE_STATES initialState) {
     if (!m_initialized || !device) {
         return GpuResourceHandle::Invalid();
@@ -135,7 +132,7 @@ GpuResourceHandle GpuResourceManager::CreateTexture2D(ID3D12Device *device, cons
         return GpuResourceHandle::Invalid();
     }
 
-    GpuResourceHandle handle = m_handlePool.AllocateSlot(GpuResourceType::Texture2D, 0xFF);
+    GpuResourceHandle handle = m_handlePool.AllocateSlot(0xFF);
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
 

@@ -30,7 +30,7 @@ struct TLSCache {
 
 static thread_local TLSCache t_tlsCache;
 
-GpuResourceHandle GpuHandlePool::AllocateSlot(GpuResourceType type, uint8_t poolId, GpuResourceState initialState) {
+GpuResourceHandle GpuHandlePool::AllocateSlot(uint8_t poolId, GpuResourceState initialState) {
     // GPU句柄不包含poolId，为了一同基类而忽略此内容
 
     uint32_t index = 0;
@@ -85,7 +85,6 @@ GpuResourceHandle GpuHandlePool::AllocateSlot(GpuResourceType type, uint8_t pool
     auto dataPtrs = m_dataPtrs;
     auto generations = m_generations;
 
-    m_types[index] = type;
     states[index].store(initialState, std::memory_order_relaxed);
     dataPtrs[index].store(nullptr, std::memory_order_relaxed);
 

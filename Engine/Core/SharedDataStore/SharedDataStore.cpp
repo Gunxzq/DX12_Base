@@ -103,9 +103,7 @@ void SharedDataStore::InitializeDataPoolsFromConfig(const ResourceSystemConfig &
     }
 }
 
-DataSlotHandle SharedDataStore::AllocateSlot(DataSlotType type, uint8_t poolId) {
-    return m_slotPool.AllocateSlot(type, poolId);
-};
+DataSlotHandle SharedDataStore::AllocateSlot(uint8_t poolId) { return m_slotPool.AllocateSlot(poolId); };
 
 /**
  * @brief 注册资产数据
@@ -383,7 +381,7 @@ DataSlotState SharedDataStore::GetStatus(const std::string &path) const {
  * @return DataSlotHandle
  * @date 2026-05-24
  */
-DataSlotHandle SharedDataStore::RegisterPath(const std::string &path, DataSlotType type, uint8_t poolId) {
+DataSlotHandle SharedDataStore::RegisterPath(const std::string &path, uint8_t poolId) {
     std::unique_lock lock(m_assetMutex);
 
     // 已存在则直接返回
@@ -393,7 +391,7 @@ DataSlotHandle SharedDataStore::RegisterPath(const std::string &path, DataSlotTy
     }
 
     // 分配新句柄（HandlePool 会设置状态为 Loading）
-    DataSlotHandle handle = m_slotPool.AllocateSlot(type, poolId);
+    DataSlotHandle handle = m_slotPool.AllocateSlot(poolId);
 
     // 注册映射
     AssetInfo info;
@@ -515,4 +513,4 @@ void SharedDataStore::CleanupUnused() {
     }
 }
 
-} // namespace DX12Engine::Resource
+} // namespace DX12Engine::Core

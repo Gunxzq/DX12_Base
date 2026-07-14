@@ -1,4 +1,4 @@
-// GpuHandlePool.h — GPU 句柄池 + GPU 资源类型定义
+// GpuHandlePool.h — GPU 句柄池
 #pragma once
 #include "Common/HandlePoolBase.h"
 #include <cstdint>
@@ -12,7 +12,6 @@ namespace DX12Engine::Resource {
 
 // GPU 端资源状态
 enum class GpuResourceState : uint8_t { Empty, Ready, PendingRelease };
-enum class GpuResourceType : uint8_t { Unknown, Buffer, Texture2D, Texture3D, TextureCube };
 
 // GPU 端资源句柄：22位索引 + 10位世代号
 struct GpuResourceHandle {
@@ -38,12 +37,12 @@ struct GpuResourceHandle {
 // GpuHandlePool — 基于 HandlePoolBase 的 GPU 句柄池（含 TLS 缓存）
 // ============================================================================
 
-class GpuHandlePool : public HandlePoolBase<GpuResourceHandle, GpuResourceState, GpuResourceType> {
+class GpuHandlePool : public HandlePoolBase<GpuResourceHandle, GpuResourceState> {
 
     friend struct TLSCache;
 
 public:
-    GpuResourceHandle AllocateSlot(GpuResourceType type, uint8_t poolId = 0,
+    GpuResourceHandle AllocateSlot(uint8_t poolId = 0,
                                    GpuResourceState initialState = GpuResourceState::Ready) override;
     void FreeSlot(GpuResourceHandle handle) override;
 };
