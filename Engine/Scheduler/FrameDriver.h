@@ -1,5 +1,4 @@
 #pragma once
-#include "ECS/Core/Registry.h"
 #include "RenderPhase.h"
 #include "Renderer/RHI/Command/CommandList/CommandListPool.h"
 
@@ -82,7 +81,7 @@ using FrameSyncCallback = std::function<void()>;
  */
 class FrameDriver {
 public:
-    explicit FrameDriver(ECS::Registry &registry);
+    FrameDriver();
     ~FrameDriver();
 
     // 禁止拷贝移动
@@ -138,7 +137,6 @@ public:
     void UnregisterSceneDataCallback(uint32_t callbackId);
 
 private:
-    ECS::Registry &m_registry;
     TaskExecutor m_executor;
     TaskGraph m_taskGraph;
     FrameStats m_stats;
@@ -192,14 +190,13 @@ struct SchedulerContext {
     FrameDriver *frameDriver = nullptr;
     TaskExecutor *executor = nullptr;
     TaskGraph *taskGraph = nullptr;
-    ECS::Registry *registry = nullptr;
     const FrameStats *stats = nullptr;
     Renderer::D3D12DeviceContext *deviceContext = nullptr; // D3D12 设备上下文
 };
 
 /// 获取当前调度器上下文（线程局部）
 SchedulerContext &GetSchedulerContext();
-void InitializeSchedulerContext(ECS::Registry &registry, Renderer::D3D12DeviceContext *deviceContext = nullptr);
+void InitializeSchedulerContext(Renderer::D3D12DeviceContext *deviceContext = nullptr);
 void ShutdownSchedulerContext();
 
 } // namespace Scheduler

@@ -29,9 +29,9 @@ static thread_local SchedulerContext g_schedulerContext;
 
 SchedulerContext &GetSchedulerContext() { return g_schedulerContext; }
 
-void InitializeSchedulerContext(ECS::Registry &registry, DX12Engine::Renderer::D3D12DeviceContext *deviceContext) {
+void InitializeSchedulerContext(DX12Engine::Renderer::D3D12DeviceContext *deviceContext) {
     static std::unique_ptr<FrameDriver> s_frameDriver;
-    s_frameDriver = std::make_unique<FrameDriver>(registry);
+    s_frameDriver = std::make_unique<FrameDriver>();
     s_frameDriver->Initialize();
 
     // 注入命令管理器
@@ -40,7 +40,6 @@ void InitializeSchedulerContext(ECS::Registry &registry, DX12Engine::Renderer::D
     g_schedulerContext.frameDriver = s_frameDriver.get();
     g_schedulerContext.executor = &s_frameDriver->GetExecutor();
     g_schedulerContext.taskGraph = &s_frameDriver->GetTaskGraph();
-    g_schedulerContext.registry = &registry;
     g_schedulerContext.stats = &s_frameDriver->GetFrameStats();
     g_schedulerContext.deviceContext = deviceContext;
 }
@@ -51,8 +50,8 @@ void ShutdownSchedulerContext() { g_schedulerContext = SchedulerContext{}; }
 // FrameDriver Implementation
 // ========================================================================
 
-FrameDriver::FrameDriver(ECS::Registry &registry)
-    : m_registry(registry), m_executor(std::thread::hardware_concurrency() - 1) // 留一个给主线程
+FrameDriver::FrameDriver()
+    : m_executor(std::thread::hardware_concurrency() - 1) // 留一个给主线程
 {
     m_lastFrameTime = std::chrono::steady_clock::now();
 }
@@ -138,7 +137,7 @@ bool FrameDriver::Tick() {
     // 2. 从通信层收集消息，构建本帧的任务图（通过 Dispatcher 单例）
     auto *dispatcher = MessageDispatcher::GetInstance();
     if (dispatcher) {
-        TaskGraphBuilder::BuildFromBuckets(m_taskGraph, *dispatcher, m_registry, m_stats);
+        TaskGraphBuilder::BuildFromBuckets(m_taskGraph, *dispatcher, m_stats);
     }
 
     // 3. 如果图非空，验证合法性
@@ -195,13 +194,13 @@ bool FrameDriver::Tick() {
 
     // B. 提交命令列表到 GPU
     // 注意：此时 GPU 开始执行第 N-1 帧的渲染任务
-    ExecuteRenderPhase(RenderPhase::PrePass, 0);          // 清屏（ClearSystem）
+    ExecuteRenderPhase(RenderPhase::PrePass, 0); // 清屏（ClearSystem）
 
-    ExecuteRenderPhase(RenderPhase::Opaque, 0);            // G-buffer 写入（当前渲染不透明物体到 G-buffer）
+    ExecuteRenderPhase(RenderPhase::Opaque, 0); // G-buffer 写入（当前渲染不透明物体到 G-buffer）
 
     ExecuteRenderPhase(RenderPhase::DynamicAOcclusion, 0); // 动态屏幕空间环境光遮蔽（G-buffer 法线 + 深度就绪后执行）
 
-    ExecuteRenderPhase(RenderPhase::Lighting, 0);          // 延迟光照 Pass（读取 G-buffer + SSAO，输出到交换链）
+    ExecuteRenderPhase(RenderPhase::Lighting, 0); // 延迟光照 Pass（读取 G-buffer + SSAO，输出到交换链）
 
     ExecuteRenderPhase(RenderPhase::Billboard, 0); // 复用 Opaque 深度，不写深度
     ExecuteRenderPhase(RenderPhase::Transparent, 0);
@@ -296,10 +295,10 @@ void FrameDriver::FrameSync() {
         }
     }
 
-    // 清理墓碑（可选，可以每 N 帧执行一次）
-    if (m_stats.frameNumber % 60 == 0) {
-        m_registry.SweepTombstones();
-    }
+    // // 清理墓碑（可选，可以每 N 帧执行一次）
+    // if (m_stats.frameNumber % 60 == 0) {
+    //     m_registry.SweepTombstones();
+    // }
 
     auto syncEnd = std::chrono::steady_clock::now();
     auto syncDuration = std::chrono::duration<float>(syncEnd - syncStart);

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ECS/Core/Registry.h"
 #include "Event/MessageDispatcher.h"
 #include "Framework/SystemBuilder.h"
 #include "Framework/SystemTypes.h"
@@ -50,7 +49,7 @@ public:
      * @param registry ECS注册表
      * @param frameStats 当前帧统计信息
      */
-    static void BuildFromBuckets(TaskGraph &graph, Event::MessageDispatcher &dispatcher, ECS::Registry &registry,
+    static void BuildFromBuckets(TaskGraph &graph, Event::MessageDispatcher &dispatcher,
                                  const struct FrameStats &frameStats);
 
 private:
@@ -62,16 +61,15 @@ private:
     /**
      * @brief 将激活的System转化为Task并添加到图中
      */
-    static std::unordered_map<SystemId, TaskId> BuildTasks(TaskGraph &graph,
-                                                           const std::unordered_set<SystemId> &activatedSystems,
-                                                           const std::vector<MessageContext> &messages,
-                                                           ECS::Registry &registry, const FrameStats &frameStats);
+    static std::unordered_map<SystemId, std::vector<TaskId>>
+    BuildTasks(TaskGraph &graph, const std::unordered_set<SystemId> &activatedSystems,
+               const std::vector<MessageContext> &messages, const FrameStats &frameStats);
 
     /**
      * @brief 建立Task之间的依赖关系
      */
     static void BuildDependencies(TaskGraph &graph, const std::unordered_set<SystemId> &activatedSystems,
-                                  const std::unordered_map<SystemId, TaskId> &systemToTask);
+                                  const std::unordered_map<SystemId, std::vector<TaskId>> &systemToTask);
 };
 
 // ========================================================================

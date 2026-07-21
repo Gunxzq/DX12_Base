@@ -68,7 +68,7 @@ std::vector<MessageContext> CollectMessages(Event::MessageDispatcher &dispatcher
 // TaskGraphBuilder 实现
 // ========================================================================
 
-void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, Event::MessageDispatcher &dispatcher, ECS::Registry &registry,
+void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, Event::MessageDispatcher &dispatcher,
                                         const FrameStats &frameStats) {
     // ========================================================================
     // 阶段 0: 清空上一帧的图
@@ -91,7 +91,7 @@ void TaskGraphBuilder::BuildFromBuckets(TaskGraph &graph, Event::MessageDispatch
     // ========================================================================
     // 阶段 3: 将消息和System转化为Task
     // ========================================================================
-    auto systemToTask = BuildTasks(graph, activatedSystems, messages, registry, frameStats);
+    auto systemToTask = BuildTasks(graph, activatedSystems, messages, frameStats);
 
     // ========================================================================
     // 阶段 4: 建立依赖关系
@@ -140,18 +140,17 @@ thread_local std::vector<MessageContext> g_currentMessages;
 // 获取当前消息上下文
 const MessageContext *GetCurrentMessageContext() { return g_currentMessageContext; }
 
-std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &graph,
-                                                                  const std::unordered_set<SystemId> &activatedSystems,
-                                                                  const std::vector<MessageContext> &messages,
-                                                                  ECS::Registry &registry,
-                                                                  const FrameStats &frameStats) {
-    std::unordered_map<SystemId, TaskId> systemToTask;
+std::unordered_map<SystemId, std::vector<TaskId>>
+TaskGraphBuilder::BuildTasks(TaskGraph &graph, const std::unordered_set<SystemId> &activatedSystems,
+                             const std::vector<MessageContext> &messages, const FrameStats &frameStats) {
+    // 映射 SystemId → 该系统的所有 TaskId（同类型多条消息 -> 多个 Task）
+    std::unordered_map<SystemId, std::vector<TaskId>> systemToTask;
 
     // 保存到线程局部变量，供 GetCurrentMessageContext() 使用
     g_currentMessages = messages;
 
     // ========================================================================
-    // 阶段 1: 为消息触发的 System 创建 Task
+    // 阶段 1: 为消息触发的 System 创建 Task（每条消息独立创建）
     // ========================================================================
     for (const auto &msgCtx : messages) {
         // 设置当前消息上下文
@@ -160,11 +159,6 @@ std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &gra
         // 找到对该消息感兴趣的 System
         auto systems = SystemRegistry::GetInterestedSystems(msgCtx.messageType);
         for (SystemId sysId : systems) {
-            // 避免重复创建 Task
-            if (systemToTask.find(sysId) != systemToTask.end()) {
-                continue;
-            }
-
             const auto *info = SystemRegistry::GetSystem(sysId);
             if (!info)
                 continue;
@@ -177,14 +171,14 @@ std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &gra
             task.priority = static_cast<uint32_t>(info->priority);
 
             // 包装System函数，按值捕获 msgCtx
-            task.execute = [info, &registry, msgCtx]() {
+            task.execute = [info, msgCtx]() {
                 if (info->func) {
-                    info->func(registry, msgCtx);
+                    info->func(msgCtx);
                 }
             };
 
             TaskId tid = graph.AddTask(std::move(task));
-            systemToTask[sysId] = tid;
+            systemToTask[sysId].push_back(tid);
         }
     }
 
@@ -194,7 +188,7 @@ std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &gra
     MessageContext emptyCtx; // 常驻系统使用空的消息上下文
 
     for (const auto &[sysId, info] : SystemRegistry::GetAllSystems()) {
-        // 跳过已经创建的 Task
+        // 跳过已经创建的 Task（常驻系统只需要一个 Task）
         if (systemToTask.find(sysId) != systemToTask.end()) {
             continue;
         }
@@ -212,14 +206,14 @@ std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &gra
         task.priority = static_cast<uint32_t>(info.priority);
 
         // 包装System函数，传递空的消息上下文
-        task.execute = [info_ptr = &info, &registry, emptyCtx]() {
+        task.execute = [info_ptr = &info, emptyCtx]() {
             if (info_ptr->func) {
-                info_ptr->func(registry, emptyCtx);
+                info_ptr->func(emptyCtx);
             }
         };
 
         TaskId tid = graph.AddTask(std::move(task));
-        systemToTask[sysId] = tid;
+        systemToTask[sysId].push_back(tid);
     }
 
     // 清理
@@ -229,7 +223,7 @@ std::unordered_map<SystemId, TaskId> TaskGraphBuilder::BuildTasks(TaskGraph &gra
 }
 
 void TaskGraphBuilder::BuildDependencies(TaskGraph &graph, const std::unordered_set<SystemId> &activatedSystems,
-                                         const std::unordered_map<SystemId, TaskId> &systemToTask) {
+                                         const std::unordered_map<SystemId, std::vector<TaskId>> &systemToTask) {
     for (SystemId sysId : activatedSystems) {
         const auto *info = SystemRegistry::GetSystem(sysId);
         if (!info)
@@ -239,14 +233,18 @@ void TaskGraphBuilder::BuildDependencies(TaskGraph &graph, const std::unordered_
         if (it == systemToTask.end())
             continue;
 
-        TaskId taskId = it->second;
+        const auto &curTaskIds = it->second;
 
-        // 为每个依赖建立边
-        for (SystemId depId : info->dependencies) {
-            auto depIt = systemToTask.find(depId);
+        // 为每个依赖建立边（该系统的所有 Task 都依赖上游系统的每个 Task）
+        for (SystemId depSysId : info->dependencies) {
+            auto depIt = systemToTask.find(depSysId);
             if (depIt != systemToTask.end()) {
-                // 依赖的System也在本帧激活，建立边
-                graph.AddDependency(taskId, depIt->second);
+                const auto &depTaskIds = depIt->second;
+                for (TaskId curId : curTaskIds) {
+                    for (TaskId depTaskId : depTaskIds) {
+                        graph.AddDependency(curId, depTaskId);
+                    }
+                }
             }
             // 如果依赖的System没激活，说明它不需要运行
             // 数据应该是上一帧的结果，或者由L4层自己管理

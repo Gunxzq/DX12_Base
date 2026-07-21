@@ -91,7 +91,7 @@ struct MessageContext {
  *
  * L4层逻辑函数的标准签名
  */
-using SystemFunc = std::function<void(ECS::Registry &, const MessageContext &)>;
+using SystemFunc = std::function<void(const MessageContext &)>;
 
 /**
  * @brief System元数据

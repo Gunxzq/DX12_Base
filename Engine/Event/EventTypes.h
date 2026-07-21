@@ -262,11 +262,11 @@ struct ResourceReadyEvent {
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
 
-struct SceneConstructReadyEvent {
+struct GeneratorTaskCompleteEvent {
     EVENT_HEADER_FIELDS
-    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::SceneConstructReadyEvent);
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::GeneratorTaskCompleteEvent);
 
-    explicit SceneConstructReadyEvent(EventPriority prio = EventPriority::P2_Normal) : INIT_EVENT_HEADER(prio) {}
+    explicit GeneratorTaskCompleteEvent(EventPriority prio = EventPriority::P2_Normal) : INIT_EVENT_HEADER(prio) {}
 
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
@@ -294,6 +294,15 @@ struct CombineCompleteEvent {
     static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::CombineCompleteEvent);
 
     explicit CombineCompleteEvent(EventPriority prio = EventPriority::P2_Normal) : INIT_EVENT_HEADER(prio) {}
+
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
+struct PreviewRenderEvent {
+    EVENT_HEADER_FIELDS
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::PreviewRenderEvent);
+
+    explicit PreviewRenderEvent(EventPriority prio = EventPriority::P2_Normal) : INIT_EVENT_HEADER(prio) {}
 
     inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
 };
