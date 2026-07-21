@@ -64,10 +64,6 @@ GeometryHandle GeometryResourceManager::RegisterGeometryVariant(const GeometryVa
     // BugFix: handle.generation 是 10 位字段，需要取模避免截断导致 IsValid 失败
     handle.generation = entry.generation & 0x3FF; // 低 10 位
 
-    char buf[256];
-    sprintf_s(buf, "[INFO] Registered geometry type %zu at index %d\n", geometry.index(), index);
-    OutputDebugStringA(buf);
-
     return handle;
 }
 

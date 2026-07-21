@@ -84,10 +84,12 @@ void DescriptorHeapCollection::Initialize(ID3D12Device *device, const std::vecto
     InitializeTagHeap(*defaultHeap, device, configs);
     m_tagHeaps[HeapTag::Default] = std::move(defaultHeap);
 
-    // 多堆模式：为每个非 Default 标签预先创建独立堆
+    // 多堆模式：为每个非 Default 标签预先创建独立堆（ImGui 除外，它通过 InitializeHeap 自定义初始化）
     if (m_mode == HeapMode::Multi) {
         for (uint32_t t = static_cast<uint32_t>(HeapTag::Default) + 1; t < static_cast<uint32_t>(HeapTag::Count); ++t) {
             auto tag = static_cast<HeapTag>(t);
+            if (tag == HeapTag::ImGui)
+                continue;
             auto tagHeap = std::make_unique<TagHeap>();
             InitializeTagHeap(*tagHeap, device, configs);
             m_tagHeaps[tag] = std::move(tagHeap);
@@ -95,6 +97,19 @@ void DescriptorHeapCollection::Initialize(ID3D12Device *device, const std::vecto
     }
 
     m_initialized = true;
+}
+
+void DescriptorHeapCollection::InitializeHeap(HeapTag tag, const std::vector<DescriptorHeapConfig> &configs) {
+    // 单堆模式：路由到 Default，不创建独立堆
+    if (m_mode == HeapMode::Single) {
+        // 无需额外初始化，AddPartition 会路由到 Default
+        return;
+    }
+
+    // 多堆模式：创建独立物理堆
+    auto tagHeap = std::make_unique<TagHeap>();
+    InitializeTagHeap(*tagHeap, m_device, configs);
+    m_tagHeaps[tag] = std::move(tagHeap);
 }
 
 // ========================================================================

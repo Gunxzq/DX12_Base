@@ -90,12 +90,6 @@ typename CommandListPool<Type>::Handle CommandListPool<Type>::AcquireHandle(ID3D
         throw std::runtime_error("Failed to create CommandList in Pool");
     }
 
-    {
-        char buf[256];
-        sprintf_s(buf, "[CmdListPool] NEW entry %zu created type=%d\n", newIndex, (int)Type);
-        OutputDebugStringA(buf);
-    }
-
     return {newIndex};
 }
 

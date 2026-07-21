@@ -114,6 +114,9 @@ public:
     ID3D12DescriptorHeap *GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, HeapTag tag = HeapTag::Default) const;
     uint32_t GetDescriptorSize(D3D12_DESCRIPTOR_HEAP_TYPE type, HeapTag tag = HeapTag::Default) const;
 
+    /// 为指定 HeapTag 初始化自定义物理堆（用于 ImGui 等小型专用堆）
+    void InitializeHeap(HeapTag tag, const std::vector<DescriptorHeapConfig> &configs);
+
     D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t index,
                                              HeapTag tag = HeapTag::Default) const;
     D3D12_GPU_DESCRIPTOR_HANDLE GetGpuHandle(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t index,
@@ -143,7 +146,6 @@ private:
         uint32_t size = 0;
     };
 
-    // 每个堆域标签的完整堆+分区集合
     struct TagHeap {
         std::unordered_map<D3D12_DESCRIPTOR_HEAP_TYPE, HeapEntry> heaps;
         std::unordered_map<PartitionType, PartitionEntry> partitions;
@@ -168,8 +170,6 @@ private:
     // ── 成员变量 ──
     ID3D12Device *m_device = nullptr;
     HeapMode m_mode = HeapMode::Single;
-    // 单堆模式：只有 Default 一个 TagHeap，所有 tag 查询都路由到它
-    // 多堆模式：每个 tag 独立 TagHeap
     std::unordered_map<HeapTag, std::unique_ptr<TagHeap>> m_tagHeaps;
     bool m_initialized = false;
 };

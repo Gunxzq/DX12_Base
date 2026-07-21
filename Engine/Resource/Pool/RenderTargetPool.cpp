@@ -44,10 +44,10 @@ void RenderTargetPool::Shutdown() {
             entry.resource = nullptr;
         }
         if (entry.rtvSlot != UINT32_MAX) {
-            m_descriptorHeaps->Free(PartitionType::Rtv, entry.rtvSlot, UINT64_MAX);
+            m_descriptorHeaps->Free(entry.heapTag, PartitionType::Rtv, entry.rtvSlot, UINT64_MAX);
         }
         if (entry.srvSlot != UINT32_MAX) {
-            m_descriptorHeaps->Free(PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
+            m_descriptorHeaps->Free(entry.heapTag, PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
         }
     }
 
@@ -82,7 +82,7 @@ bool RenderTargetPool::IsDescMatch(const RenderTargetDesc &a, const RenderTarget
 uint32_t RenderTargetPool::FindMatchingEntry(const RenderTargetDesc &desc) {
     for (uint32_t i = 0; i < m_pool.size(); ++i) {
         auto &entry = m_pool[i];
-        if (!entry.inUse && IsDescMatch(entry.desc, desc)) {
+        if (!entry.inUse && entry.resource != nullptr && IsDescMatch(entry.desc, desc)) {
             return i;
         }
     }
@@ -95,7 +95,8 @@ uint32_t RenderTargetPool::FindMatchingEntry(const RenderTargetDesc &desc) {
  * @return uint32_t
  * @date 2026-05-24
  */
-uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc, const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc) {
+uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc, HeapTag tag,
+                                          const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc) {
     D3D12_RESOURCE_DESC resourceDesc = {};
     resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     resourceDesc.Width = desc.width;
@@ -125,20 +126,21 @@ uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc, const D3
     if (!desc.name.empty())
         resource->SetName(desc.name.c_str());
 
-    uint32_t rtvSlot = m_descriptorHeaps->Allocate(PartitionType::Rtv);
+    uint32_t rtvSlot = m_descriptorHeaps->Allocate(tag, PartitionType::Rtv);
     if (rtvSlot == UINT32_MAX) {
         return UINT32_MAX;
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Rtv, rtvSlot);
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Rtv, rtvSlot, tag);
     m_device->CreateRenderTargetView(resource, rtvDesc, rtvHandle);
 
     uint32_t srvSlot = UINT32_MAX;
     if ((desc.flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) &&
         !(desc.flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)) {
-        srvSlot = m_descriptorHeaps->Allocate(PartitionType::Buffer);
+        srvSlot = m_descriptorHeaps->Allocate(tag, PartitionType::Buffer);
         if (srvSlot != UINT32_MAX) {
-            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot);
+            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle =
+                m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot, tag);
             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
             srvDesc.Format = desc.format;
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -153,6 +155,7 @@ uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc, const D3
     entry.desc = desc;
     entry.rtvSlot = rtvSlot;
     entry.srvSlot = srvSlot;
+    entry.heapTag = tag;
     entry.lastUsedFrame = 0;
     entry.generation = m_nextGeneration++;
     entry.inUse = false;
@@ -167,7 +170,7 @@ uint32_t RenderTargetPool::CreateNewEntry(const RenderTargetDesc &desc, const D3
  * @return RenderTargetHandle
  * @date 2026-05-24
  */
-RenderTargetHandle RenderTargetPool::Allocate(const RenderTargetDesc &desc,
+RenderTargetHandle RenderTargetPool::Allocate(const RenderTargetDesc &desc, HeapTag tag,
                                               const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc) {
     if (!m_initialized) {
         return {};
@@ -175,7 +178,7 @@ RenderTargetHandle RenderTargetPool::Allocate(const RenderTargetDesc &desc,
 
     uint32_t poolIndex = FindMatchingEntry(desc);
     if (poolIndex == UINT32_MAX) {
-        poolIndex = CreateNewEntry(desc, rtvDesc);
+        poolIndex = CreateNewEntry(desc, tag, rtvDesc);
         if (poolIndex == UINT32_MAX) {
             return {};
         }
@@ -269,7 +272,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE RenderTargetPool::GetRtvHandle(RenderTargetHandle ha
         return {};
     }
 
-    return m_descriptorHeaps->GetCpuHandle(PartitionType::Rtv, entry.rtvSlot);
+    return m_descriptorHeaps->GetCpuHandle(PartitionType::Rtv, entry.rtvSlot, entry.heapTag);
 }
 
 /**
@@ -304,15 +307,17 @@ void RenderTargetPool::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames)
     for (auto &entry : m_pool) {
         if (!entry.inUse && currentFrame - entry.lastUsedFrame > maxAgeFrames) {
             if (entry.rtvSlot != UINT32_MAX) {
-                m_descriptorHeaps->Free(PartitionType::Rtv, entry.rtvSlot, UINT64_MAX);
+                m_descriptorHeaps->Free(entry.heapTag, PartitionType::Rtv, entry.rtvSlot, UINT64_MAX);
                 entry.rtvSlot = UINT32_MAX;
             }
             if (entry.srvSlot != UINT32_MAX) {
-                m_descriptorHeaps->Free(PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
+                m_descriptorHeaps->Free(entry.heapTag, PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
                 entry.srvSlot = UINT32_MAX;
             }
-            entry.resource->Release();
-            entry.resource = nullptr;
+            if (entry.resource) {
+                entry.resource->Release();
+                entry.resource = nullptr;
+            }
             // 递增 generation 使所有指向此条目的旧句柄立即失效
             entry.generation = m_nextGeneration++;
         }
@@ -340,7 +345,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE RenderTargetPool::GetSrvHandle(RenderTargetHandle ha
     if (entry.srvSlot == UINT32_MAX) {
         return {};
     }
-    return m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, entry.srvSlot);
+    return m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, entry.srvSlot, entry.heapTag);
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE RenderTargetPool::GetSrvGpuHandle(RenderTargetHandle handle) const {
@@ -354,7 +359,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE RenderTargetPool::GetSrvGpuHandle(RenderTargetHandle
     if (entry.srvSlot == UINT32_MAX) {
         return {};
     }
-    return m_descriptorHeaps->GetGpuHandle(PartitionType::Buffer, entry.srvSlot);
+    return m_descriptorHeaps->GetGpuHandle(PartitionType::Buffer, entry.srvSlot, entry.heapTag);
 }
 
 } // namespace DX12Engine::Resource

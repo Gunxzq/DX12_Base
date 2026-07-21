@@ -151,7 +151,7 @@ SceneLoader 解析场景 JSON
           │     ├─ 材质纹理 key → 查 SRV 索引
           │     ├─ 构造 MaterialData → MaterialManager::RegisterMaterial
           │     └─ 返回 MaterialHandle
-          └─ 材质 GPU buffer COPY 上传 → SceneConstructReadyEvent
+          └─ 材质 GPU buffer COPY 上传 → GeneratorTaskCompleteEvent
 ```
 
 ### 外部 `.mat` 引用（编辑器导出/共享场景时使用）

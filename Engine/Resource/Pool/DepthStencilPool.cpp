@@ -42,10 +42,10 @@ void DepthStencilPool::Shutdown() {
             entry.resource = nullptr;
         }
         if (entry.dsvSlot != UINT32_MAX) {
-            m_descriptorHeaps->Free(PartitionType::Dsv, entry.dsvSlot, UINT64_MAX);
+            m_descriptorHeaps->Free(entry.heapTag, PartitionType::Dsv, entry.dsvSlot, UINT64_MAX);
         }
         if (entry.srvSlot != UINT32_MAX) {
-            m_descriptorHeaps->Free(PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
+            m_descriptorHeaps->Free(entry.heapTag, PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
         }
     }
 
@@ -79,7 +79,7 @@ bool DepthStencilPool::IsDescMatch(const DepthStencilDesc &a, const DepthStencil
 uint32_t DepthStencilPool::FindMatchingEntry(const DepthStencilDesc &desc) {
     for (uint32_t i = 0; i < m_pool.size(); ++i) {
         auto &entry = m_pool[i];
-        if (!entry.inUse && IsDescMatch(entry.desc, desc)) {
+        if (!entry.inUse && entry.resource != nullptr && IsDescMatch(entry.desc, desc)) {
             return i;
         }
     }
@@ -93,7 +93,8 @@ uint32_t DepthStencilPool::FindMatchingEntry(const DepthStencilDesc &desc) {
  * @return uint32_t 创建的条目索引，如果创建成功则返回索引，否则返回 UINT32_MAX
  * @date 2026-06-26
  */
-uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc) {
+uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, HeapTag tag,
+                                          const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc) {
     D3D12_RESOURCE_DESC resourceDesc = {};
     resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     resourceDesc.Width = desc.width;
@@ -112,7 +113,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
 
     ID3D12Resource *resource = nullptr;
     HRESULT hr = m_device->CreateCommittedResource(
-        &heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        &heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc, D3D12_RESOURCE_STATE_COMMON,
         desc.clearValue.Format != DXGI_FORMAT_UNKNOWN ? &desc.clearValue : nullptr, IID_PPV_ARGS(&resource));
 
     if (FAILED(hr)) {
@@ -123,19 +124,20 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
     if (!desc.name.empty())
         resource->SetName(desc.name.c_str());
 
-    uint32_t dsvSlot = m_descriptorHeaps->Allocate(PartitionType::Dsv);
+    uint32_t dsvSlot = m_descriptorHeaps->Allocate(tag, PartitionType::Dsv);
     if (dsvSlot == UINT32_MAX) {
         return UINT32_MAX;
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, dsvSlot);
+    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, dsvSlot, tag);
     m_device->CreateDepthStencilView(resource, dsvDesc, dsvHandle);
 
     uint32_t srvSlot = UINT32_MAX;
     if (!(desc.flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)) {
-        srvSlot = m_descriptorHeaps->Allocate(PartitionType::Buffer);
+        srvSlot = m_descriptorHeaps->Allocate(tag, PartitionType::Buffer);
         if (srvSlot != UINT32_MAX) {
-            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot);
+            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle =
+                m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, srvSlot, tag);
 
             DXGI_FORMAT srvFormat = DXGI_FORMAT_UNKNOWN;
             switch (desc.format) {
@@ -167,6 +169,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
     entry.desc = desc;
     entry.dsvSlot = dsvSlot;
     entry.srvSlot = srvSlot;
+    entry.heapTag = tag;
     entry.lastUsedFrame = 0;
     entry.generation = m_nextGeneration++;
     entry.inUse = false;
@@ -182,7 +185,7 @@ uint32_t DepthStencilPool::CreateNewEntry(const DepthStencilDesc &desc, const D3
  * @return DepthStencilHandle 分配的句柄
  * @date 2026-06-26
  */
-DepthStencilHandle DepthStencilPool::Allocate(const DepthStencilDesc &desc,
+DepthStencilHandle DepthStencilPool::Allocate(const DepthStencilDesc &desc, HeapTag tag,
                                               const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc) {
     if (!m_initialized) {
         return {};
@@ -190,7 +193,7 @@ DepthStencilHandle DepthStencilPool::Allocate(const DepthStencilDesc &desc,
 
     uint32_t poolIndex = FindMatchingEntry(desc);
     if (poolIndex == UINT32_MAX) {
-        poolIndex = CreateNewEntry(desc, dsvDesc);
+        poolIndex = CreateNewEntry(desc, tag, dsvDesc);
         if (poolIndex == UINT32_MAX) {
             return {};
         }
@@ -284,7 +287,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilPool::GetDsvHandle(DepthStencilHandle ha
         return {};
     }
 
-    return m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, entry.dsvSlot);
+    return m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, entry.dsvSlot, entry.heapTag);
 }
 
 /**
@@ -304,7 +307,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilPool::GetSrvHandle(DepthStencilHandle ha
     if (entry.srvSlot == UINT32_MAX) {
         return {};
     }
-    return m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, entry.srvSlot);
+    return m_descriptorHeaps->GetCpuHandle(PartitionType::Buffer, entry.srvSlot, entry.heapTag);
 }
 
 /**
@@ -337,15 +340,17 @@ void DepthStencilPool::PurgeUnused(uint64_t currentFrame, uint64_t maxAgeFrames)
     for (auto &entry : m_pool) {
         if (!entry.inUse && currentFrame - entry.lastUsedFrame > maxAgeFrames) {
             if (entry.dsvSlot != UINT32_MAX) {
-                m_descriptorHeaps->Free(PartitionType::Dsv, entry.dsvSlot, UINT64_MAX);
+                m_descriptorHeaps->Free(entry.heapTag, PartitionType::Dsv, entry.dsvSlot, UINT64_MAX);
                 entry.dsvSlot = UINT32_MAX;
             }
             if (entry.srvSlot != UINT32_MAX) {
-                m_descriptorHeaps->Free(PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
+                m_descriptorHeaps->Free(entry.heapTag, PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
                 entry.srvSlot = UINT32_MAX;
             }
-            entry.resource->Release();
-            entry.resource = nullptr;
+            if (entry.resource) {
+                entry.resource->Release();
+                entry.resource = nullptr;
+            }
             entry.generation = m_nextGeneration++;
         }
     }

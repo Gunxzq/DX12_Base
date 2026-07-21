@@ -1,7 +1,8 @@
 #pragma once
+#include "Resource/Core/DescriptorHeapCollection.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include "Resource/Struct/Descriptor.h"
 #include "Resource/Struct/DescriptorHandle.h"
-#include "Resource/Core/GpuHandlePool.h"
 #include <d3d12.h>
 #include <vector>
 
@@ -21,7 +22,8 @@ public:
     void Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps);
     void Shutdown();
 
-    DepthStencilHandle Allocate(const DepthStencilDesc &desc, const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc = nullptr);
+    DepthStencilHandle Allocate(const DepthStencilDesc &desc, HeapTag tag = HeapTag::Default,
+                                const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc = nullptr);
     void Free(DepthStencilHandle handle, uint64_t fenceValue);
 
     ID3D12Resource *GetResource(DepthStencilHandle handle) const;
@@ -43,6 +45,7 @@ private:
         DepthStencilDesc desc;
         uint32_t dsvSlot = UINT32_MAX;
         uint32_t srvSlot = UINT32_MAX;
+        HeapTag heapTag = HeapTag::Default;
         uint64_t lastUsedFrame = 0;
         uint32_t generation = 0;
         bool inUse = false;
@@ -56,7 +59,7 @@ private:
 
 private:
     uint32_t FindMatchingEntry(const DepthStencilDesc &desc);
-    uint32_t CreateNewEntry(const DepthStencilDesc &desc, const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc);
+    uint32_t CreateNewEntry(const DepthStencilDesc &desc, HeapTag tag, const D3D12_DEPTH_STENCIL_VIEW_DESC *dsvDesc);
     bool IsDescMatch(const DepthStencilDesc &a, const DepthStencilDesc &b) const;
 
     ID3D12Device *m_device = nullptr;

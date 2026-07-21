@@ -1,4 +1,5 @@
 #pragma once
+#include "Asset/Definitions/AssetType.h"
 #include "Background/BackgroundExecutor.h"
 #include "Core/SharedDataStore/SharedDataStore.h"
 #include "Renderer/Material/MaterialHandle.h"
@@ -45,8 +46,6 @@ class DescriptorHeapCollection; // 前向声明
 //       manager->RegisterGeometry(result);
 //   });
 // ========================================================================
-
-enum class AssetType : uint8_t { Mesh, Texture, Material, Terrain, Scene };
 
 struct AssetResult {
     AssetType type;

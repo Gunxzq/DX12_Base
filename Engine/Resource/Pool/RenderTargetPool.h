@@ -1,7 +1,8 @@
 #pragma once
+#include "Resource/Core/DescriptorHeapCollection.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include "Resource/Struct/Descriptor.h"
 #include "Resource/Struct/DescriptorHandle.h"
-#include "Resource/Core/GpuHandlePool.h"
 #include <d3d12.h>
 #include <unordered_map>
 #include <vector>
@@ -22,7 +23,8 @@ public:
     void Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps);
     void Shutdown();
 
-    RenderTargetHandle Allocate(const RenderTargetDesc &desc, const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc = nullptr);
+    RenderTargetHandle Allocate(const RenderTargetDesc &desc, HeapTag tag = HeapTag::Default,
+                                const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc = nullptr);
     void Free(RenderTargetHandle handle, uint64_t fenceValue);
 
     ID3D12Resource *GetResource(RenderTargetHandle handle) const;
@@ -45,6 +47,7 @@ private:
         RenderTargetDesc desc;
         uint32_t rtvSlot = UINT32_MAX;
         uint32_t srvSlot = UINT32_MAX;
+        HeapTag heapTag = HeapTag::Default;
         uint64_t lastUsedFrame = 0;
         bool inUse = false;
         uint32_t generation = 0;
@@ -58,7 +61,7 @@ private:
 
 private:
     uint32_t FindMatchingEntry(const RenderTargetDesc &desc);
-    uint32_t CreateNewEntry(const RenderTargetDesc &desc, const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc);
+    uint32_t CreateNewEntry(const RenderTargetDesc &desc, HeapTag tag, const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc);
     bool IsDescMatch(const RenderTargetDesc &a, const RenderTargetDesc &b) const;
 
     ID3D12Device *m_device = nullptr;
