@@ -37,6 +37,8 @@ find_package(Jolt CONFIG REQUIRED)
 find_package(Taskflow CONFIG REQUIRED)
 find_package(GameNetworkingSockets CONFIG REQUIRED)
 find_package(protobuf CONFIG REQUIRED)
+find_package(Stb REQUIRED)
+find_package(imguizmo CONFIG REQUIRED)
 
 # ========================================================================
 # 3. 拆分引擎模块 (Static Libraries)
@@ -75,6 +77,7 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ENGINE_DIR}/Math/*.cpp"      "${ENGINE_DIR}/Math/*.h"
     "${ENGINE_DIR}/ECS/*.cpp"       "${ENGINE_DIR}/ECS/*.h"
     "${ENGINE_DIR}/Platform/*.cpp"  "${ENGINE_DIR}/Platform/*.h"
+    "${ENGINE_DIR}/Scene/*.cpp"     "${ENGINE_DIR}/Scene/*.h"
     "${ENGINE_DIR}/Scheduler/*.cpp" "${ENGINE_DIR}/Scheduler/*.h"
 )
 
@@ -111,7 +114,8 @@ target_link_libraries(DX12Core PUBLIC
 # ========================================================================
 file(GLOB_RECURSE RESOURCE_SOURCES
     "${ENGINE_DIR}/Resource/*.cpp" "${ENGINE_DIR}/Resource/*.h"
-    "${ENGINE_DIR}/AssetDefinitions/*.cpp" "${ENGINE_DIR}/AssetDefinitions/*.h"
+    "${ENGINE_DIR}/Asset/Definitions/*.cpp" "${ENGINE_DIR}/Asset/Definitions/*.h"
+    "${ENGINE_DIR}/Asset/IO/*.cpp" "${ENGINE_DIR}/Asset/IO/*.h"
 )
 
 add_library(DX12Resource STATIC ${RESOURCE_SOURCES})
@@ -337,13 +341,66 @@ add_custom_command(TARGET DX12_Game POST_BUILD
 )
 
 # ========================================================================
-# 5. 构建编辑器 (骨架)
+# 5. 构建编辑器
 # ========================================================================
-add_executable(DX12_Editor WIN32 "${CMAKE_CURRENT_SOURCE_DIR}/Editor/Application/main.cpp")
 
-target_link_libraries(DX12_Editor PRIVATE DX12Core)
+# 5.1 DX12EditorLib — 编辑器专用逻辑库
+file(GLOB_RECURSE EDITORLIB_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/*.h"
+)
 
-target_compile_definitions(DX12_Editor PRIVATE UNICODE _UNICODE)
+add_library(DX12EditorLib STATIC ${EDITORLIB_SOURCES})
+
+target_include_directories(DX12EditorLib PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Core
+    ${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Panels
+    ${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib
+    ${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Input
+    ${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Scene
+    ${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Log
+)
+
+target_compile_definitions(DX12EditorLib PUBLIC
+    UNICODE _UNICODE
+    MI_OVERRIDE=ON
+    IMGUI_DEFINE_MATH_OPERATORS
+    WITH_EDITOR
+)
+
+target_compile_options(DX12EditorLib PRIVATE /MP)
+target_precompile_headers(DX12EditorLib REUSE_FROM DX12Core)
+
+target_link_libraries(DX12EditorLib PUBLIC
+    DX12Renderer
+    DX12Background
+    DX12Resource
+    DX12Core
+    imguizmo::imguizmo
+)
+
+# 5.2 DX12_Editor 主程序
+file(GLOB_RECURSE EDITOR_APP_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/Editor/Application/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Editor/Application/*.h"
+)
+
+set(EDITOR_RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Editor/Application/DX12_Editor.rc")
+
+add_executable(DX12_Editor WIN32 ${EDITOR_APP_SOURCES} ${EDITOR_RESOURCES})
+
+target_compile_definitions(DX12_Editor PRIVATE
+    UNICODE _UNICODE
+    MI_OVERRIDE=ON
+    WITH_EDITOR
+)
+
+target_compile_options(DX12_Editor PRIVATE /MP)
+target_precompile_headers(DX12_Editor REUSE_FROM DX12Core)
+
+set_source_files_properties(${EDITOR_RESOURCES} PROPERTIES
+    RC_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/Editor/Application"
+)
 
 # 生成 ProjectConfig 头文件（编译时常量，替代运行时 ProjectConfig.ini）
 set(PROJECT_TYPE "editor")
@@ -355,6 +412,7 @@ configure_file(
 
 target_include_directories(DX12_Editor PRIVATE
     "${CMAKE_BINARY_DIR}/Generated/Editor"
+    ${CMAKE_CURRENT_SOURCE_DIR}/Editor/Application
 )
 
 # 复制 Editor 配置文件到输出目录
@@ -364,12 +422,7 @@ add_custom_command(TARGET DX12_Editor POST_BUILD
     $<TARGET_FILE_DIR:DX12_Editor>/Config
 )
 
-# 复制 Shaders 到输出目录（各渲染器编译时依赖 ShaderRoot）
-add_custom_command(TARGET DX12_Game POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_SOURCE_DIR}/Shaders
-    $<TARGET_FILE_DIR:DX12_Game>/Shaders
-)
+# 复制 Shaders 到输出目录
 add_custom_command(TARGET DX12_Editor POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_SOURCE_DIR}/Shaders
@@ -384,6 +437,12 @@ set_target_properties(DX12_Editor PROPERTIES
 )
 
 target_link_libraries(DX12_Editor PRIVATE
+    DX12EditorLib
+    DX12Renderer
+    DX12Background
+    DX12Resource
+    DX12Core
+    imguizmo::imguizmo
     user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib
 )
 if(EXISTS "${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_upscaler_dx12.dll")
@@ -478,4 +537,62 @@ target_link_libraries(NetworkP2PTest PRIVATE
 target_include_directories(NetworkP2PTest PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine
     ${CMAKE_CURRENT_SOURCE_DIR}/Game
+)
+
+# ========================================================================
+# 8. 构建 AssetTool — UKW PowerUp Kit 离线资产转换工具
+#
+# 两个目标：
+#   AssetTool     — CLI 控制台版本（6 个子命令）
+#   AssetToolGUI  — Win32 图形界面版本（目录选择+批量转换）
+# ========================================================================
+
+set(ASSET_TOOL_SHARED_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/XORCipher.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/XORCipher.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/XFileParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/XFileParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/HODParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/HODParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/MPDParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/MPDParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/ScriptSPTParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/ScriptSPTParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/TextureConverter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/TextureConverter.h"
+)
+
+# ── AssetTool (CLI) ──
+add_executable(AssetTool
+    ${ASSET_TOOL_SHARED_SOURCES}
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/main.cpp"
+)
+
+target_include_directories(AssetTool PRIVATE ${CMAKE_SOURCE_DIR}/Engine ${Stb_INCLUDE_DIR})
+target_link_libraries(AssetTool PRIVATE DX12Core nlohmann_json::nlohmann_json assimp::assimp)
+target_compile_options(AssetTool PRIVATE /MP)
+target_compile_definitions(AssetTool PRIVATE UNICODE _UNICODE)
+
+set_target_properties(AssetTool PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG    "${CMAKE_BINARY_DIR}/Bin/x64/Debug/AssetTool"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE  "${CMAKE_BINARY_DIR}/Bin/x64/Release/AssetTool"
+)
+
+# ── AssetToolGUI (Win32) ──
+add_executable(AssetToolGUI WIN32
+    ${ASSET_TOOL_SHARED_SOURCES}
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/AssetToolGUI.cpp"
+)
+
+target_include_directories(AssetToolGUI PRIVATE ${CMAKE_SOURCE_DIR}/Engine ${Stb_INCLUDE_DIR})
+target_link_libraries(AssetToolGUI PRIVATE
+    DX12Core nlohmann_json::nlohmann_json assimp::assimp
+    comctl32.lib ole32.lib shlwapi.lib
+)
+target_compile_options(AssetToolGUI PRIVATE /MP)
+target_compile_definitions(AssetToolGUI PRIVATE UNICODE _UNICODE)
+
+set_target_properties(AssetToolGUI PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG    "${CMAKE_BINARY_DIR}/Bin/x64/Debug/AssetTool"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE  "${CMAKE_BINARY_DIR}/Bin/x64/Release/AssetTool"
 )

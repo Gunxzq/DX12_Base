@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "locale": "zh-CN",
+  "strings": {
+    "viewport": "视口",
+    "preview": "预览",
+    "content_browser": "文件管理器",
+    "asset_manager": "资产管理器",
+    "outliner": "大纲",
+    "properties": "属性",
+    "console": "控制台",
+    "status_bar": "状态栏",
+
+    "menu_file": "文件",
+    "menu_file_new": "新建场景",
+    "menu_file_open": "打开场景",
+    "menu_file_save": "保存场景",
+    "menu_file_save_as": "另存为",
+    "menu_file_exit": "退出",
+    "menu_edit": "编辑",
+    "menu_edit_undo": "撤销",
+    "menu_edit_redo": "重做",
+    "menu_view": "视图",
+    "menu_view_toolbar": "工具栏",
+    "menu_view_statusbar": "状态栏",
+    "menu_view_show_grid": "显示网格",
+    "menu_view_show_gizmo": "显示Gizmo",
+    "menu_gizmo": "Gizmo",
+    "menu_gizmo_translate": "平移",
+    "menu_gizmo_rotate": "旋转",
+    "menu_gizmo_scale": "缩放",
+
+    "help": "帮助",
+    "help_imgui_demo": "ImGui 演示",
+
+    "mode_folder": "文件夹",
+    "mode_type": "类型",
+
+    "toolbar_refresh": "刷新",
+    "toolbar_search": "搜索...",
+
+    "console_clear": "清空",
+    "console_autoscroll": "自动滚动",
+    "console_lines": "%zu 行",
+
+    "viewport_no_rt": "视口 - 无渲染目标",
+    "viewport_grid_spacing": "网格间距",
+    "viewport_grid_tooltip": "世界单位",
+    "content_root_not_set": "未设置资源根目录",
+
+    "no_results": "无结果",
+    "result_limit": "... 及其他 (最多 20 条)",
+    "empty": "(空)",
+
+    "search": "搜索...",
+    "refresh": "刷新",
+    "grid_spacing": "网格间距"
+  }
+}

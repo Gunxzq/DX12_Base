@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "locale": "en-US",
+  "strings": {
+    "viewport": "Viewport",
+    "preview": "Preview",
+    "content_browser": "File Manager",
+    "asset_manager": "Asset Manager",
+    "outliner": "Outliner",
+    "properties": "Properties",
+    "console": "Console",
+    "status_bar": "Status Bar",
+
+    "menu_file": "File",
+    "menu_file_new": "New Scene",
+    "menu_file_open": "Open Scene",
+    "menu_file_save": "Save Scene",
+    "menu_file_save_as": "Save As",
+    "menu_file_exit": "Exit",
+    "menu_edit": "Edit",
+    "menu_edit_undo": "Undo",
+    "menu_edit_redo": "Redo",
+    "menu_view": "View",
+    "menu_view_toolbar": "Toolbar",
+    "menu_view_statusbar": "Status Bar",
+    "menu_view_show_grid": "Show Grid",
+    "menu_view_show_gizmo": "Show Gizmo",
+    "menu_gizmo": "Gizmo",
+    "menu_gizmo_translate": "Translate",
+    "menu_gizmo_rotate": "Rotate",
+    "menu_gizmo_scale": "Scale",
+
+    "help": "Help",
+    "help_imgui_demo": "ImGui Demo",
+
+    "mode_folder": "Folder",
+    "mode_type": "Type",
+
+    "toolbar_refresh": "Refresh",
+    "toolbar_search": "Search...",
+
+    "console_clear": "Clear",
+    "console_autoscroll": "Auto Scroll",
+    "console_lines": "%zu lines",
+
+    "viewport_no_rt": "Viewport - No Render Target",
+    "viewport_grid_spacing": "Grid Spacing",
+    "viewport_grid_tooltip": "World units",
+    "content_root_not_set": "Content root not set",
+
+    "no_results": "No results found",
+    "result_limit": "... and more (limit 20)",
+    "empty": "(empty)",
+
+    "search": "Search...",
+    "refresh": "Refresh",
+    "grid_spacing": "Grid Spacing"
+  }
+}
