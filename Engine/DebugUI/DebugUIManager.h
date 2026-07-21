@@ -23,6 +23,7 @@ namespace DebugUI {
 // ========================================================================
 
 using PanelDrawFunc = std::function<void(float deltaTime, uint32_t frameNumber)>;
+using RootDrawFunc = std::function<void(float deltaTime, uint32_t frameNumber)>;
 
 // ========================================================================
 // 面板配置
@@ -68,6 +69,9 @@ public:
     bool IsInitialized() const { return m_initialized; }
     void SetGameContext(Boot::GameContext *context) { m_gameContext = context; }
 
+    /// 合并图标字体（iconfont），由 Bootstrap 调用，传入已解析的绝对路径
+    void MergeIconFont(const std::string &ttfPath);
+
     // ========================================================================
     // 面板管理
     // ========================================================================
@@ -77,6 +81,12 @@ public:
     void SetPanelVisible(const std::string &name, bool visible);
     void TogglePanelVisible(const std::string &name);
     bool IsPanelVisible(const std::string &name) const;
+
+    // ========================================================================
+    // 根级绘制回调（不包裹在面板窗口中，直接注册在根级）
+    // ========================================================================
+
+    void RegisterRootDrawCallback(RootDrawFunc func);
 
     // ========================================================================
     // 渲染
@@ -168,6 +178,9 @@ private:
 
     Boot::GameContext *m_gameContext = nullptr;
     bool m_registered = false;
+
+    // 根级绘制回调（不包裹在面板窗口中）
+    RootDrawFunc m_rootDrawCallback;
 
     // 自行管理的 SRV 描述符堆
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvHeap;

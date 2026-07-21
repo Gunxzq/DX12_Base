@@ -183,23 +183,11 @@ LRESULT Window::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
     switch (m_inputPriorityIsImGuiFirst ? 0 : 1) {
     case 0:
     default:
-        // ImGui 先处理，再给 InputManager
-        if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
-            OutputDebugStringA(
-                ("[Window] Case 0 (ImGuiFirst), msg=" + std::to_string(msg) + ", key=" + std::to_string(wParam) + "\n")
-                    .c_str());
-        }
         ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
         ProcessInputMessage(msg, wParam, lParam);
         break;
 
     case 1:
-        // InputManager 先处理，再给 ImGui
-        if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
-            OutputDebugStringA(
-                ("[Window] Case 1 (InputFirst), msg=" + std::to_string(msg) + ", key=" + std::to_string(wParam) + "\n")
-                    .c_str());
-        }
         ProcessInputMessage(msg, wParam, lParam);
         ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
         break;
@@ -358,7 +346,6 @@ void Window::ProcessInputMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
-        OutputDebugStringA(("[ProcessInputMessage] WM_KEYDOWN key=" + std::to_string(wParam) + "\n").c_str());
         m_inputMgr->GetRawBuffer()->OnKeyDown(static_cast<Input::EKeyCode>(wParam));
         break;
 
@@ -378,13 +365,11 @@ void Window::ProcessInputMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_MOUSEWHEEL: {
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-        OutputDebugStringA(("[ProcessInputMessage] WM_MOUSEWHEEL delta=" + std::to_string(delta) + "\n").c_str());
         m_inputMgr->GetRawBuffer()->OnMouseWheel(delta);
         break;
     }
 
     case WM_LBUTTONDOWN:
-        OutputDebugStringA("[ProcessInputMessage] WM_LBUTTONDOWN\n");
         m_inputMgr->GetRawBuffer()->OnKeyDown(Input::EKeyCode::Mouse_Left);
         break;
     case WM_LBUTTONUP:
@@ -392,7 +377,6 @@ void Window::ProcessInputMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
 
     case WM_RBUTTONDOWN:
-        OutputDebugStringA("[ProcessInputMessage] WM_RBUTTONDOWN\n");
         m_inputMgr->GetRawBuffer()->OnKeyDown(Input::EKeyCode::Mouse_Right);
         break;
     case WM_RBUTTONUP:
@@ -400,7 +384,6 @@ void Window::ProcessInputMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
 
     case WM_MBUTTONDOWN:
-        OutputDebugStringA("[ProcessInputMessage] WM_MBUTTONDOWN\n");
         m_inputMgr->GetRawBuffer()->OnKeyDown(Input::EKeyCode::Mouse_Middle);
         break;
     case WM_MBUTTONUP:

@@ -13,6 +13,7 @@
 #include "Components/Grid.h"
 #include "Components/Light.h"
 #include "Components/Misc.h"
+#include "Components/Name.h"
 #include "Components/ReflectionProbe.h"
 #include "Components/Render.h"
 #include "Components/Tags.h"

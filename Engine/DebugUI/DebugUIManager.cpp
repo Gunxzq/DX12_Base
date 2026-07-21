@@ -1,5 +1,8 @@
 #include "DebugUIManager.h"
+#include "Boot/GameContext.h"
 #include "Common/WindowsPlatform.h"
+#include "Resource/Core/DescriptorHeapCollection.h"
+#include <filesystem>
 
 // Common
 #include "Common/ImGuiWrapper.h"
@@ -66,13 +69,30 @@ void DebugUIManager::Initialize(HWND hwnd) {
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // 键盘导航
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.IniFilename = "imgui.ini"; // 保存布局
 
     // 应用默认样式
     ApplyDarkTheme();
 
-    // 初始化 Win32 后端
+    // 加载字体（优先使用系统字体以支持中文，回退到默认字体）
+    bool fontLoaded = false;
+    const char *systemFonts[] = {"C:/Windows/Fonts/msyh.ttc",   // Microsoft YaHei
+                                 "C:/Windows/Fonts/simhei.ttf", // SimHei
+                                 "C:/Windows/Fonts/msyhbd.ttc", // Microsoft YaHei Bold
+                                 "C:/Windows/Fonts/deng.ttf",   // DengXian
+                                 nullptr};
+    for (int i = 0; systemFonts[i]; i++) {
+        if (std::filesystem::exists(systemFonts[i])) {
+            io.Fonts->AddFontFromFileTTF(systemFonts[i], 15.0f, nullptr, io.Fonts->GetGlyphRangesChineseFull());
+            fontLoaded = true;
+            break;
+        }
+    }
+    if (!fontLoaded) {
+        io.Fonts->AddFontDefault();
+    }
+
+       // 初始化 Win32 后端
     ImGui_ImplWin32_Init(hwnd);
 
     m_initialized = true;
@@ -86,12 +106,21 @@ void DebugUIManager::InitDX12Backend(ID3D12Device *device, ID3D12CommandQueue *c
     m_frameCount = frameCount;
     m_rtvFormat = rtvFormat;
 
-    // 创建 SRV 描述符堆（1024 个槽位，ImGui 可能需要较多）
-    CreateSrvDescriptorHeap(device);
-
-    // 初始化描述符分配器
-    D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
-    m_descriptorAllocator.Initialize(heapStart, m_srvDescriptorSize, 1024); // 1024 个槽位
+    // 从 DescriptorHeapCollection 获取 ImGui 专用分区
+    if (m_gameContext && m_gameContext->DescriptorHeaps) {
+        auto *descHeaps = m_gameContext->DescriptorHeaps;
+        m_srvHeap = descHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::HeapTag::ImGui);
+        m_srvDescriptorSize =
+            descHeaps->GetDescriptorSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::HeapTag::ImGui);
+        D3D12_CPU_DESCRIPTOR_HANDLE partitionStart =
+            descHeaps->GetCpuHandle(Resource::PartitionType::Texture, 0, Resource::HeapTag::ImGui);
+        m_descriptorAllocator.Initialize(partitionStart, m_srvDescriptorSize, 2048);
+    } else {
+        // 无 DescriptorHeapCollection 时回退到自建堆
+        CreateSrvDescriptorHeap(device);
+        D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+        m_descriptorAllocator.Initialize(heapStart, m_srvDescriptorSize, 1024);
+    }
 
     // 使用新的 ImGui_ImplDX12_InitInfo 结构体初始化
     ImGui_ImplDX12_InitInfo initInfo = {};
@@ -146,6 +175,28 @@ void DebugUIManager::Shutdown() {
 }
 
 // ========================================================================
+// 图标字体合并
+// ========================================================================
+
+void DebugUIManager::MergeIconFont(const std::string &ttfPath) {
+    if (!m_initialized || ttfPath.empty())
+        return;
+
+    ImGuiIO &io = ImGui::GetIO();
+    ImFontConfig iconConfig;
+    iconConfig.MergeMode = true;
+    iconConfig.GlyphMinAdvanceX = 15.0f;
+    static const ImWchar iconRanges[] = {0xeb91, 0xec17, 0};
+
+    ImFont *iconFont = io.Fonts->AddFontFromFileTTF(ttfPath.c_str(), 15.0f, &iconConfig, iconRanges);
+    if (iconFont) {
+        OutputDebugStringA(("[DebugUIManager] iconfont merged: " + ttfPath + "\n").c_str());
+    } else {
+        OutputDebugStringA(("[DebugUIManager] WARN: iconfont failed: " + ttfPath + "\n").c_str());
+    }
+}
+
+// ========================================================================
 // 描述符分配/释放
 // ========================================================================
 
@@ -185,6 +236,8 @@ bool DebugUIManager::RegisterPanel(const PanelConfig &config) {
 
     return true;
 }
+
+void DebugUIManager::RegisterRootDrawCallback(RootDrawFunc func) { m_rootDrawCallback = std::move(func); }
 
 void DebugUIManager::UnregisterPanel(const std::string &name) {
     m_panels.erase(name);
@@ -389,6 +442,10 @@ void DebugUIManager::RenderAndSubmit(ID3D12GraphicsCommandList *commandList, flo
     if (m_showDemoWindow)
         DrawDemoWindow();
 
+    // 绘制根级回调（不包裹在面板窗口中）
+    if (m_rootDrawCallback)
+        m_rootDrawCallback(deltaTime, frameNumber);
+
     for (auto &[name, config] : m_panels) {
         if (m_panelVisible[name]) {
             DrawPanel(config, deltaTime, frameNumber);
@@ -417,7 +474,7 @@ void DebugUIManager::AutoRegisterToFrameDriver(Boot::GameContext *context) {
     SystemRegistry::Register(
         {.name = "ImGuiRenderSystem",
          .func =
-             [this](Registry &, const MessageContext &) {
+             [this](const MessageContext &) {
                  if (!m_initialized || !m_gameContext)
                      return;
 
