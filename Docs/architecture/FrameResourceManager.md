@@ -46,3 +46,33 @@ RingBuffer 统一走"每帧分配 + 完成后 Reclaim"模式：
 
 - **持久化缓冲区**（`AllocatePersistentObjectCB` / `AllocatePersistentInstanceBuffer` 等）已移除
   — 这是早期静态组件的遗留设计，静态实体应通过独立的 committed resource 管理
+
+## 未来演进：命名与持久化能力
+
+### 生命周期规则
+
+帧驱动器不提供单帧生命周期的资源，所有 RingBuffer 至少 3 帧缓冲：
+
+```
+FrameResourceManager: 帧 N Allocate → 帧 N+3 Reclaim   (3 帧)
+FrameScratchAllocator: 帧 N Allocate → 帧 N+1 Reset     (例外，仅用于临时上传)
+```
+
+### 静态 ECS 组件的持久化方向
+
+后续静态 ECS 组件将省略每帧的矩阵计算，对应的 D3D12 资源是持久化的（上传一次，存活到组件销毁）。这意味着：
+
+- 持久化资源**不是**通过 `FrameResourceManager` 的 RingBuffer 管理的
+- 它们走独立的 committed resource 或独立的 persistent upload heap
+
+### 命名考虑
+
+如果未来 `FrameResourceManager` 需要同时管理临时 RingBuffer 和持久化缓冲区，当前名字可能不够准确：
+
+| 未来可能的命名 | 说明 |
+|---------------|------|
+| `TransientRingBuffer` | 当前 RingBuffer 的职责，3 帧 reclaim |
+| `PersistentBufferManager` | 静态 ECS 组件的持久化 GPU 资源 |
+| `BufferAllocator` | 如果两者合并为一个统一分配器（暂不采用） |
+
+当前阶段无需改动，记录备查。

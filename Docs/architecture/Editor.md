@@ -43,6 +43,115 @@
 | 编辑器（多堆） | 每个模块或 Pass 独立堆 | 线性分配 或 复用优先 | 可靠性：隔离崩溃，方便热重载 |
 | 运行时（单堆） | 全局唯一大堆 | 环形分配（Ring Buffer） | 性能：无碎片，O(1) 分配释放 |
 
+### 2.4 实现方案：隐式多堆 + HeapTag
+
+#### 设计
+
+通过 `HeapTag` 枚举标识调用方所属的堆域，`DescriptorHeapCollection` 内部维护 `HeapTag → 物理堆` 映射：
+
+```
+                    Game 模式           Editor 模式
+    Debug           多堆 ✅             多堆 ✅
+    Release         单堆 ✅             多堆 ✅ (必须!)
+```
+
+- **隐式接口**：调用方传 `HeapTag`，不关心底层是单堆还是多堆
+- **单堆模式**（`HeapMode::Single`，Release Game）：所有 `HeapTag` 映射到同一个物理堆，零开销
+- **多堆模式**（`HeapMode::Multi`，Editor / Debug Game）：每个 `HeapTag` 对应独立物理堆
+
+#### 堆域标签定义
+
+```cpp
+enum class HeapTag : uint32_t {
+    Default,        // 主场景 / 全局（向后兼容）
+    EditorViewport, // 编辑器视口预览
+    PostFx,         // 后处理
+    ImGui,          // ImGui 渲染
+    Count
+};
+```
+
+#### 旧接口向后兼容
+
+所有旧调用 `Allocate(PartitionType::Texture)` 自动路由到 `HeapTag::Default`，现有代码无需修改：
+
+```cpp
+// 旧接口（inline，映射到 HeapTag::Default）
+uint32_t Allocate(PartitionType partition) {
+    return Allocate(HeapTag::Default, partition);
+}
+```
+
+#### 初始化入口
+
+```cpp
+// Bootstrap.cpp
+m_descriptorHeaps.Initialize(device, configs
+#ifdef WITH_EDITOR
+    , Resource::HeapMode::Multi
+#endif
+);
+```
+
+### 2.5 多堆的使用场景
+
+多堆策略不是仅为"场景预览"准备的，而是为编辑器中各种临时编辑操作提供隔离的 GPU 工作区：
+
+| 编辑操作 | 分配在 | 绑定的堆 | 隔离收益 |
+|:---------|:-------|:---------|:---------|
+| 纹理预览 | `EditorViewport` 堆 | `EditorViewport` 堆 | 纹理加载 bug 不会污染 `gTextureMaps[]` |
+| Mesh 预览 | `EditorViewport` 堆 | `EditorViewport` 堆 | 蒙皮 buffer 创建失败不影响主场景 |
+| 材质编辑 | `EditorViewport` 堆 | `EditorViewport` 堆 | 改错参数不会弄乱主场景的 MaterialBuffer |
+| 动画预览 | `EditorViewport` 堆 | `EditorViewport` 堆 | 骨骼计算结果异常不波及主场景 |
+| 场景预览 | `Default` 堆 | `Default` 堆 | 共享场景纹理，RTV/DSV 隔离即可 |
+
+每个编辑面板都是自包含的渲染上下文——它从自己的堆分配描述符，绑定自己的堆，渲染自己的 RT。主场景的 `Default` 堆完全不受影响。
+
+### 2.6 调用链分析
+
+#### 分配路径
+
+```
+Bootstrap
+  ├─ DescriptorHeapCollection.Initialize(...HeapMode::Multi)
+  │     └─ 创建 Default + EditorViewport + PostFx + ImGui 各 tag 的物理堆
+  ├─ AddPartition(Texture, 0, 16384)          → Default
+  ├─ AddPartition(Buffer, 16384, 81920)       → Default
+  ├─ AddPartition(Shadow, 98304, 1024)        → Default
+  ├─ [WITH_EDITOR] 为其他 tag 重复 AddPartition
+  │
+  ├─ DepthStencilPool/RenderTargetPool
+  │     └─ Allocate(PartitionType::Dsv|Rtv)   → HeapTag::Default
+  ├─ LightManager / SkyboxManager / SSAO / SceneConstructor
+  │     └─ Allocate(PartitionType::*)         → HeapTag::Default
+  └─ SamplerCache
+        └─ Allocate(PartitionType::Sampler)   → HeapTag::Default
+```
+
+#### 绑定路径
+
+```
+GBuffer Pass:     GetHeap(CBV_SRV_UAV)        → Default → SetDescriptorHeaps
+Lighting Pass:    GetHeap(CBV_SRV_UAV)        → Default → SetDescriptorHeaps
+Skybox/Shadow/SSAO/Probe: 同上                → Default → SetDescriptorHeaps
+ImGui:            (使用自己的独立 srvHeap)     → 不经过 DescriptorHeapCollection
+```
+
+#### 隔离保证
+
+D3D12 限制一个命令列表只能绑定一个 CBV_SRV_UAV 堆。但 RTV 和 DSV 是独立堆类型，通过 `OMSetRenderTargets` 直接传入 CPU 句柄绑定，不经过 `SetDescriptorHeaps`。因此：
+
+- **CBV_SRV_UAV**：编辑面板绑定自己的堆，使用自己的纹理/缓冲索引，与 Default 隔离
+- **RTV/DSV**：编辑面板从自己的堆分配，写入自己的 RT，与 Default 完全隔离
+- **主场景渲染**：始终走 `HeapTag::Default`，不受编辑面板影响
+
+### 2.7 相关代码
+
+- `Engine/Resource/Core/DescriptorHeapCollection.h` — `HeapTag`/`HeapMode` 枚举 + 核心实现
+- `Engine/Resource/Core/DescriptorHeapCollection.cpp` — 多堆分配、TagHeap 映射
+- `Engine/Boot/Bootstrap.cpp` — 初始化入口 + 多堆分区创建
+- `todo.md` — 当前进度跟踪
+
 ---
 
 ## 3. 多进程架构
@@ -176,6 +285,14 @@ Tick N+1 ~ N+3:
 - 操作的执行顺序严格按帧号排序
 - 每帧携带绝对时间戳（基于帧编号）
 - 增量更新，只传输发生变化的属性（Delta Compressed）
+
+---
+
+## 6. 资源路径配置
+
+当前 `EditorAssetBrowser` 的 ContentRoot 从 `ProjectConfig.ContentRoot` 读取，适用于单项目集中编译模式。
+
+**后续多项目支持**：当编辑器需要同时管理多个项目时，ContentRoot 应改为从项目配置文件（INI/JSON）中读取，每个项目独立配置自己的资产搜索路径。编辑器通过项目选择器切换当前激活的项目，`EditorAssetBrowser` 根据当前项目配置刷新文件树。
 
 ---
 

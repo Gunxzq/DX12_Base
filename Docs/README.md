@@ -41,9 +41,13 @@
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
+| **SceneManager** | **场景管理器架构：核心 SceneManager 设计、Game/Editor 双端特化、子场景模块体系、场景生命周期、加载器体系** | 📋 新设计 |
 | **SceneFileAndLoading** | 场景文件格式 + AssetManager 加载管线 + 场景构造 | 📋 新设计 |
 | **EventSystemAndDataLayer** | 事件系统四层架构 + 数据层（ECS / SharedDataStore）关系 | ✅ |
 | **ResourceManager** | 资源管理器架构、AssetManager 设计 | ✅ 活跃 |
+| **AssetSpecification** | **资产规范：原子资产（Mesh/Material/Texture 三元组）、复合资产（Scene/Terrain/ParticleSystem）、加载器注册表、文件格式规范** | 📋 新设计 |
+| **AssetArchitecture** | 资产体系架构设计思路、与几何系统子类型的关系、迁移步骤 | 📋 新设计 |
+| **AssetTypeDefinition** | **资产类型定义（AssetType）——新增类型时需同步修改的部分清单** | 📋 新设计 |
 
 > 相关模块：**BackgroundExecutor**（TaskGraph 后台执行器）、**AssetLoader**（文件读取）、**AssetDataManager**（CPU 数据中转）
 
@@ -61,8 +65,12 @@
 |------|------|------|
 | **Editor** | 编辑器/发布双模式架构 | ✅ 活跃 |
 | **SnapshotSystem** | **操作快照 + 文件变更检测 + 热重载** | ✅ 活跃 |
+| **AssetPreviewSystem** | 离屏渲染预览系统（文件图标 / 资产缩略图 / 实时编辑预览） | 📋 新设计 |
 
-> **重要**：Snapshot System L1 `FileSnapshot` 已提供文件级变更监听能力，任何需要热重载的模块（如 ConfigManager）应订阅其事件，不要重新设计文件监听器。
+> - **重要**：Snapshot System L1 `FileSnapshot` 已提供文件级变更监听能力，任何需要热重载的模块（如 ConfigManager）应订阅其事件，不要重新设计文件监听器。
+> - **AssetPreviewSystem** 的 L1 缓存失效检测可复用 `FileSnapshot` 的文件变更事件。
+
+> ~~IconResourceManager~~ → 已合并到 **AssetPreviewSystem**（见 `Docs/architecture/AssetPreviewSystem.md`）
 
 ---
 
@@ -102,8 +110,9 @@
 
 | 文档 | 内容 |
 |------|------|
-| **todo** | 主待办清单 |
-| **todo6** | 历史待办 |
+| **remaining_issues** | 全局待办清单（当前所有活跃 TODO 集中于此） |
+| **todo** | 历史待办（遗留条目） |
+| **todo6** | 历史待办（遗留条目） |
 | **todo-10** | 渲染构建器并行化与多缓冲 |
 
 ---
