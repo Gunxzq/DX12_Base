@@ -4,24 +4,24 @@
 
 using namespace DX12Engine::Renderer;
 
-ApplicationRenderTargets::~ApplicationRenderTargets() {
-    Shutdown();
-}
+ApplicationRenderTargets::~ApplicationRenderTargets() { Shutdown(); }
 
-void ApplicationRenderTargets::Initialize(ID3D12Device *device,
-                                          Resource::DescriptorHeapCollection *heaps,
-                                          uint32_t width, uint32_t height) {
-    if (m_initialized) Shutdown();
+void ApplicationRenderTargets::Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *heaps,
+                                          uint32_t width, uint32_t height, Resource::HeapTag heapTag) {
+    if (m_initialized)
+        Shutdown();
 
     m_device = device;
     m_heaps = heaps;
+    m_heapTag = heapTag;
 
     AllocateGBuffer(width, height);
     m_initialized = true;
 }
 
 void ApplicationRenderTargets::Shutdown() {
-    if (!m_initialized) return;
+    if (!m_initialized)
+        return;
     FreeGBuffer();
     m_initialized = false;
     m_device = nullptr;
@@ -29,7 +29,8 @@ void ApplicationRenderTargets::Shutdown() {
 }
 
 void ApplicationRenderTargets::OnResize(uint32_t width, uint32_t height) {
-    if (!m_initialized) return;
+    if (!m_initialized)
+        return;
     FreeGBuffer();
     AllocateGBuffer(width, height);
 }
@@ -55,10 +56,12 @@ void ApplicationRenderTargets::AllocateGBuffer(uint32_t width, uint32_t height) 
         return d;
     };
 
-    m_gbuffer.albedo = rtPool.Allocate(makeDesc(DXGI_FORMAT_R8G8B8A8_UNORM, L"Gbuffer_Albedo"));
-    m_gbuffer.normal = rtPool.Allocate(makeDesc(DXGI_FORMAT_R16G16B16A16_FLOAT, L"Gbuffer_Normal"));
-    m_gbuffer.material = rtPool.Allocate(makeDesc(DXGI_FORMAT_R8G8B8A8_UNORM, L"Gbuffer_Material"));
-    m_gbuffer.worldPos = rtPool.Allocate(makeDesc(DXGI_FORMAT_R16G16B16A16_FLOAT, L"Gbuffer_WorldPos"));
+    m_gbuffer.albedo = rtPool.Allocate(makeDesc(DXGI_FORMAT_R8G8B8A8_UNORM, L"Gbuffer_Albedo"), m_heapTag);
+    m_gbuffer.normal = rtPool.Allocate(makeDesc(DXGI_FORMAT_R16G16B16A16_FLOAT, L"Gbuffer_Normal"), m_heapTag);
+    m_gbuffer.material = rtPool.Allocate(makeDesc(DXGI_FORMAT_R8G8B8A8_UNORM, L"Gbuffer_Material"), m_heapTag);
+    m_gbuffer.worldPos = rtPool.Allocate(makeDesc(DXGI_FORMAT_R16G16B16A16_FLOAT, L"Gbuffer_WorldPos"), m_heapTag);
+
+    m_sceneColor = rtPool.Allocate(makeDesc(DXGI_FORMAT_R8G8B8A8_UNORM, L"SceneColor"), m_heapTag);
 }
 
 void ApplicationRenderTargets::FreeGBuffer() {
@@ -76,6 +79,7 @@ void ApplicationRenderTargets::FreeGBuffer() {
     freeIfValid(m_gbuffer.normal);
     freeIfValid(m_gbuffer.material);
     freeIfValid(m_gbuffer.worldPos);
+    freeIfValid(m_sceneColor);
 }
 
 // ========================================================================
@@ -110,4 +114,16 @@ ID3D12Resource *ApplicationRenderTargets::GetGBufferMaterialResource() const {
 }
 ID3D12Resource *ApplicationRenderTargets::GetGBufferWorldPosResource() const {
     return Resource::RenderTargetPool::GetInstance().GetResource(m_gbuffer.worldPos);
+}
+
+// ========================================================================
+// 场景颜色 RT
+// ========================================================================
+
+ID3D12Resource *ApplicationRenderTargets::GetSceneColorResource() const {
+    return Resource::RenderTargetPool::GetInstance().GetResource(m_sceneColor);
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE ApplicationRenderTargets::GetSceneColorSRV() const {
+    return Resource::RenderTargetPool::GetInstance().GetSrvGpuHandle(m_sceneColor);
 }

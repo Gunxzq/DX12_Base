@@ -22,9 +22,10 @@ SkyboxManager &SkyboxManager::GetInstance() {
 // 生命周期
 // ========================================================================
 
-void SkyboxManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descHeaps) {
+void SkyboxManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descHeaps, Resource::HeapTag heapTag) {
     m_device = device;
     m_descHeaps = descHeaps;
+    m_heapTag = heapTag;
     m_initialized = (device != nullptr && descHeaps != nullptr);
 }
 
@@ -80,7 +81,7 @@ void SkyboxManager::ClearSkybox() {
 D3D12_GPU_DESCRIPTOR_HANDLE SkyboxManager::GetCubeSRV() const {
     if (!m_descHeaps || m_cubeSrvIndex == UINT32_MAX)
         return {};
-    return m_descHeaps->GetPartitionGpuHandle(PartitionType::Texture, m_cubeSrvIndex);
+    return m_descHeaps->GetPartitionGpuHandle(PartitionType::Texture, m_cubeSrvIndex, m_heapTag);
 }
 
 // ========================================================================
@@ -102,7 +103,7 @@ void SkyboxManager::CreateCubeSRV() {
     if (m_cubeSrvIndex != UINT32_MAX) {
         // 暂不回收，让槽位复用逻辑后续优化
     }
-    uint32_t newSrvIdx = m_descHeaps->Allocate(PartitionType::Texture);
+    uint32_t newSrvIdx = m_descHeaps->Allocate(m_heapTag, PartitionType::Texture);
     if (newSrvIdx == UINT32_MAX)
         return;
 
@@ -113,7 +114,7 @@ void SkyboxManager::CreateCubeSRV() {
     srvDesc.TextureCube.MipLevels = rDesc.MipLevels;
     srvDesc.TextureCube.MostDetailedMip = 0;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuH = m_descHeaps->GetPartitionCpuHandle(PartitionType::Texture, newSrvIdx);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuH = m_descHeaps->GetPartitionCpuHandle(PartitionType::Texture, newSrvIdx, m_heapTag);
     m_device->CreateShaderResourceView(texRes, &srvDesc, cpuH);
 
     m_cubeSrvIndex = newSrvIdx;

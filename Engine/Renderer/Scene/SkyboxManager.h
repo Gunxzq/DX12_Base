@@ -37,7 +37,8 @@ public:
     // 生命周期
     // ========================================================================
 
-    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descHeaps);
+    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descHeaps,
+                    Resource::HeapTag heapTag = Resource::HeapTag::Default);
     void Shutdown();
 
     // ========================================================================
@@ -63,6 +64,7 @@ public:
 
     Resource::GeometryHandle GetGeometry() const { return m_geometryHandle; }
 
+    Resource::GpuResourceHandle GetTextureResource() const { return m_textureResource; }
     D3D12_GPU_DESCRIPTOR_HANDLE GetCubeSRV() const;
     D3D12_GPU_VIRTUAL_ADDRESS GetObjectCBAddress() const { return m_objectCBAddress; }
 
@@ -76,6 +78,7 @@ private:
 private:
     ID3D12Device *m_device = nullptr;
     Resource::DescriptorHeapCollection *m_descHeaps = nullptr;
+    Resource::HeapTag m_heapTag = Resource::HeapTag::Default;
     bool m_initialized = false;
 
     // 天空盒资源

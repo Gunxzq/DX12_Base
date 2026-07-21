@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Common/d3dUtil.h"
+#include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/Struct/DescriptorHandle.h"
 #include <wrl/client.h>
 
@@ -23,8 +24,8 @@ public:
     ApplicationRenderTargets(const ApplicationRenderTargets &) = delete;
     ApplicationRenderTargets &operator=(const ApplicationRenderTargets &) = delete;
 
-    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *heaps,
-                    uint32_t width, uint32_t height);
+    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *heaps, uint32_t width, uint32_t height,
+                    Resource::HeapTag heapTag = Resource::HeapTag::Default);
     void OnResize(uint32_t width, uint32_t height);
     void Shutdown();
 
@@ -36,6 +37,12 @@ public:
     const Resource::RenderTargetHandle &GetGBufferNormal() const { return m_gbuffer.normal; }
     const Resource::RenderTargetHandle &GetGBufferMaterial() const { return m_gbuffer.material; }
     const Resource::RenderTargetHandle &GetGBufferWorldPos() const { return m_gbuffer.worldPos; }
+
+    // ── 场景颜色 RT（光照 Pass 输出，天空盒/网格共用） ──
+
+    const Resource::RenderTargetHandle &GetSceneColor() const { return m_sceneColor; }
+    ID3D12Resource *GetSceneColorResource() const;
+    D3D12_GPU_DESCRIPTOR_HANDLE GetSceneColorSRV() const;
 
     // ── G-buffer GPU SRV 句柄（直接绑定到光照 Pass） ──
 
@@ -62,8 +69,11 @@ private:
         Resource::RenderTargetHandle worldPos;
     } m_gbuffer;
 
+    Resource::RenderTargetHandle m_sceneColor;
+
     ID3D12Device *m_device = nullptr;
     Resource::DescriptorHeapCollection *m_heaps = nullptr;
+    Resource::HeapTag m_heapTag = Resource::HeapTag::Default;
     bool m_initialized = false;
 };
 
