@@ -24,14 +24,16 @@ namespace Event {
     X(ResourceUploadCompleteEvent, 0x00000300, P4_Background)                                                          \
     /* Step 4: 围栏通过 → ResourceReady（通用事件，高位编码具体类型） */                          \
     X(ResourceReadyEvent, 0x00000400, P3_Low)                                                                          \
-    /* 通用生成器任务完成事件（payload 高位编码生成器类型，低位编码任务数据） */                    \
-    X(GeneratorTaskCompleteEvent, 0x00000500, P2_Normal)                                                             \
+    /* 通用生成器任务完成事件（payload 高位编码生成器类型，低位编码任务数据） */        \
+    X(GeneratorTaskCompleteEvent, 0x00000500, P2_Normal)                                                               \
     /* 失败事件 */                                                                                                 \
     X(ResourceLoadFailedEvent, 0x00000220, P4_Background)                                                              \
     /* 加载请求 */                                                                                                 \
     X(RequestLoadEvent, 0x00000230, P2_Normal)                                                                         \
     X(CombineCompleteEvent, 0x00000240, P2_Normal)                                                                     \
-    X(PreviewRenderEvent, 0x00000510, P2_Normal)
+    X(PreviewRenderEvent, 0x00000510, P2_Normal)                                                                       \
+    /* 通用 Tab 切换事件（编辑器 Tab 切换 / Game 关卡切换均可使用） */                            \
+    X(TabSwitchedEvent, 0x00000600, P2_Normal)
 
 // ========================================================================
 // 2. 自动生成枚举 (EventType)

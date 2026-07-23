@@ -7,6 +7,7 @@
 #include "Core/Config/ConfigTypes/ResourceConfig.h"
 #include "Core/SharedDataStore/SharedDataStore.h"
 #include "ECS/Core/Registry.h"
+#include "ECS/World.h"
 #include "Event/MessageDispatcher.h"
 #include "GameContext.h"
 #include "Logger/Logger.h"
@@ -16,12 +17,14 @@
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
+#include "Renderer/Scene/LightManager/LightManager.h"
 #include "Renderer/Utils/ShaderUtils.h"
 #include "Resource/AssetManager/AssetManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Pool/DepthStencilPool.h"
 #include "Resource/Pool/RenderTargetPool.h"
+#include "Scene/SceneManager.h"
 #include "Scheduler/FrameDriver.h"
 #include <steam/isteamnetworkingutils.h>
 #include <steam/steamnetworkingsockets.h>
@@ -57,9 +60,8 @@ void Bootstrap::Shutdown() {
     // 2. 关闭描述符堆集合
     m_descriptorHeaps.Shutdown();
 
-    // 1. 关闭调度器上下文 (FrameDriver)
-    DX12Engine::Scheduler::ShutdownSchedulerContext();
-    m_frameDriver = nullptr;
+    // 3. 关闭 FrameDriver（由 Bootstrap 直接管理）
+    m_frameDriver.reset();
 
     // 2. 销毁 GameContext
     m_context.reset();
@@ -91,8 +93,9 @@ void Bootstrap::Shutdown() {
     // 4. 销毁 Window
     m_window.reset();
 
-    // 5. 销毁 ECS Registry
-    m_registry.reset();
+    // 5. 关闭 World（ECS 绝对源头，在 SceneManager 之后销毁）
+    m_world.Shutdown();
+    m_sceneManager.Shutdown();
 
     // 6. 关闭 MessageDispatcher 单例
     try {
@@ -255,34 +258,17 @@ bool Bootstrap::InitializeD3DDeviceContext() {
     return true;
 }
 
-void Bootstrap::InitializeRegistry() {
-    EngineLogger::GetInstance()->Info("[Bootstrap] Initializing ECS Registry...");
-
-    m_registry = std::make_unique<ECS::Registry>();
-
-    EngineLogger::GetInstance()->Info("[Bootstrap] ECS Registry initialized successfully");
-}
-
 void Bootstrap::InitializeFrameDriver() {
     EngineLogger::GetInstance()->Info("[Bootstrap] Initializing FrameDriver...");
-
-    if (!m_registry) {
-        throw std::runtime_error("[Bootstrap] Registry must be initialized before FrameDriver");
-    }
 
     if (!m_deviceContext) {
         throw std::runtime_error("[Bootstrap] D3D12DeviceContext must be initialized before FrameDriver");
     }
 
-    // 创建全局调度器上下文，同时注入命令管理器
-    ::DX12Engine::Scheduler::InitializeSchedulerContext(*m_registry, m_deviceContext.get());
-
-    // 获取 FrameDriver 指针并保存
-    auto &schedulerCtx = ::DX12Engine::Scheduler::GetSchedulerContext();
-    if (!schedulerCtx.frameDriver) {
-        throw std::runtime_error("[Bootstrap] Failed to create FrameDriver");
-    }
-    m_frameDriver = schedulerCtx.frameDriver;
+    // 直接创建 FrameDriver（不再通过 SchedulerContext）
+    m_frameDriver = std::make_unique<Scheduler::FrameDriver>();
+    m_frameDriver->SetDeviceContext(m_deviceContext.get());
+    m_frameDriver->Initialize();
 
     EngineLogger::GetInstance()->Info("[Bootstrap] FrameDriver initialized successfully");
 }
@@ -376,11 +362,13 @@ void Bootstrap::InitializeModules() {
                                        1024);
         EngineLogger::GetInstance()->Info("[Bootstrap] Shadow partition created: base=98304, size=1024");
 
-        // 多堆模式下为每个非 Default 标签创建相同的分区
+        // 多堆模式下为每个非 Default 标签创建相同的分区（ImGui 除外，它有专用小堆）
         if (isEditor && m_descriptorHeaps.GetMode() == Resource::HeapMode::Multi) {
             for (uint32_t t = static_cast<uint32_t>(Resource::HeapTag::Default) + 1;
                  t < static_cast<uint32_t>(Resource::HeapTag::Count); ++t) {
                 auto tag = static_cast<Resource::HeapTag>(t);
+                if (tag == Resource::HeapTag::ImGui)
+                    continue; // ImGui 使用下面的专用小堆
                 m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Texture,
                                                0, 16384, tag);
                 m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Buffer,
@@ -390,6 +378,24 @@ void Bootstrap::InitializeModules() {
                 EngineLogger::GetInstance()->Info("[Bootstrap] Partitions created for HeapTag::%s",
                                                   Resource::HeapTagToString(tag));
             }
+        }
+
+        // ── HeapTag::ImGui 专用小堆 ──
+        // 在 Multi 模式下创建独立物理堆，Single 模式下 share Default 堆
+        {
+            if (m_descriptorHeaps.GetMode() == Resource::HeapMode::Multi) {
+                // 多堆：创建独立的 2048 槽 CBV_SRV_UAV 堆
+                std::vector<Resource::DescriptorHeapConfig> imguiConfig = {
+                    {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 2048, 2048, Resource::DescriptorSlotFlags::LinearAlloc,
+                     true}};
+                m_descriptorHeaps.InitializeHeap(Resource::HeapTag::ImGui, imguiConfig);
+                EngineLogger::GetInstance()->Info("[Bootstrap] ImGui TagHeap created: CBV_SRV_UAV 2048 slots");
+            }
+            // Single 模式下路由到 Default，无需额外初始化
+            // 添加 ImGui 分区（Single = Default 堆内小分区，Multi = 独立堆内分区）
+            m_descriptorHeaps.AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Resource::PartitionType::Texture, 0,
+                                           2048, Resource::HeapTag::ImGui);
+            EngineLogger::GetInstance()->Info("[Bootstrap] ImGui partition created: size=2048");
         }
 
         // 初始化主深度缓冲 SRV（供后处理 Pass 只读采样）
@@ -504,11 +510,9 @@ void Bootstrap::InitializeModules() {
         Event::MessageDispatcher::Init();
         EngineLogger::GetInstance()->Info("[Bootstrap] MessageDispatcher initialized.");
 
-        // 6. ECS Registry (调度系统需要)
-        InitializeRegistry();
-
+        // 6. ECS Registry 初始化移至 CreateContext（由调用方接管所有权）
         // 7. FrameDriver (调度层核心，由基础设施层创建)
-        InitializeFrameDriver();
+        // 注册表初始化后在 CreateContext 中创建 FrameDriver
 
         // 8. 后台任务执行器（异步资产加载等）
         EngineLogger::GetInstance()->Info("[Bootstrap] Initializing BackgroundExecutor...");
@@ -569,23 +573,23 @@ GameContext *Bootstrap::CreateContext() {
     m_context->Window = m_window.get();
     m_context->MainTimer = m_mainTimer.get();
     m_context->Dispatcher = Event::MessageDispatcher::GetInstance();
-    m_context->Registry = m_registry.get();
-    m_context->FrameDriver = m_frameDriver;
     m_context->BackgroundExecutor = m_backgroundExecutor.get();
     m_context->DeviceContext = m_deviceContext.get();
 
+    // 初始化场景管理器（在 FrameDriver 之前，确保帧循环可用）
+    // 先创建 World（ECS 绝对源头），再初始化 SceneManager 并绑定
+    m_world.Initialize();
+    m_sceneManager.Initialize(&m_world);
+    m_context->SceneMgr = &m_sceneManager;
+
+    // 初始化 FrameDriver
+    InitializeFrameDriver();
+    m_context->FrameDriver = m_frameDriver.get();
+
     m_context->CameraMgr = &DX12Engine::Renderer::CameraManager::GetInstance();
-    uint32_t width = m_window ? m_window->GetWidth() : 1280;
-    uint32_t height = m_window ? m_window->GetHeight() : 720;
-    m_context->CameraMgr->Initialize(width, height);
 
     // 初始化反射探针管理器
     m_reflectionProbeManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps);
-    m_context->ReflectionProbeMgr = &m_reflectionProbeManager;
-
-    // 初始化环境光遮蔽管理器（编辑器模块）
-    m_ambientOcclusionManager.Initialize(m_deviceContext->GetDevice(), &m_descriptorHeaps, width, height);
-    m_context->AmbientOcclusionMgr = &m_ambientOcclusionManager;
 
     m_context->DescriptorHeaps = &m_descriptorHeaps;
     m_context->DepthStencilPool = &DepthStencilPool::GetInstance();
@@ -599,8 +603,21 @@ GameContext *Bootstrap::CreateContext() {
     m_context->SkeletonMgr = &m_skeletonManager;
     m_context->CullingSystem = &m_cullingSystem;
     m_context->LODSystem = &m_lodSystem;
-    m_visibleRaycaster.Initialize(m_registry.get());
+    // VisibleRaycaster 初始化由 SceneManager 在接管 Registry 后处理
+    // m_visibleRaycaster.Initialize(registry.get());
     m_context->VisibleRaycaster = &m_visibleRaycaster;
+
+    // 配置 RenderScene 渲染上下文容器的指针（管理器单例 + 共享基础设施）
+    {
+        auto *rs = m_sceneManager.GetRenderScene();
+        if (rs) {
+            rs->SetLightManager(&DX12Engine::Renderer::LightManager::GetInstance());
+            rs->SetReflectionProbeManager(&m_reflectionProbeManager);
+            rs->SetAmbientOcclusionManager(&DX12Engine::Renderer::AmbientOcclusionManager::GetInstance());
+            rs->SetDescriptorHeaps(m_context->DescriptorHeaps);
+            rs->SetDeviceContext(m_context->DeviceContext);
+        }
+    }
 
     if (m_frameDriver) {
         m_frameDriver->SetGameContext(m_context.get());
@@ -637,7 +654,14 @@ void Bootstrap::InitializeDebugUI() {
     debugUI.ApplyDarkTheme();
     debugUI.SetShowMenuBar(true);
 
-    // 4. 注册到 FrameDriver（通过 GameContext）
+    // 4. 合并图标字体（由 Bootstrap 负责路径解析，DebugUIManager 不关心文件路径）
+    {
+        std::string iconFontPath =
+            (std::filesystem::path(m_projectConfig.Root) / "Content/Fonts/iconfont.ttf").string();
+        debugUI.MergeIconFont(iconFontPath);
+    }
+
+    // 5. 注册到 FrameDriver（通过 GameContext）
     // 这一步在 CreateContext 中完成，因为需要 GameContext
 
     EngineLogger::GetInstance()->Info("[Bootstrap] DebugUI initialized successfully");

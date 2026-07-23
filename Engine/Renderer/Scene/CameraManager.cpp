@@ -1,6 +1,5 @@
 #include "CameraManager.h"
 #include "Boot/GameContext.h"
-#include "Scheduler/FrameDriver.h"
 #include <DirectXMath.h>
 #include <stdexcept>
 
@@ -81,10 +80,9 @@ void CameraManager::UpdateMainCamera() {
     // 计算相机速度（用于下一帧的预测剔除）
     // Velocity = (Position - PrevPosition) / deltaTime
     float deltaTime = 1.0f / 60.0f; // 默认 60fps 兜底
-    // 尝试从全局上下文获取实际 deltaTime
-    auto &schedulerCtx = Scheduler::GetSchedulerContext();
-    if (schedulerCtx.frameDriver && schedulerCtx.frameDriver->GetGameContext()) {
-        deltaTime = schedulerCtx.frameDriver->GetGameContext()->MainTimer->GetDeltaTime();
+    // 通过 GameContext 直接获取实际 deltaTime
+    if (m_gameContext && m_gameContext->MainTimer) {
+        deltaTime = m_gameContext->MainTimer->GetDeltaTime();
         if (deltaTime <= 0.0f)
             deltaTime = 1.0f / 60.0f;
     }
@@ -164,6 +162,24 @@ void CameraManager::OnResize(uint32_t width, uint32_t height) {
 // ========================================================================
 // 内部方法：纯数学计算
 // ========================================================================
+
+void CameraManager::UpdateBasisFromRotation() {
+    Camera &camera = m_mainCamera;
+    float pitch = camera.Rotation.x;
+    float yaw = camera.Rotation.y;
+
+    // 从 Pitch/Yaw 计算 Forward 向量
+    float sp = sinf(pitch), cp = cosf(pitch);
+    float sy = sinf(yaw), cy = cosf(yaw);
+
+    camera.Forward = XMFLOAT3(cp * sy, sp, cp * cy);
+    camera.Right = XMFLOAT3(cy, 0.0f, -sy);
+
+    // Up = cross(Right, Forward)
+    XMVECTOR R = XMLoadFloat3(&camera.Right);
+    XMVECTOR L = XMLoadFloat3(&camera.Forward);
+    XMStoreFloat3(&camera.Up, XMVector3Normalize(XMVector3Cross(R, L)));
+}
 
 void CameraManager::CalculateMatrices(Camera &camera) {
     // 使用龙书风格：基于基向量 (Right, Up, Forward) 手动构建 View 矩阵

@@ -308,6 +308,23 @@ struct PreviewRenderEvent {
 };
 
 // ========================================================================
+// 通用 Tab 切换事件（编辑器 Tab 切换 / Game 关卡切换均可使用）
+// ========================================================================
+
+struct TabSwitchedEvent {
+    EVENT_HEADER_FIELDS
+    static constexpr EventTypeHash StaticTypeHash = static_cast<EventTypeHash>(EventType::TabSwitchedEvent);
+
+    size_t tabIndex;
+    uint64_t sceneId;
+
+    explicit TabSwitchedEvent(size_t idx, uint64_t sid, EventPriority prio = EventPriority::P2_Normal)
+        : INIT_EVENT_HEADER(prio), tabIndex(idx), sceneId(sid) {}
+
+    inline EventTypeHash GetTypeHash() const { return StaticTypeHash; }
+};
+
+// ========================================================================
 // Asset Loaded Payload Utilities (RequestID + Handle)
 // ========================================================================
 

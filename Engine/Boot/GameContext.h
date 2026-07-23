@@ -64,6 +64,10 @@ namespace Platform {
 class Window;
 }
 
+namespace Scene {
+class SceneManager;
+}
+
 namespace Boot {
 
 // ========================================================================
@@ -99,7 +103,7 @@ public:
     // ── 调度与数据层指针 ──
     Scheduler::FrameDriver *FrameDriver = nullptr;
     Async::BackgroundExecutor *BackgroundExecutor = nullptr;
-    ECS::Registry *Registry = nullptr;
+    Scene::SceneManager *SceneMgr = nullptr;
 
     // ── 渲染子系统指针 ──
     Renderer::D3D12DeviceContext *DeviceContext = nullptr;
@@ -123,12 +127,6 @@ public:
     Renderer::CullingSystem *CullingSystem = nullptr;
     Renderer::LODSystem *LODSystem = nullptr;
     Renderer::VisibleRaycaster *VisibleRaycaster = nullptr;
-
-    // 反射探针管理器
-    Renderer::ReflectionProbeManager *ReflectionProbeMgr = nullptr;
-
-    // 环境光遮蔽管理器（编辑器模式）
-    Renderer::AmbientOcclusionManager *AmbientOcclusionMgr = nullptr;
 
     // ── 便捷访问方法 ──
     bool IsValid() const;

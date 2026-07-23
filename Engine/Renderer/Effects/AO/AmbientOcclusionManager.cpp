@@ -63,8 +63,6 @@ void AmbientOcclusionManager::Initialize(ID3D12Device *device, Resource::Descrip
     m_ssaoRenderer.Initialize();
 
     // 注册 SSAO PSO（由 SsaoRenderer 内部创建）
-
-    // 注册 SSAO PSO（由 SsaoRenderer 内部创建）
     if (m_ssaoRenderer.GetSSAOPipeline()) {
         SetAlgorithmPSO(AoAlgorithm::SSAO, m_ssaoRenderer.GetSSAOPipeline());
     }

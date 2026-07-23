@@ -7,6 +7,9 @@
 #include <unordered_map>
 
 namespace DX12Engine {
+namespace Boot {
+class GameContext;
+}
 namespace Renderer {
 
 class D3D12DeviceContext;
@@ -37,6 +40,9 @@ public:
     void Initialize(uint32_t initialWidth, uint32_t initialHeight);
     void Shutdown();
 
+    /// 设置 GameContext 引用（用于直接访问 MainTimer 等）
+    void SetGameContext(Boot::GameContext *ctx) { m_gameContext = ctx; }
+
     // ========================================================================
     // 预测相机
     // ========================================================================
@@ -49,6 +55,9 @@ public:
     Camera &GetMainCamera();
     const Camera &GetMainCamera() const;
     void UpdateMainCamera();
+
+    /// 从 Rotation (Pitch, Yaw) 更新 Right/Up/Forward 基向量
+    void UpdateBasisFromRotation();
 
     // =========================================================================
     // 辅助相机管理 (Auxiliary Cameras)
@@ -68,6 +77,7 @@ private:
 
     Camera m_mainCamera;
     std::unordered_map<std::string, Camera> m_auxiliaryCameras;
+    Boot::GameContext *m_gameContext = nullptr;
 };
 
 } // namespace Renderer

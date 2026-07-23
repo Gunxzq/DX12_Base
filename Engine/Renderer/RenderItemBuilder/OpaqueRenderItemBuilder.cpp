@@ -46,6 +46,10 @@ uint32_t OpaqueRenderItemBuilder::Count(ECS::Registry &registry) {
     uint32_t count = 0;
     auto view = registry.view<MeshComponent, TransformComponent, OpaqueTag>();
     for (auto entity : view) {
+        // 可选实体过滤器（编辑器端用于按 SceneTagComponent 过滤）
+        if (m_entityFilter && !m_entityFilter(entity))
+            continue;
+
         auto &meshComp = view.get<MeshComponent>(entity);
         auto &transform = view.get<TransformComponent>(entity);
 
@@ -86,6 +90,10 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
 
     auto view = registry.view<MeshComponent, TransformComponent, OpaqueTag>();
     for (auto entity : view) {
+        // 可选实体过滤器（编辑器端用于按 SceneTagComponent 过滤）
+        if (m_entityFilter && !m_entityFilter(entity))
+            continue;
+
         auto &meshComp = view.get<MeshComponent>(entity);
         auto &transform = view.get<TransformComponent>(entity);
 

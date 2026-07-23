@@ -7,7 +7,6 @@
 #include "Core/Config/ConfigTypes/WindowConfig.h"
 #include "Core/ProjectConfig.h"
 #include "DebugUI/DebugUIManager.h"
-#include "ECS/Core/Registry.h"
 #include "GameTimer.h"
 #include "Platform/Windows/Window.h"
 #include "Renderer/Core/CullingSystem.h"
@@ -22,15 +21,14 @@
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Manager/SkeletonManager.h"
 #include "Resource/Texture/TextureManager.h"
+#include "Scene/SceneManager.h"
+#include "Scheduler/FrameDriver.h"
 #include <filesystem>
 
 namespace DX12Engine {
 
-namespace Scheduler {
-class FrameDriver;
-}
 namespace ECS {
-class Registry;
+class World;
 }
 
 namespace Platform {
@@ -73,7 +71,6 @@ private:
     void InitializeLogging();
     bool CreateMainWindow();
     bool InitializeD3DDeviceContext();
-    void InitializeRegistry();
     void InitializeFrameDriver();
     void InitializeDebugUI();
 
@@ -86,9 +83,10 @@ private:
     std::unique_ptr<GameContext> m_context;                          // 游戏上下文
     std::unique_ptr<GameTimer> m_mainTimer;                          // 主计时器
     std::unique_ptr<Renderer::D3D12DeviceContext> m_deviceContext;   // D3D12 设备上下文
-    std::unique_ptr<ECS::Registry> m_registry;                       // ECS Registry
-    Scheduler::FrameDriver *m_frameDriver;                           // FrameDriver (由基础设施层创建)
+    std::unique_ptr<Scheduler::FrameDriver> m_frameDriver;           // FrameDriver（由 Bootstrap 直接管理）
     std::unique_ptr<Async::BackgroundExecutor> m_backgroundExecutor; // 后台任务执行器
+    Scene::SceneManager m_sceneManager;                              // 场景管理器
+    ECS::World m_world;                                              // ECS 绝对源头
 
     // 配置数据（由 ConfigManager 托管注册，Register 时自动加载）
     Boot::RendererConfig m_rendererConfig;
@@ -108,8 +106,6 @@ private:
     Renderer::VisibleRaycaster m_visibleRaycaster;
     Renderer::ReflectionProbeManager m_reflectionProbeManager;
     Renderer::AmbientOcclusionManager m_ambientOcclusionManager;
-
-    // 注意：ConfigManager 和 Logger 都是单例，通过 GetInstance() 访问
 
     bool m_isInitialized = false;
 };
