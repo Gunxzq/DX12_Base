@@ -186,18 +186,5 @@ private:
     void UpdateStats();
 };
 
-struct SchedulerContext {
-    FrameDriver *frameDriver = nullptr;
-    TaskExecutor *executor = nullptr;
-    TaskGraph *taskGraph = nullptr;
-    const FrameStats *stats = nullptr;
-    Renderer::D3D12DeviceContext *deviceContext = nullptr; // D3D12 设备上下文
-};
-
-/// 获取当前调度器上下文（线程局部）
-SchedulerContext &GetSchedulerContext();
-void InitializeSchedulerContext(Renderer::D3D12DeviceContext *deviceContext = nullptr);
-void ShutdownSchedulerContext();
-
 } // namespace Scheduler
 } // namespace DX12Engine

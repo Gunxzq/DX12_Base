@@ -22,31 +22,6 @@ using namespace DX12Engine::Input;
 namespace DX12Engine::Scheduler {
 
 // ========================================================================
-// Thread-local Scheduler Context
-// ========================================================================
-
-static thread_local SchedulerContext g_schedulerContext;
-
-SchedulerContext &GetSchedulerContext() { return g_schedulerContext; }
-
-void InitializeSchedulerContext(DX12Engine::Renderer::D3D12DeviceContext *deviceContext) {
-    static std::unique_ptr<FrameDriver> s_frameDriver;
-    s_frameDriver = std::make_unique<FrameDriver>();
-    s_frameDriver->Initialize();
-
-    // 注入命令管理器
-    s_frameDriver->SetDeviceContext(deviceContext);
-
-    g_schedulerContext.frameDriver = s_frameDriver.get();
-    g_schedulerContext.executor = &s_frameDriver->GetExecutor();
-    g_schedulerContext.taskGraph = &s_frameDriver->GetTaskGraph();
-    g_schedulerContext.stats = &s_frameDriver->GetFrameStats();
-    g_schedulerContext.deviceContext = deviceContext;
-}
-
-void ShutdownSchedulerContext() { g_schedulerContext = SchedulerContext{}; }
-
-// ========================================================================
 // FrameDriver Implementation
 // ========================================================================
 

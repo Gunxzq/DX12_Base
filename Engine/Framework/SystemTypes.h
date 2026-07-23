@@ -11,6 +11,9 @@
 #include "Scheduler/RenderPhase.h"
 #include "Scheduler/Task.h"
 
+#include "Platform/Input/Core/InputBinding.h"
+#include "Platform/Input/InputSystem.h"
+
 #include "Common/Common.h"
 
 namespace DX12Engine::Scheduler {
@@ -83,6 +86,25 @@ struct MessageContext {
 };
 
 // ========================================================================
+// 输入声明
+// ========================================================================
+
+/**
+ * @brief 输入声明：System 在注册时声明自己需要的输入绑定
+ *
+ * System 通过此结构声明它关心哪些输入动作、如何触发、以及默认绑定。
+ * 绑定信息在 SystemRegistry::Register() 时收集，注册到 InputSystem。
+ */
+struct InputDeclaration {
+    std::string actionName;                                 // 动作名称（如 "Move", "Look"）
+    uint64_t actionId = 0;                                  // 运行时 Hash，由 SystemRegistry::Register() 填充
+    std::vector<DX12Engine::Input::BindingSource> bindings; // 默认绑定
+
+    DX12Engine::Input::TriggerBehavior trigger =
+        DX12Engine::Input::TriggerBehavior::OnPressed; // 触发行为：默认按下时触发一次
+};
+
+// ========================================================================
 // System 定义
 // ========================================================================
 
@@ -107,6 +129,10 @@ struct SystemInfo {
     std::vector<SystemId> dependencies;              // 依赖的其他System
     std::vector<MessageTypeHash> interestedMessages; // 感兴趣的消息类型
     bool alwaysRun = false;                          // 常驻标志：每帧都执行，不依赖消息触发
+
+    // ── 输入声明（可选） ──
+    std::vector<InputDeclaration> inputDeclarations; // System 声明的输入绑定
+    std::vector<std::string> inputContexts;          // 哪些输入上下文下此 System 的输入生效
 };
 
 } // namespace DX12Engine::Scheduler
