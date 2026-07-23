@@ -6,7 +6,7 @@
 #include <memory>
 
 namespace DX12Engine::ECS { class Registry; }
-namespace DX12Engine::Renderer { class GridRenderer; class SkyRenderer; }
+namespace DX12Engine::Renderer { class SkyRenderer; }
 namespace DX12Engine::Scheduler { struct MessageContext; }
 
 // ========================================================================
@@ -64,7 +64,7 @@ private:
     D3D12_GPU_DESCRIPTOR_HANDLE m_outputSRV = {};
 
     // ── 渲染器 ──
-    std::unique_ptr<DX12Engine::Renderer::GridRenderer> m_gridRenderer;
+    // std::unique_ptr<DX12Engine::Renderer::GridRenderer> m_gridRenderer; // [已注释] 网格渲染待重构
     std::unique_ptr<DX12Engine::Renderer::SkyRenderer> m_skyRenderer;
 
     uint32_t m_width = 0;

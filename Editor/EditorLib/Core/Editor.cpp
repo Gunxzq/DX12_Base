@@ -5,7 +5,6 @@
 #include "EditorLayout.h"
 #include "EditorStrings.h"
 #include "EditorViewport.h"
-#include "EditorViewportInput.h"
 #include "EditorViewportInputActions.h"
 #include "Event/MessageDispatcher.h"
 #include "Framework/SystemBuilder.h"
@@ -15,6 +14,8 @@
 #include "Platform/Input/InputManager.h"
 #include "Platform/Input/InputSystem.h"
 #include "Platform/Windows/Window.h"
+#include "Properties/ComponentEditorRegistrations.h"
+#include "Renderer/Effects/AO/AmbientOcclusionManager.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/Material/MaterialManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
@@ -31,6 +32,8 @@
 #include "Scene/SceneConstructor.h"
 #include "Scheduler/FrameDriver.h"
 #include "ThirdParty/imgui/imgui.h"
+#include "Viewport/EditorViewportToolbar.h"
+#include "Viewport/Systems/EditorCameraSystem.h"
 
 #include <DirectXMath.h>
 #include <filesystem>
@@ -54,15 +57,24 @@ bool Editor::Initialize() {
 
     m_context->Logging->Info("[Editor] Initializing editor...");
 
-    // 初始化相机（与 Game 端 ESC 重置位置一致）
-    if (m_context->CameraMgr) {
-        auto &mainCamera = m_context->CameraMgr->GetMainCamera();
-        mainCamera.Position = XMFLOAT3(4.0f, 34.0f, -6.0f);
-        mainCamera.Right = XMFLOAT3(1.0f, 0.0f, 0.0f);
-        mainCamera.Up = XMFLOAT3(0.0f, 1.0f, 0.0f);
-        mainCamera.Forward = XMFLOAT3(0.0f, 0.0f, 1.0f);
-        mainCamera.Rotation = XMFLOAT3(0.0f, 0.0f, 0.0f);
-        m_context->CameraMgr->UpdateMainCamera();
+    // 注册组件编辑器（属性卡系统）
+    RegisterTransformEditor();
+    RegisterLightEditor();
+    m_context->Logging->Info("[Editor] Component editors registered");
+
+    // 初始化相机配置（裁剪面、远平面），不设位置，后续由场景加载时恢复
+    m_editorSceneMgr.InitCameraConfig(m_context);
+
+    // 初始化环境光遮蔽管理器（SSAO，各端自行管理，尺寸随视口调整）
+    {
+        auto &aoMgr = DX12Engine::Renderer::AmbientOcclusionManager::GetInstance();
+        aoMgr.SetDeviceContext(m_context->DeviceContext);
+        aoMgr.Initialize(m_context->DeviceContext->GetDevice(), m_context->DescriptorHeaps,
+                         m_viewport ? m_viewport->GetWidth() : 1280, m_viewport ? m_viewport->GetHeight() : 720);
+        // 更新 RenderScene 中的 AO 引用（Bootstrap 已设置单例指针，但 Initialize 延迟至此）
+        if (auto *rs = m_context->SceneMgr->GetRenderScene())
+            rs->SetAmbientOcclusionManager(&aoMgr);
+        m_context->Logging->Info("[Editor] AmbientOcclusionManager initialized");
     }
 
     // 初始化 LightManager（测试光源）
@@ -81,11 +93,7 @@ bool Editor::Initialize() {
     m_editorSceneMgr.RegisterSceneConstructSystem();
 
     // 传场景管理器引用给 OutlinerPanel
-    m_outlinerPanel.SetEditorSceneManager(m_editorSceneMgr.GetSceneManager());
-
-    // 加载默认场景（标准天空盒 + 空世界）
-    // 场景描述由 EditorSceneManager 提供，加载由 AssetBrowser 编排
-    m_assetManager.LoadSceneDescription(m_editorSceneMgr.GetDefaultSceneDescription());
+    m_outlinerPanel.SetEditorSceneManager(&m_editorSceneMgr);
 
     // 初始化 WaterManager
     WaterManager::GetInstance().Initialize(m_context->DeviceContext->GetDevice());
@@ -188,6 +196,9 @@ bool Editor::Initialize() {
     // 设置缩略图数组引用
     m_assetManager.SetThumbnailArray(&m_thumbnailArray);
 
+    // 加载默认场景（标准天空盒 + 空世界，此时 m_gameCtx 已就绪）
+    m_assetManager.LoadSceneDescription(m_editorSceneMgr.GetDefaultSceneDescription());
+
     // 加载磁盘缓存的缩略图
     m_assetManager.LoadThumbnailPack(m_context->DeviceContext);
 
@@ -202,6 +213,13 @@ bool Editor::Initialize() {
             m_layout->SetPreviewManager(&m_previewManager);
         },
         [this]() { m_layout->ShowPreviewPanel(); });
+
+    // 设置场景切换回调（AssetBrowser 加载新场景前释放旧场景资源）
+    m_assetManager.SetSceneSwitcher(
+        [this](const std::string &sceneName, const std::filesystem::path &sceneFilePath) -> bool {
+            return m_editorSceneMgr.SwitchScene(sceneName.empty() ? sceneFilePath.stem().string() : sceneName,
+                                                sceneFilePath);
+        });
 
     // 注册面板到 Layout
     m_layout->RegisterPanel(&m_assetManager);
@@ -220,58 +238,99 @@ bool Editor::Initialize() {
     m_layout->SetViewportSRV(m_viewport->GetOutputSRV());
     m_layout->SetViewportSize(m_viewport->GetWidth(), m_viewport->GetHeight());
 
-    // 初始化视口输入处理
-    m_viewportInput = std::make_unique<EditorViewportInput>();
-    m_viewportInput->Initialize(m_context);
-    m_viewportInput->SetEditorSceneManager(m_editorSceneMgr.GetSceneManager());
-    m_viewportInput->SetViewportSize(m_viewport->GetWidth(), m_viewport->GetHeight());
+    // 初始化视口输入处理（旧系统，已注释）
+    // m_viewportInput = std::make_unique<EditorViewportInput>();
+    // m_viewportInput->Initialize(m_context);
+    // m_viewportInput->SetEditorSceneManager(m_editorSceneMgr.GetSceneManager());
+    // m_viewportInput->SetViewportSize(m_viewport->GetWidth(), m_viewport->GetHeight());
+
+    // 初始化声明式输入驱动的相机系统
+    m_cameraSystem = std::make_unique<EditorCameraSystem>();
+    m_cameraSystem->Initialize(m_context);
+    m_cameraSystem->SetEditorSceneManager(m_editorSceneMgr.GetSceneManager());
+    m_cameraSystem->SetViewportSize(m_viewport->GetWidth(), m_viewport->GetHeight());
+    m_cameraSystem->SetGetCurrentToolCallback(
+        [this]() -> ViewportTool { return m_toolbar ? m_toolbar->GetCurrentTool() : ViewportTool::Cursor; });
+    m_cameraSystem->SetGetCursorModeCallback(
+        [this]() -> CursorMode { return m_toolbar ? m_toolbar->GetCursorMode() : CursorMode::View; });
+
+    // 初始化视口工具栏
+    m_toolbar = std::make_unique<EditorViewportToolbar>();
+    m_toolbar->Initialize(m_context);
+
+    // 注册视口工具栏回调（在 EditorLayout::DrawViewport 中叠加）
+    if (m_layout) {
+        m_layout->SetViewportToolbarCallback([this](ImVec2 viewportPos, ImVec2 viewportSize) {
+            // 无 Tab 时不显示工具栏
+            if (m_toolbar && !m_editorSceneMgr.GetOpenTabs().empty()) {
+                m_toolbar->DrawToolbar(viewportPos, viewportSize);
+            }
+        });
+
+        // 注册 Gizmo 操作类型回调（将工具栏工具模式映射到 ImGuizmo 操作）
+        m_layout->SetGetGizmoOpCallback(
+            [this]() -> int { return m_toolbar ? m_toolbar->GetCurrentGizmoOp() : ImGuizmo::TRANSLATE; });
+    }
 
     // 注册相机更新回调（Immediate 路径）
     if (m_context->FrameDriver) {
         m_context->FrameDriver->RegisterImmediateCallback(
             [this]() {
-                // ── 视口输入处理（先处理输入，再更新相机，确保渲染使用最新矩阵） ──
-                if (m_viewportInput) {
-                    // 更新视口悬停状态（供 HandleCameraInput 判断是否跳过相机控制）
-                    m_viewportInput->SetViewportHovered(m_layout->IsViewportHovered());
+                // ── 视口输入处理（旧系统，已注释，由 EditorCameraSystem 的输入回调替代） ──
+                // if (m_viewportInput) {
+                //    m_viewportInput->SetViewportHovered(m_layout->IsViewportHovered());
+                //    m_viewportInput->Update(m_context->MainTimer->GetDeltaTime());
+                //
+                //    // ── F 键：聚焦到选中实体 ──
+                //    if (m_context->InputMgr) {
+                //        auto *inputSys = m_context->InputMgr->GetInputSystem();
+                //        if (inputSys && inputSys->IsActionPressed(DX12Engine::Input::ActionId_FocusSelection)) {
+                //            DX12Engine::ECS::Entity selected = m_outlinerPanel.GetSelectedEntity();
+                //            if (selected != DX12Engine::ECS::INVALID_ENTITY && m_editorSceneMgr.GetSceneManager()) {
+                //                m_viewportInput->FocusOnEntity(selected, 10.0f);
+                //            }
+                //        }
+                //    }
+                //}
 
-                    m_viewportInput->Update(m_context->MainTimer->GetDeltaTime());
-
-                    // ── F 键：聚焦到选中实体（保持当前视角方向，仅调整位置） ──
-                    if (m_context->InputMgr) {
-                        auto *inputSys = m_context->InputMgr->GetInputSystem();
-                        if (inputSys && inputSys->IsActionPressed(DX12Engine::Input::ActionId_FocusSelection)) {
-                            DX12Engine::ECS::Entity selected = m_outlinerPanel.GetSelectedEntity();
-                            if (selected != DX12Engine::ECS::INVALID_ENTITY && m_editorSceneMgr.GetSceneManager()) {
-                                // 默认距离 10，后续可结合包围盒半径计算
-                                m_viewportInput->FocusOnEntity(selected, 10.0f);
-                            }
-                        }
-                    }
+                // 新系统：更新相机悬停状态
+                if (m_cameraSystem) {
+                    m_cameraSystem->SetViewportHovered(m_layout->IsViewportHovered());
                 }
 
-                m_context->CameraMgr->UpdateMainCamera();
+                // 更新 PassConstants（由 EditorCameraSystem 统一处理）
+                if (m_cameraSystem) {
+                    m_cameraSystem->UpdatePassConstants();
+                } else {
+                    // 回退：旧路径
+                    m_context->CameraMgr->UpdateMainCamera();
 
+                    const auto &camera = m_context->CameraMgr->GetMainCamera();
+                    auto &passConstants = m_context->FrameResourceManager->GetPassConstants();
+
+                    XMStoreFloat4x4(&passConstants.View, camera.ViewMatrix);
+                    XMStoreFloat4x4(&passConstants.Proj, camera.ProjMatrix);
+                    XMStoreFloat4x4(&passConstants.ViewProj, camera.ViewProjMatrix);
+                    XMStoreFloat4x4(&passConstants.InvView, camera.InverseView);
+                    XMStoreFloat4x4(&passConstants.InvProj, camera.InverseProj);
+                    XMStoreFloat4x4(&passConstants.InvViewProj, camera.InverseViewProj);
+                    XMStoreFloat4x4(&passConstants.PrevViewProj, camera.PrevViewProjMatrix);
+
+                    passConstants.CameraPos = camera.Position;
+                    passConstants.TotalTime = static_cast<float>(m_context->MainTimer->GetGameTime());
+                    passConstants.DeltaTime = m_context->MainTimer->GetDeltaTime();
+                    passConstants.NearPlane = camera.NearPlane;
+                    passConstants.FarPlane = camera.FarPlane;
+                    passConstants.AspectRatio = camera.AspectRatio;
+                    passConstants.FrameCount = m_context->FrameDriver->GetFrameStats().frameNumber;
+                }
+
+                // 获取当前相机引用（用于后续 LightManager/WaterManager/GridManager 更新）
                 const auto &camera = m_context->CameraMgr->GetMainCamera();
-                auto &passConstants = m_context->FrameResourceManager->GetPassConstants();
 
-                XMStoreFloat4x4(&passConstants.View, camera.ViewMatrix);
-                XMStoreFloat4x4(&passConstants.Proj, camera.ProjMatrix);
-                XMStoreFloat4x4(&passConstants.ViewProj, camera.ViewProjMatrix);
-                XMStoreFloat4x4(&passConstants.InvView, camera.InverseView);
-                XMStoreFloat4x4(&passConstants.InvProj, camera.InverseProj);
-                XMStoreFloat4x4(&passConstants.InvViewProj, camera.InverseViewProj);
-                XMStoreFloat4x4(&passConstants.PrevViewProj, camera.PrevViewProjMatrix);
-
-                passConstants.CameraPos = camera.Position;
-                passConstants.TotalTime = static_cast<float>(m_context->MainTimer->GetGameTime());
-                passConstants.DeltaTime = m_context->MainTimer->GetDeltaTime();
-                passConstants.NearPlane = camera.NearPlane;
-                passConstants.FarPlane = camera.FarPlane;
-                passConstants.AspectRatio = camera.AspectRatio;
-                passConstants.FrameCount = m_context->FrameDriver->GetFrameStats().frameNumber;
-
-                LightManager::GetInstance().UpdateAndUpload(m_context->GetNextFence(), camera);
+                auto *renderScene = m_context->SceneMgr->GetRenderScene();
+                if (renderScene && renderScene->GetLightManager())
+                    renderScene->GetLightManager()->UpdateAndUpload(m_context->GetNextFence(), camera);
                 WaterManager::GetInstance().UpdateAndUpload(m_context->GetNextFence());
                 GridManager::GetInstance().UpdateAndUpload(m_context->GetNextFence(), camera.ViewProjMatrix,
                                                            camera.Position);
@@ -314,8 +373,10 @@ bool Editor::Initialize() {
                         m_viewport->OnResize(vpW, vpH);
                         m_layout->SetViewportSRV(m_viewport->GetOutputSRV());
                         m_layout->SetViewportSize(vpW, vpH);
-                        if (m_viewportInput)
-                            m_viewportInput->SetViewportSize(vpW, vpH);
+                        // if (m_viewportInput)
+                        //     m_viewportInput->SetViewportSize(vpW, vpH);
+                        if (m_cameraSystem)
+                            m_cameraSystem->SetViewportSize(vpW, vpH);
                     }
                 }
             },
@@ -324,6 +385,21 @@ bool Editor::Initialize() {
 
     // 所有模块初始化完成后再注册绘制回调，确保第一帧时所有资源已就绪
     m_layout->Register();
+
+    // 注册场景 Tab 栏绘制回调（在视口窗口顶部，内容区域之前渲染，传入 SRV）
+    m_layout->SetViewportTabBarCallback([this](ImTextureID srv, ImVec2 *outImageMin, ImVec2 *outImageMax) {
+        m_editorSceneMgr.DrawTabBar(srv, outImageMin, outImageMax);
+    });
+
+    // 注册场景加载回调（Tab 切换时触发，通过 SceneConstructor 异步加载场景）
+    m_editorSceneMgr.SetOnLoadSceneCallback(
+        [this](const std::string &sceneName, const std::filesystem::path &sceneFilePath) {
+            m_context->Logging->Info("[Editor] Tab switch triggered loading: '{}' (path: {})", sceneName,
+                                     sceneFilePath.string());
+            // 直接通过 AssetManager 加载场景文件，不触发 SwitchScene 回调
+            // （SwitchScene 已在 ProcessPendingTabSwitch 中完成）
+            m_assetManager.LoadSceneFromFile(sceneFilePath);
+        });
 
     m_isInitialized = true;
     m_context->Logging->Info("[Editor] Editor initialized successfully");
@@ -343,6 +419,10 @@ void Editor::RegisterEngineSystems() {
                                       if (m_context && m_context->CameraMgr) {
                                           m_context->CameraMgr->OnResize(width, height);
                                       }
+                                      // SSAO RT 尺寸跟随窗口缩放（OnResize 内部有 m_initialized 守卫）
+                                      auto &aoMgr = DX12Engine::Renderer::AmbientOcclusionManager::GetInstance();
+                                      if (aoMgr.IsInitialized())
+                                          aoMgr.OnResize(width, height);
                                   },
                               .phase = TaskPhase::EarlyUpdate,
                               .threadType = ThreadType::Main,
@@ -471,6 +551,16 @@ void Editor::RegisterEditorRenderSystems() {
             m_opaqueBuilder->SetFrustum(&frustum);
             m_opaqueBuilder->SetCameraPos(camPos);
             m_opaqueBuilder->SetLODSystem(m_context->LODSystem);
+
+            // 设置实体过滤器（按 SceneTagComponent 过滤，只处理当前活跃场景的实体）
+            uint64_t activeSceneId = m_editorSceneMgr.GetActiveSceneId();
+            auto *registry = m_editorSceneMgr.GetRegistry();
+            m_opaqueBuilder->SetEntityFilter([activeSceneId, registry](DX12Engine::ECS::Entity entity) -> bool {
+                if (!registry)
+                    return true;
+                auto *tag = registry->TryGetComponent<SceneTagComponent>(entity);
+                return tag && tag->sceneId == activeSceneId;
+            });
         })
         .AlwaysRun()
         .Build();
@@ -676,12 +766,12 @@ void Editor::RegisterEditorRenderSystems() {
                  cmd.Get()->RSSetViewports(1, &vp);
                  cmd.Get()->RSSetScissorRects(1, &sr);
 
-                 m_lightingRenderer->BeginFrame(cmd, m_context->FrameResourceManager->GetPassCBAddress(),
-                                                LightManager::GetInstance().GetLightCBAddress(),
-                                                vpRTs->GetGBufferAlbedoSRV(), vpRTs->GetGBufferNormalSRV(),
-                                                vpRTs->GetGBufferMaterialSRV(), vpRTs->GetGBufferWorldPosSRV(),
-                                                {} /* ssaoSrv */, {} /* envMapSrv */, {} /* cubemapArraySrv */,
-                                                {} /* shadowDataSRV */, {} /* shadowMapSRV */);
+                 m_lightingRenderer->BeginFrame(
+                     cmd, m_context->FrameResourceManager->GetPassCBAddress(),
+                     m_context->SceneMgr->GetRenderScene()->GetLightManager()->GetLightCBAddress(),
+                     vpRTs->GetGBufferAlbedoSRV(), vpRTs->GetGBufferNormalSRV(), vpRTs->GetGBufferMaterialSRV(),
+                     vpRTs->GetGBufferWorldPosSRV(), {} /* ssaoSrv */, {} /* envMapSrv */, {} /* cubemapArraySrv */,
+                     {} /* shadowDataSRV */, {} /* shadowMapSRV */);
                  m_lightingRenderer->Draw(cmd);
                  m_lightingRenderer->EndFrame();
 
@@ -767,11 +857,17 @@ int Editor::Run() {
         // 1. 更新计时器
         m_context->MainTimer->Tick();
 
+        // 1b. 同步选中实体到 Layout（供 Properties 面板使用）
+        m_layout->SetSelectedEntity(m_outlinerPanel.GetSelectedEntity());
+
         // 2. 推进异步加载
         m_context->BackgroundExecutor->Tick();
 
         // 3. 驱动帧循环
         m_context->FrameDriver->Tick();
+
+        // 处理待处理的 Tab 切换（ImGui 渲染完成后执行，避免在渲染中切换场景）
+        m_editorSceneMgr.ProcessPendingTabSwitch();
 
         // 4. 检查是否需要缓存缩略图
         if (m_assetManager.NeedsThumbnailCache()) {
@@ -834,11 +930,11 @@ void Editor::Shutdown() {
         m_viewport.reset();
     }
 
-    // 关闭视口输入
-    if (m_viewportInput) {
-        m_viewportInput->Shutdown();
-        m_viewportInput.reset();
-    }
+    // 关闭视口输入（旧系统，已注释）
+    // if (m_viewportInput) {
+    //    m_viewportInput->Shutdown();
+    //    m_viewportInput.reset();
+    //}
 
     // ── 将缩略图打包写入磁盘缓存（正常退出时保存，需在 layout 销毁前） ──
     if (m_thumbnailArray.IsInitialized() && m_previewCache.IsInitialized()) {
@@ -931,6 +1027,9 @@ void Editor::Shutdown() {
 
     // 关闭全局单例
     GridManager::GetInstance().Shutdown();
+
+    // 保存当前场景的快照到磁盘
+    m_editorSceneMgr.SaveCurrentSnapshotToDisk();
 
     m_isInitialized = false;
     m_context->Logging->Info("[Editor] Editor shutdown complete");

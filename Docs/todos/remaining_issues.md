@@ -1,14 +1,14 @@
 # 全局待办清单
 
 > 日期：2026-07-23
-> 本次会话：World 提取（ECS 绝对源头）、SceneManager 遗留清理（移除 RegisterEntity/PersistEntity/GetAllEntities 等）、Game 端语义拆分（GameRenderPipeline + GameResources）、编辑器 UI 修复（工具栏位置、场景双击闪烁、重复加载）。
+> 本次会话：Game 端语义拆分完成（GameRenderPipeline 系统注册迁移 + 旧文件清理）、输入系统扩展（TriggerBehavior 9 种 + Analog1D 状态）、SceneConstructor::OnSceneReady 实现、游戏相机初始视角修复（Rotation→基向量同步）、文档更新。
 >
 > 详细快照见 `Docs/snapshots/WorldRefactor_Snapshot_20260723.md`。
 >
 > **重要设计决策**：
 > 1. 编辑器端采用标记组件方案（`SceneTagComponent`），所有场景实体共存于同一 ECS Registry，通过 `sceneId` 区分。切换 Tab 时不动 Registry，只更新活跃索引，Builder 按 `sceneId` 过滤。详见 `Docs/architecture/SceneManager.md §10`。
 > 2. 属性卡采用 ECS 组件驱动注册制：`ComponentEditorRegistry::Register<T>(drawFn)`，每个组件类型独立注册编辑方法，控制逻辑分散到各组件。ImGuizmo 集成用于 3D 变换操作。详见 `Docs/architecture/ComponentEditorSystem.md`。
-> 3. 输入系统改为声明式推送模式：`InputSystem::BindCallback()` 注册回调，`InputSystem::Update()` 末尾自动触发。System 在注册时通过 `SystemInfo::inputDeclarations` 声明输入需求。详见 `Docs/architecture/ViewportToolbar.md §三`。
+> 3. 输入系统改为声明式推送模式：`InputSystem::BindCallback()` 注册回调，`InputSystem::Update()` 末尾自动触发。System 在注册时通过 `SystemInfo::inputDeclarations` 声明输入需求。详见 `Docs/architecture/InputSystem.md`。
 > 4. **SceneManager 不是所有 ECS 实体的源头，ECS Registry 才是。** SceneManager 只做场景实体的 CRUD（增删查不改），组件值修改由各 System 自行负责。选中实体独立为 SelectionService，不依赖 SceneManager。详见 `Docs/architecture/SceneManager.md §11`、`Docs/architecture/ViewportToolbar.md §十二`。
 
 ---
@@ -39,6 +39,12 @@
 | **标记组件方案** | ✅ | `SceneTagComponent` 标记实体所属场景，Builder 按 `sceneId` 过滤 |
 | **隐式默认 Tab 移除** | ✅ | 启动时无 Tab，Viewport 提示"打开场景文件" |
 | **Builder 通用过滤器** | ✅ | `OpaqueRenderItemBuilder::SetEntityFilter` 支持按场景过滤 |
+| **Game 端语义拆分** | ✅ | GameRenderPipeline 持有全部构建器/渲染器/队列 + 16 个系统注册，GameWorld 简化为子模块编排 |
+| **GameWorld_*.cpp 清理** | ✅ | 4 个旧文件已删除（Builder/RenderSystems/Assets/Scene），内容迁移到 GameRenderPipeline.cpp |
+| **TriggerBehavior 扩展** | ✅ | 从 4 种扩展到 9 种（新增 OnTapped/OnDoubleTap/OnHoldRelease/OnRepeat/Analog1D），WhileHeld 支持轴输入 |
+| **InputDeclaration 重复清理** | ✅ | 删除 InputDeclaration 内重复的 TriggerBehavior 枚举，改用 InputSystem::TriggerBehavior |
+| **SceneConstructor::OnSceneReady** | ✅ | 实现空壳方法，提取两处重复的"场景就绪"逻辑 |
+| **相机初始视角修复** | ✅ | 新增 `CameraManager::UpdateBasisFromRotation()`，Game 端相机 Rotation 正确同步到基向量 |
 
 ---
 
@@ -133,9 +139,19 @@ Editor/EditorLib/
       ├── EditorSceneManager.h/.cpp   ← 场景管理器（多 Tab + 标记组件 + 缓存）
       └── EditorStateFile.h/.cpp      ← 编辑器状态持久化
 
-Game/Game/Scene/
-  ├─ GameSceneManager.h/.cpp          ← 组合包装 SceneManager*
-  └─ GameWorld.h/.cpp                 ← 使用 GameSceneManager
+Game/Game/
+  ├─ Game.h/.cpp                        ← 主入口 + 主循环
+  ├─ Input/
+  │   ├── GameInputActions.h            ← 游戏动作定义
+  │   └── GameInputHandler.h/.cpp       ← 游戏输入处理（相机、拾取、拖拽）
+  ├─ RenderPipeline/
+  │   └── GameRenderPipeline.h/.cpp     ← 构建器/渲染器/队列 + 16 个系统注册
+  ├─ Resources/
+  │   └── GameResources.h/.cpp          ← GPU 资源初始化（白纹理、预触）
+  └─ Scene/
+      ├── GameWorld.h/.cpp              ← 主循环 + 子模块编排
+      ├── GameSceneManager.h/.cpp       ← 场景生命周期
+      └── (旧文件已删除)
 ```
 
 ---
@@ -144,4 +160,6 @@ Game/Game/Scene/
 
 - `Docs/architecture/SceneManager.md` — 完整架构设计（含 §10 多 Tab 架构 + 事件流）
 - `Docs/architecture/ComponentEditorSystem.md` — 组件驱动属性卡与 ImGuizmo 集成设计
+- `Docs/architecture/InputSystem.md` — 输入系统架构（三层数据模型、TriggerBehavior 语义、数据流图）
+- `Docs/architecture/EngineOverview.md` — 引擎架构总览（含 Game 端最新文件结构）
 - `Engine/Scene/SceneManager.h` — 核心接口定义

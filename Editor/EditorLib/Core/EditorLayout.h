@@ -4,8 +4,10 @@
 #include "Core/IEditorPanel.h"
 #include "ECS/Core/Entity.h"
 #include "Preview/PreviewContext.h"
+#include "Properties/ComponentEditorRegistry.h"
 #include "ThirdParty/imgui/imgui.h"
 #include <DirectXMath.h>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -51,6 +53,22 @@ public:
     /// @param panel 面板指针（生命周期由调用方管理）
     void RegisterPanel(IEditorPanel *panel);
 
+    /// 注册额外绘制回调（在 ImGui 帧内、面板绘制之前调用）
+    /// @param callback 无参数回调函数
+    void RegisterDrawCallback(std::function<void()> callback);
+
+    /// 设置视口 Tab 栏绘制回调（在视口窗口顶部渲染，传入视口 SRV）
+    /// @param callback 回调参数为视口图像的 ImTextureID，以及 [out] 图像位置的 ImVec2 指针
+    void SetViewportTabBarCallback(std::function<void(ImTextureID, ImVec2*, ImVec2*)> callback);
+
+    /// 设置视口工具栏回调（在视口窗口内叠加，传入视口位置和尺寸）
+    /// @param callback 回调参数为视口左上角位置 (ImVec2) 和尺寸 (ImVec2)
+    void SetViewportToolbarCallback(std::function<void(ImVec2, ImVec2)> callback);
+
+    /// 设置获取当前 Gizmo 操作类型的回调
+    /// @param callback 返回 ImGuizmo::OPERATION 值
+    void SetGetGizmoOpCallback(std::function<int()> callback);
+
     /// 注销面板
     void UnregisterPanel(const char *windowName);
 
@@ -82,6 +100,10 @@ public:
     void SetPreviewId(PreviewId id) { m_previewId = id; }
     void ShowPreviewPanel() { m_showPreview = true; }
 
+    // ── 选中实体（由 Editor 每帧从 OutlinerPanel 同步） ──
+    void SetSelectedEntity(DX12Engine::ECS::Entity entity) { m_selectedEntity = entity; }
+    DX12Engine::ECS::Entity GetSelectedEntity() const { return m_selectedEntity; }
+
 private:
     void DrawMenuBar();
     void DrawDockSpace();
@@ -100,6 +122,18 @@ private:
     // ── 注册的面板 ──
     std::vector<IEditorPanel *> m_panels;
 
+    // ── 额外绘制回调（在 ImGui 帧内执行） ──
+    std::vector<std::function<void()>> m_drawCallbacks;
+
+    // ── 视口 Tab 栏回调（在视口窗口顶部渲染，传入视口 SRV 的 ImTextureID，[out] 图像位置） ──
+    std::function<void(ImTextureID, ImVec2*, ImVec2*)> m_viewportTabBarCallback;
+
+    // ── 视口工具栏回调（在视口窗口内叠加，传入视口位置和尺寸） ──
+    std::function<void(ImVec2, ImVec2)> m_viewportToolbarCallback;
+
+    // ── Gizmo 操作类型回调（从 EditorViewportToolbar 获取当前工具模式） ──
+    std::function<int()> m_getGizmoOpCallback;
+
     // ── Dockspace ──
     ImGuiID m_dockspaceId = 0;
     bool m_dockLayoutInitialized = false;
@@ -116,6 +150,8 @@ private:
     uint32_t m_viewportWidth = 0;
     uint32_t m_viewportHeight = 0;
     bool m_viewportHovered = false;
+    ImVec2 m_viewportMin = {};          // 视口图像左上角屏幕坐标（供 ImGuizmo/工具栏使用）
+    ImVec2 m_viewportMax = {};          // 视口图像右下角屏幕坐标
 
     // ── 布局状态 ──
     bool m_initialized = false;
@@ -140,4 +176,7 @@ private:
     float m_previewLightStrength = 3.0f;
     float m_previewLightAngleX = 45.0f;
     float m_previewLightAngleY = 30.0f;
+
+    // ── 选中实体（由 Editor 每帧从 OutlinerPanel 同步） ──
+    DX12Engine::ECS::Entity m_selectedEntity = DX12Engine::ECS::INVALID_ENTITY;
 };

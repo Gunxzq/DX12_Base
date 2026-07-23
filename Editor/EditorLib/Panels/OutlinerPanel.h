@@ -7,6 +7,7 @@
 // 前向声明
 namespace DX12Engine::Scene { class SceneManager; }
 namespace DX12Engine::Boot { class GameContext; }
+class EditorSceneManager;
 
 // ========================================================================
 // OutlinerPanel — 编辑器场景大纲面板
@@ -43,7 +44,10 @@ public:
     void InitializeContext(DX12Engine::Boot::GameContext *context);
 
     // ── 设置场景管理器引用（由 Editor 传入） ──
-    void SetEditorSceneManager(DX12Engine::Scene::SceneManager *mgr) { m_editorSceneMgr = mgr; }
+    void SetEditorSceneManager(EditorSceneManager *mgr) { m_editorSceneMgr = mgr; }
+
+    // ── 场景切换后恢复选中状态（由 EditorSceneManager 在场景构造完成后调用） ──
+    void RestoreSelection(uint64_t persistentId);
 
     // ── 实体选中 ──
     DX12Engine::ECS::Entity GetSelectedEntity() const { return m_selectedEntity; }
@@ -55,8 +59,8 @@ public:
 private:
     DX12Engine::Boot::GameContext *m_context = nullptr;
 
-    // 场景管理器引用（由 Editor 持有，不拥有所有权）
-    DX12Engine::Scene::SceneManager *m_editorSceneMgr = nullptr;
+    // 编辑器场景管理器引用（由 Editor 持有，不拥有所有权）
+    EditorSceneManager *m_editorSceneMgr = nullptr;
 
     // 选中状态
     DX12Engine::ECS::Entity m_selectedEntity = DX12Engine::ECS::INVALID_ENTITY;

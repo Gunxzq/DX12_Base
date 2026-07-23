@@ -189,9 +189,10 @@ void EditorViewport::DestroyRenderTarget() {
 // ========================================================================
 
 bool EditorViewport::CreateRenderResources() {
-    m_gridRenderer = std::make_unique<Renderer::GridRenderer>();
-    m_gridRenderer->SetDeviceContext(m_context->DeviceContext);
-    m_gridRenderer->Initialize();
+    // [网格已注释] 网格渲染存在输入上下文及控制流程问题，待参考大型引擎模式重构
+    // m_gridRenderer = std::make_unique<Renderer::GridRenderer>();
+    // m_gridRenderer->SetDeviceContext(m_context->DeviceContext);
+    // m_gridRenderer->Initialize();
 
     // SkyRenderer
     m_skyRenderer = std::make_unique<Renderer::SkyRenderer>();
@@ -205,9 +206,9 @@ bool EditorViewport::CreateRenderResources() {
 
 void EditorViewport::DestroyRenderResources() {
     m_skyRenderer.reset();
-    if (m_gridRenderer) {
-        m_gridRenderer.reset();
-    }
+    // if (m_gridRenderer) {
+    //     m_gridRenderer.reset();
+    // }
 }
 
 // ========================================================================
@@ -292,6 +293,14 @@ void EditorViewport::RegisterRenderSystems() {
                          m_context->CameraMgr != nullptr);
                      return;
                  }
+                 // 先检查天空盒有效性，无效时提前返回，不创建命令列表
+                 auto &skyMgr = Renderer::SkyboxManager::GetInstance();
+                 if (!skyMgr.IsValid()) {
+                     m_context->Logging->Warn(
+                         "[EditorSkyboxRenderSystem] SkyboxManager not valid yet (async load pending)");
+                     return;
+                 }
+
                  auto &rtPool = RenderTargetPool::GetInstance();
                  auto &dsPool = DepthStencilPool::GetInstance();
                  auto *heaps = m_context->DescriptorHeaps;
@@ -326,18 +335,11 @@ void EditorViewport::RegisterRenderSystems() {
                  cmdList.Get()->RSSetScissorRects(1, &sr);
                  cmdList.Get()->OMSetRenderTargets(1, &m_rtvHandle, FALSE, &m_dsvHandle);
 
-                 // 天空盒（SRV 已在 EditorViewport 堆域，由 SkyboxManager 创建）
-                 auto &skyMgr = Renderer::SkyboxManager::GetInstance();
-                 if (skyMgr.IsValid()) {
-                     D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
-                     m_skyRenderer->BeginFrame(cmdList, passCBAddr, skyMgr.GetCubeSRV());
-                     m_skyRenderer->DrawSky(cmdList, skyMgr.GetGeometry(), skyMgr.GetObjectCBAddress());
-                     m_skyRenderer->EndFrame();
-                 } else {
-                     m_context->Logging->Warn(
-                         "[EditorSkyboxRenderSystem] SkyboxManager not valid yet (async load pending)");
-                     return;
-                 }
+                 // 天空盒渲染（此时 skyMgr.IsValid() 已确认）
+                 D3D12_GPU_VIRTUAL_ADDRESS passCBAddr = m_context->FrameResourceManager->GetPassCBAddress();
+                 m_skyRenderer->BeginFrame(cmdList, passCBAddr, skyMgr.GetCubeSRV());
+                 m_skyRenderer->DrawSky(cmdList, skyMgr.GetGeometry(), skyMgr.GetObjectCBAddress());
+                 m_skyRenderer->EndFrame();
 
                  auto barrierBack = CD3DX12_RESOURCE_BARRIER::Transition(colorRes, D3D12_RESOURCE_STATE_RENDER_TARGET,
                                                                          D3D12_RESOURCE_STATE_COMMON);
@@ -358,68 +360,72 @@ void EditorViewport::RegisterRenderSystems() {
          .renderPhase = RenderPhase::PostProcess,
          .alwaysRun = true});
 
-    // ── GridRenderSystem ──
-    SystemRegistry::Register(
-        {.name = "EditorGridRenderSystem",
-         .func =
-             [this](const MessageContext &) {
-                 if (!m_appRTs || !m_appRTs->IsInitialized() || !m_gridRenderer || !m_context->CameraMgr ||
-                     m_rtvHandle.ptr == 0)
-                     return;
-
-                 auto &rtPool = RenderTargetPool::GetInstance();
-                 auto &dsPool = DepthStencilPool::GetInstance();
-                 auto *heaps = m_context->DescriptorHeaps;
-                 ID3D12Resource *colorRes = rtPool.GetResource(m_appRTs->GetSceneColor());
-                 ID3D12Resource *depthRes = dsPool.GetResource(m_depthHandle);
-                 if (!colorRes || !depthRes)
-                     return;
-
-                 uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-                 auto allocHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
-                 auto *alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
-                 auto cmdHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
-                 auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdHandle);
-
-                 ID3D12DescriptorHeap *descHeaps[] = {
-                     heaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, HeapTag::EditorViewport),
-                     heaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, HeapTag::EditorViewport)};
-                 cmdList.Get()->SetDescriptorHeaps(2, descHeaps);
-
-                 auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(colorRes, D3D12_RESOURCE_STATE_COMMON,
-                                                                     D3D12_RESOURCE_STATE_RENDER_TARGET);
-                 cmdList.Get()->ResourceBarrier(1, &barrier);
-
-                 // 深度缓冲已在 DEPTH_WRITE 状态（由 Opaque pass 保留），无需再 transition
-                 D3D12_VIEWPORT vp = {0, 0, (float)m_width, (float)m_height, 0, 1};
-                 D3D12_RECT sr = {0, 0, (LONG)m_width, (LONG)m_height};
-                 cmdList.Get()->RSSetViewports(1, &vp);
-                 cmdList.Get()->RSSetScissorRects(1, &sr);
-                 cmdList.Get()->OMSetRenderTargets(1, &m_rtvHandle, FALSE, &m_dsvHandle);
-
-                 const auto &camera = m_context->CameraMgr->GetMainCamera();
-                 auto &gridMgr = Renderer::GridManager::GetInstance();
-                 gridMgr.SetCameraPosition(camera.Position.x, camera.Position.z);
-                 m_gridRenderer->Draw(cmdList.Get(), camera.ViewProjMatrix, camera.Position);
-
-                 auto barrierBack = CD3DX12_RESOURCE_BARRIER::Transition(colorRes, D3D12_RESOURCE_STATE_RENDER_TARGET,
-                                                                         D3D12_RESOURCE_STATE_COMMON);
-                 cmdList.Get()->ResourceBarrier(1, &barrierBack);
-
-                 auto depthBarrierBack = CD3DX12_RESOURCE_BARRIER::Transition(
-                     depthRes, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COMMON);
-                 cmdList.Get()->ResourceBarrier(1, &depthBarrierBack);
-
-                 cmdList.Close();
-                 m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PostProcess, cmdHandle);
-                 uint64_t seq = m_context->GetNextSequence();
-                 m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, seq);
-             },
-         .phase = TaskPhase::Render,
-         .threadType = ThreadType::Render,
-         .priority = TaskPriority::Normal,
-         .renderPhase = RenderPhase::PostProcess,
-         .alwaysRun = true});
+    // ── GridRenderSystem（已注释） ──
+    // 网格渲染存在输入上下文及控制流程问题，待参考大型引擎模式重构
+    // SystemRegistry::Register(
+    //     {.name = "EditorGridRenderSystem",
+    //      .func =
+    //          [this](const MessageContext &) {
+    //              if (!m_appRTs || !m_appRTs->IsInitialized() || !m_gridRenderer || !m_context->CameraMgr ||
+    //                  m_rtvHandle.ptr == 0)
+    //                  return;
+    //
+    //              auto &rtPool = RenderTargetPool::GetInstance();
+    //              auto &dsPool = DepthStencilPool::GetInstance();
+    //              auto *heaps = m_context->DescriptorHeaps;
+    //              ID3D12Resource *colorRes = rtPool.GetResource(m_appRTs->GetSceneColor());
+    //              ID3D12Resource *depthRes = dsPool.GetResource(m_depthHandle);
+    //              if (!colorRes || !depthRes)
+    //                  return;
+    //
+    //              uint64_t completedFence = m_context->GetFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
+    //              auto allocHandle = m_context->GetAllocatorHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(completedFence);
+    //              auto *alloc = m_context->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle);
+    //              auto cmdHandle = m_context->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(alloc);
+    //              auto cmdList = m_context->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(cmdHandle);
+    //
+    //              ID3D12DescriptorHeap *descHeaps[] = {
+    //                  heaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, HeapTag::EditorViewport),
+    //                  heaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, HeapTag::EditorViewport)};
+    //              cmdList.Get()->SetDescriptorHeaps(2, descHeaps);
+    //
+    //              auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(colorRes, D3D12_RESOURCE_STATE_COMMON,
+    //                                                                  D3D12_RESOURCE_STATE_RENDER_TARGET);
+    //              cmdList.Get()->ResourceBarrier(1, &barrier);
+    //
+    //              auto depthBarrier = CD3DX12_RESOURCE_BARRIER::Transition(depthRes, D3D12_RESOURCE_STATE_COMMON,
+    //                                                                       D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    //              cmdList.Get()->ResourceBarrier(1, &depthBarrier);
+    //
+    //              D3D12_VIEWPORT vp = {0, 0, (float)m_width, (float)m_height, 0, 1};
+    //              D3D12_RECT sr = {0, 0, (LONG)m_width, (LONG)m_height};
+    //              cmdList.Get()->RSSetViewports(1, &vp);
+    //              cmdList.Get()->RSSetScissorRects(1, &sr);
+    //              cmdList.Get()->OMSetRenderTargets(1, &m_rtvHandle, FALSE, &m_dsvHandle);
+    //
+    //              const auto &camera = m_context->CameraMgr->GetMainCamera();
+    //              auto &gridMgr = Renderer::GridManager::GetInstance();
+    //              gridMgr.SetCameraPosition(camera.Position.x, camera.Position.z);
+    //              m_gridRenderer->Draw(cmdList.Get(), camera.ViewProjMatrix, camera.Position);
+    //
+    //              auto barrierBack = CD3DX12_RESOURCE_BARRIER::Transition(colorRes, D3D12_RESOURCE_STATE_RENDER_TARGET,
+    //                                                                      D3D12_RESOURCE_STATE_COMMON);
+    //              cmdList.Get()->ResourceBarrier(1, &barrierBack);
+    //
+    //              auto depthBarrierBack = CD3DX12_RESOURCE_BARRIER::Transition(
+    //                  depthRes, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COMMON);
+    //              cmdList.Get()->ResourceBarrier(1, &depthBarrierBack);
+    //
+    //              cmdList.Close();
+    //              m_context->FrameDriver->SubmitRenderCommand(RenderPhase::PostProcess, cmdHandle);
+    //              uint64_t seq = m_context->GetNextSequence();
+    //              m_context->ReleaseAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(allocHandle, seq);
+    //          },
+    //      .phase = TaskPhase::Render,
+    //      .threadType = ThreadType::Render,
+    //      .priority = TaskPriority::Normal,
+    //      .renderPhase = RenderPhase::PostProcess,
+    //      .alwaysRun = true});
 }
 
 // ========================================================================

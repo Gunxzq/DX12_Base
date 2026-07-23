@@ -379,6 +379,10 @@ void EditorAssetManager::SetLayoutProxy(std::function<void(PreviewId)> onSetPrev
     m_onShowPreviewPanel = std::move(onShowPreviewPanel);
 }
 
+void EditorAssetManager::SetSceneSwitcher(std::function<bool(const std::string &, const std::filesystem::path &)> onSwitchScene) {
+    m_onSwitchScene = std::move(onSwitchScene);
+}
+
 // ========================================================================
 // 注册预览渲染回调
 // ========================================================================
@@ -605,12 +609,42 @@ void EditorAssetManager::LoadSceneDescription(const DX12Engine::Resource::SceneD
 
     m_gameCtx->Logging->Info("[AssetBrowser] Loading scene description: {}", desc.metadata.name);
 
-    // SceneConstructor 生命周期由内部持有，加载完成后自动释放
-    auto sceneCtor = std::make_shared<DX12Engine::Scene::SceneConstructor>();
-    sceneCtor->LoadScene(desc, m_gameCtx, DX12Engine::Resource::HeapTag::EditorViewport,
-        [sceneCtor](bool success) {
-            // sceneCtor 超出此作用域后自动释放
+    // 调用场景切换回调（释放旧场景资源）
+    if (m_onSwitchScene) {
+        m_onSwitchScene(desc.metadata.name, "");
+    }
+
+    // SceneConstructor 是 EditorAssetManager 的值成员，编辑器生命周期，复用避免悬空回调
+    m_sceneCtor.LoadScene(desc, m_gameCtx, DX12Engine::Resource::HeapTag::EditorViewport,
+        [this, desc](bool success) {
+            m_gameCtx->Logging->Info("[AssetBrowser] Default scene '{}' load {}", desc.metadata.name, success ? "succeeded" : "failed");
         });
+}
+
+// ========================================================================
+// 从文件路径异步加载场景（不触发 SwitchScene 回调，供 Tab 切换使用）
+// ========================================================================
+
+void EditorAssetManager::LoadSceneFromFile(const std::filesystem::path &sceneFilePath) {
+    if (!m_gameCtx)
+        return;
+
+    m_gameCtx->Logging->Info("[AssetBrowser] Loading scene from file: {}", sceneFilePath.string());
+
+    try {
+        DX12Engine::Resource::SceneDescription desc =
+            DX12Engine::Resource::SceneLoader::LoadFromFile(sceneFilePath);
+
+        // 直接通过 SceneConstructor 加载，不触发 SwitchScene 回调
+        // （Tab 切换时 SwitchScene 已在 ProcessPendingTabSwitch 中完成）
+        m_sceneCtor.LoadScene(desc, m_gameCtx, DX12Engine::Resource::HeapTag::EditorViewport,
+            [this](bool success) {
+                m_gameCtx->Logging->Info("[AssetBrowser] Scene load from file {}", success ? "succeeded" : "failed");
+            },
+            sceneFilePath.string());  // 传入文件路径用于 Tab 匹配
+    } catch (const std::exception &e) {
+        m_gameCtx->Logging->Error("[AssetBrowser] Failed to load scene from file '{}': {}", sceneFilePath.string(), e.what());
+    }
 }
 
 void EditorAssetManager::OnFileDoubleClick(const std::string &filePath) {
@@ -633,6 +667,13 @@ void EditorAssetManager::OnFileDoubleClick(const std::string &filePath) {
     if (isSceneFile) {
         m_gameCtx->Logging->Info("[AssetBrowser] Scene file double-clicked: {}", filePath);
 
+        // Step 0: 调用场景切换回调（释放旧场景资源，为新场景腾出空间）
+        // 若返回 false 表示场景已存在 Tab 中，跳过加载
+        if (m_onSwitchScene && !m_onSwitchScene("", filePath)) {
+            m_gameCtx->Logging->Info("[AssetBrowser] Scene already open, skipping load: {}", filePath);
+            return;
+        }
+
         // Step 1: SceneLoader 解析 JSON → SceneDescription
         DX12Engine::Resource::SceneDescription desc;
         try {
@@ -643,12 +684,12 @@ void EditorAssetManager::OnFileDoubleClick(const std::string &filePath) {
         }
 
         // Step 2: SceneConstructor 异步加载依赖
-        // SceneConstructor 生命周期由 shared_ptr 持有，std::function 需可复制
-        auto sceneCtor = std::make_shared<DX12Engine::Scene::SceneConstructor>();
-        sceneCtor->LoadScene(desc, m_gameCtx, DX12Engine::Resource::HeapTag::EditorViewport,
-            [sceneCtor](bool success) {
-                // sceneCtor 超出此作用域后自动释放
-            });
+        // SceneConstructor 是 EditorAssetManager 的值成员，编辑器生命周期，复用避免悬空回调
+        m_sceneCtor.LoadScene(desc, m_gameCtx, DX12Engine::Resource::HeapTag::EditorViewport,
+            [this](bool success) {
+                m_gameCtx->Logging->Info("[AssetBrowser] Scene load {}", success ? "succeeded" : "failed");
+            },
+            filePath);  // 传入文件路径用于 Tab 匹配
         return;
     }
 

@@ -22,7 +22,9 @@
 // 前向声明
 class EditorLayout;
 class EditorViewport;
-class EditorViewportInput;
+//class EditorViewportInput; // [已注释] 旧输入系统，已替换为 EditorCameraSystem
+class EditorCameraSystem;
+class EditorViewportToolbar;
 
 namespace DX12Engine::Renderer {
 class D3D12DeviceContext;
@@ -65,7 +67,9 @@ private:
     DX12Engine::Boot::GameContext *m_context;
     std::unique_ptr<EditorLayout> m_layout;
     std::unique_ptr<EditorViewport> m_viewport;
-    std::unique_ptr<EditorViewportInput> m_viewportInput;
+    //std::unique_ptr<EditorViewportInput> m_viewportInput; // [已注释] 旧输入系统，已替换为 EditorCameraSystem
+    std::unique_ptr<EditorCameraSystem> m_cameraSystem;
+    std::unique_ptr<EditorViewportToolbar> m_toolbar;
 
     // ── 面板（Editor 直接持有，注册到 EditorLayout） ──
     EditorAssetManager m_assetManager; // 资产管理器

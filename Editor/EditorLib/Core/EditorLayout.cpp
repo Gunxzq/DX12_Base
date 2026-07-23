@@ -2,11 +2,14 @@
 #include "DebugUI/DebugUIManager.h"
 #include "ECS/Core/Components.h"
 #include "EditorStrings.h"
+#include "ImGuizmo.h"
 #include "Platform/Windows/Window.h"
 #include "Preview/PreviewManager.h"
+#include "Properties/ComponentEditorRegistry.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/CameraManager.h"
 #include "Renderer/Scene/GridManager.h"
+#include "Scene/SceneManager.h"
 #include "ThirdParty/imgui/imgui.h"
 #include "ThirdParty/imgui/imgui_internal.h"
 #include <DirectXMath.h>
@@ -80,6 +83,11 @@ void EditorLayout::Draw(float deltaTime) {
     if (m_showProperties)
         DrawProperties();
 
+    // 执行额外绘制回调（在 ImGui 帧内、面板绘制之前）
+    for (auto &cb : m_drawCallbacks) {
+        cb();
+    }
+
     // 遍历已注册的 IEditorPanel 面板
     for (auto *panel : m_panels) {
         if (panel->IsVisible()) {
@@ -123,6 +131,22 @@ void EditorLayout::RegisterPanel(IEditorPanel *panel) {
         }
     }
 }
+
+void EditorLayout::RegisterDrawCallback(std::function<void()> callback) {
+    if (callback) {
+        m_drawCallbacks.push_back(std::move(callback));
+    }
+}
+
+void EditorLayout::SetViewportTabBarCallback(std::function<void(ImTextureID, ImVec2 *, ImVec2 *)> callback) {
+    m_viewportTabBarCallback = std::move(callback);
+}
+
+void EditorLayout::SetViewportToolbarCallback(std::function<void(ImVec2, ImVec2)> callback) {
+    m_viewportToolbarCallback = std::move(callback);
+}
+
+void EditorLayout::SetGetGizmoOpCallback(std::function<int()> callback) { m_getGizmoOpCallback = std::move(callback); }
 
 void EditorLayout::UnregisterPanel(const char *windowName) {
     auto it = std::remove_if(m_panels.begin(), m_panels.end(), [windowName](IEditorPanel *panel) {
@@ -332,41 +356,114 @@ void EditorLayout::DrawViewport() {
 
     m_viewportHovered = ImGui::IsWindowHovered();
 
+    // 从实际窗口内容区更新视口尺寸（供 Editor 的 resize 检测使用）
     ImVec2 contentSize = ImGui::GetContentRegionAvail();
-    m_viewportWidth = static_cast<uint32_t>(contentSize.x);
-    m_viewportHeight = static_cast<uint32_t>(contentSize.y);
-
-    if (m_viewportSRV.ptr != 0) {
-        ImVec2 contentTopLeft = ImGui::GetCursorScreenPos();
-        ImGui::Image((ImTextureID)m_viewportSRV.ptr, contentSize);
-
-        // 网格比例尺滑条（覆盖在视口内容区左上角）
-        ImGui::SetCursorScreenPos(ImVec2(contentTopLeft.x + 8, contentTopLeft.y + 8));
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.1f, 0.1f, 0.15f, 0.7f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.15f, 0.15f, 0.2f, 0.8f));
-        ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0.4f, 0.6f, 1.0f, 1.0f));
-        float spacing = Renderer::GridManager::GetInstance().GetMinorSpacing();
-        ImGui::SetNextItemWidth(120.0f);
-        if (ImGui::SliderFloat("##GridSpacing", &spacing, 1.0f, 500.0f, "Grid: %.0f")) {
-            Renderer::GridManager::GetInstance().SetMinorSpacing(spacing);
-            Renderer::GridManager::GetInstance().SetMajorSpacing(spacing * 10.0f);
+    if (contentSize.x > 0 && contentSize.y > 0) {
+        uint32_t newW = (uint32_t)contentSize.x;
+        uint32_t newH = (uint32_t)contentSize.y;
+        if (newW != m_viewportWidth || newH != m_viewportHeight) {
+            m_viewportWidth = newW;
+            m_viewportHeight = newH;
         }
-        ImGui::PopStyleColor(3);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Grid spacing in world units");
-    } else {
-        // 占位：深灰色背景
-        ImDrawList *drawList = ImGui::GetWindowDrawList();
-        ImVec2 posMin = ImGui::GetCursorScreenPos();
-        ImVec2 posMax = ImVec2(posMin.x + contentSize.x, posMin.y + contentSize.y);
-        drawList->AddRectFilled(posMin, posMax, IM_COL32(40, 40, 50, 255));
-        ImGui::Dummy(contentSize);
+    }
 
-        const char *hint = "Viewport - No Render Target";
-        ImVec2 textSize = ImGui::CalcTextSize(hint);
-        ImVec2 textPos =
-            ImVec2(posMin.x + (contentSize.x - textSize.x) * 0.5f, posMin.y + (contentSize.y - textSize.y) * 0.5f);
-        drawList->AddText(textPos, IM_COL32(120, 120, 140, 255), hint);
+    // Tab 栏回调负责渲染场景标签和视口图像
+    // 同时获取图像位置（供工具栏/ImGuizmo 定位使用）
+    ImVec2 imageMin = {}, imageMax = {};
+    if (m_viewportTabBarCallback)
+        m_viewportTabBarCallback((ImTextureID)m_viewportSRV.ptr, &imageMin, &imageMax);
+
+    // 保存视口位置（供 ImGuizmo 和工具栏叠加使用）
+    // 使用 DrawTabBar 中显式记录的图像位置，避免 EndTabBar 后 GetItemRectMin 获取 TabBar 位置
+    {
+        ImVec2 windowPos = ImGui::GetWindowPos();
+        ImVec2 contentMin = ImGui::GetWindowContentRegionMin();
+        // 图像位置有效时使用图像 rect，否则回退到内容区
+        bool hasImage = (imageMax.x > imageMin.x && imageMax.y > imageMin.y);
+        float yBase = hasImage ? imageMin.y : (windowPos.y + contentMin.y);
+        float xBase = windowPos.x + contentMin.x;
+        m_viewportMin = ImVec2(xBase, yBase);
+        m_viewportMax =
+            hasImage ? imageMax
+                     : ImVec2(xBase + ImGui::GetContentRegionAvail().x, yBase + ImGui::GetContentRegionAvail().y);
+    }
+
+    // ── ImGuizmo 叠加绘制（在视口图像之上） ──
+    if (m_viewportSRV.ptr != 0 && m_showGizmo && m_selectedEntity != DX12Engine::ECS::INVALID_ENTITY) {
+        // 获取 Camera 的 View/Proj 矩阵
+        auto &cameraMgr = DX12Engine::Renderer::CameraManager::GetInstance();
+        const auto &camera = cameraMgr.GetMainCamera();
+
+        // 获取选中实体的 TransformComponent
+        DX12Engine::ECS::Registry *registry = nullptr;
+        if (m_context && m_context->SceneMgr) {
+            registry = m_context->SceneMgr->GetRegistry();
+        }
+        auto *tc =
+            registry ? registry->TryGetComponent<DX12Engine::ECS::TransformComponent>(m_selectedEntity) : nullptr;
+
+        if (tc) {
+            // 计算变换矩阵
+            DirectX::XMMATRIX worldMatrix = tc->GetMatrix();
+
+            // 设置 ImGuizmo 操作模式（优先从工具栏回调获取，否则回退到旧 m_gizmoOperation）
+            ImGuizmo::OPERATION operation = ImGuizmo::TRANSLATE;
+            if (m_getGizmoOpCallback) {
+                operation = static_cast<ImGuizmo::OPERATION>(m_getGizmoOpCallback());
+            } else {
+                if (m_gizmoOperation == 1)
+                    operation = ImGuizmo::ROTATE;
+                else if (m_gizmoOperation == 2)
+                    operation = ImGuizmo::SCALE;
+            }
+
+            // 设置 ImGuizmo 视口矩形（与视口图像区域对齐）
+            ImGuizmo::SetRect(m_viewportMin.x, m_viewportMin.y, m_viewportMax.x - m_viewportMin.x,
+                              m_viewportMax.y - m_viewportMin.y);
+            ImGuizmo::SetDrawlist();
+
+            // 调用 ImGuizmo 操纵器
+            DirectX::XMMATRIX deltaMatrix = DirectX::XMMatrixIdentity();
+            ImGuizmo::Manipulate(&camera.ViewMatrix.r->m128_f32[0], &camera.ProjMatrix.r->m128_f32[0], operation,
+                                 ImGuizmo::MODE::WORLD, &worldMatrix.r->m128_f32[0], &deltaMatrix.r->m128_f32[0]);
+
+            // 如果正在操作，更新 TransformComponent
+            if (ImGuizmo::IsUsing()) {
+                // 分解矩阵回 position/rotation/scale
+                DirectX::XMVECTOR newPos, newScale, newRotQuat;
+                DirectX::XMMatrixDecompose(&newScale, &newRotQuat, &newPos, worldMatrix);
+
+                DirectX::XMStoreFloat3(&tc->position, newPos);
+                DirectX::XMStoreFloat3(&tc->scale, newScale);
+
+                // 四元数 → 欧拉角（TODO: 完整转换，当前仅更新位置和缩放）
+                // 旋转由 ImGuizmo 的 deltaMatrix 隐式处理
+            }
+        }
+    }
+
+    // 网格比例尺滑条（已注释，窗口变化导致视口渲染丢失异常）
+    // if (m_viewportSRV.ptr != 0) {
+    //    ImVec2 contentTopLeft = ImGui::GetCursorScreenPos();
+    //    ImGui::SetCursorScreenPos(ImVec2(contentTopLeft.x + 8, contentTopLeft.y + 8));
+    //    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.1f, 0.1f, 0.15f, 0.7f));
+    //    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.15f, 0.15f, 0.2f, 0.8f));
+    //    ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0.4f, 0.6f, 1.0f, 1.0f));
+    //    float spacing = Renderer::GridManager::GetInstance().GetMinorSpacing();
+    //    ImGui::SetNextItemWidth(120.0f);
+    //    if (ImGui::SliderFloat("##GridSpacing", &spacing, 1.0f, 500.0f, "Grid: %.0f")) {
+    //        Renderer::GridManager::GetInstance().SetMinorSpacing(spacing);
+    //        Renderer::GridManager::GetInstance().SetMajorSpacing(spacing * 10.0f);
+    //    }
+    //    ImGui::PopStyleColor(3);
+    //    if (ImGui::IsItemHovered())
+    //        ImGui::SetTooltip("Grid spacing in world units");
+    //}
+
+    // 视口工具栏叠加（在选项卡内容区左上角，随图像位置移动）
+    if (m_viewportToolbarCallback) {
+        m_viewportToolbarCallback(m_viewportMin,
+                                  ImVec2(m_viewportMax.x - m_viewportMin.x, m_viewportMax.y - m_viewportMin.y));
     }
 
     ImGui::End();
@@ -450,22 +547,64 @@ void EditorLayout::DrawProperties() {
     }
 
     // ── 下方：组件属性 ──
-    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "No entity selected");
-    ImGui::Separator();
-    ImGui::Text("Transform");
-    ImGui::Indent(16.0f);
-    float pos[3] = {0, 0, 0};
-    float rot[3] = {0, 0, 0};
-    float scale[3] = {1, 1, 1};
-    ImGui::DragFloat3("Position", pos, 0.1f);
-    ImGui::DragFloat3("Rotation", rot, 0.1f);
-    ImGui::DragFloat3(EditorStrings::Get("menu_gizmo_scale", "Scale"), scale, 0.1f);
-    ImGui::Unindent(16.0f);
-    ImGui::Separator();
-    ImGui::Text("Mesh");
-    ImGui::Indent(16.0f);
-    ImGui::TextDisabled("(none)");
-    ImGui::Unindent(16.0f);
+    // 获取当前选中的实体和 Registry
+    DX12Engine::ECS::Registry *registry = nullptr;
+    if (m_context && m_context->SceneMgr) {
+        registry = m_context->SceneMgr->GetRegistry();
+    }
+
+    if (m_selectedEntity == DX12Engine::ECS::INVALID_ENTITY || !registry || !registry->IsValid(m_selectedEntity)) {
+        // 无选中实体，显示提示
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "No entity selected");
+        ImGui::Separator();
+    } else {
+        // ── 实体名称（如果存在 NameComponent） ──
+        auto *nameComp = registry->TryGetComponent<DX12Engine::ECS::NameComponent>(m_selectedEntity);
+        if (nameComp) {
+            ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "%s", nameComp->name.c_str());
+        } else {
+            ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Entity");
+        }
+        ImGui::Separator();
+
+        // ── 遍历注册的组件编辑器 ──
+        // 按 category 分组绘制
+        std::string lastCategory;
+        for (const auto &[typeIndex, info] : ComponentEditorRegistry::GetAll()) {
+            // 检查实体是否拥有该组件
+            // 通过 type_index 无法直接检查 EnTT 组件存在性，需要各组件自行处理
+            // 当前策略：调用注册的编辑回调，回调内部通过 TryGetComponent 检查
+            // 用折叠分组包裹，但仅当组件存在时才展开
+            ImGui::PushID(static_cast<int>(typeIndex.hash_code()));
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+
+            // 调用注册的编辑回调（由回调内部通过 TryGetComponent 检查组件存在性）
+            info.drawFn(registry, m_selectedEntity);
+
+            ImGui::PopStyleVar();
+            ImGui::PopID();
+        }
+
+        // ── "添加组件" 按钮 ──
+        ImGui::Separator();
+        if (ImGui::Button("+ Add Component", ImVec2(-1, 0))) {
+            ImGui::OpenPopup("AddComponentPopup");
+        }
+        if (ImGui::BeginPopup("AddComponentPopup")) {
+            // 收集已存在的组件类型
+            // 遍历所有注册的组件，显示未添加的
+            for (const auto &[typeIndex, info] : ComponentEditorRegistry::GetAll()) {
+                // 简化：弹出菜单中列出所有可添加的组件类型
+                // 实际检查需要 type_index → EnTT type 的映射，可后续完善
+                if (ImGui::MenuItem(info.typeName.c_str())) {
+                    // 通过 type_index 无法直接创建 EnTT 组件，需要显式处理
+                    // 当前为占位，后续通过注册组件工厂方法来实现
+                    m_context->Logging->Info("[EditorLayout] Add component requested: %s", info.typeName.c_str());
+                }
+            }
+            ImGui::EndPopup();
+        }
+    }
 
     ImGui::End();
 }

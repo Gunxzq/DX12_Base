@@ -38,7 +38,6 @@ find_package(Taskflow CONFIG REQUIRED)
 find_package(GameNetworkingSockets CONFIG REQUIRED)
 find_package(protobuf CONFIG REQUIRED)
 find_package(Stb REQUIRED)
-find_package(imguizmo CONFIG REQUIRED)
 
 # ========================================================================
 # 3. 拆分引擎模块 (Static Libraries)
@@ -350,6 +349,12 @@ file(GLOB_RECURSE EDITORLIB_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/*.h"
 )
 
+# 显式添加新文件（GLOB_RECURSE 在 configure 时求值，新增文件需手动加入直到下次 reconfigure）
+list(APPEND EDITORLIB_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Properties/Editors/TransformEditor.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Properties/Editors/LightEditor.cpp"
+)
+
 add_library(DX12EditorLib STATIC ${EDITORLIB_SOURCES})
 
 target_include_directories(DX12EditorLib PUBLIC
@@ -359,6 +364,7 @@ target_include_directories(DX12EditorLib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Input
     ${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Scene
     ${CMAKE_CURRENT_SOURCE_DIR}/Editor/EditorLib/Log
+    ${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imguizmo
 )
 
 target_compile_definitions(DX12EditorLib PUBLIC
@@ -376,7 +382,6 @@ target_link_libraries(DX12EditorLib PUBLIC
     DX12Background
     DX12Resource
     DX12Core
-    imguizmo::imguizmo
 )
 
 # 5.2 DX12_Editor 主程序
@@ -387,7 +392,14 @@ file(GLOB_RECURSE EDITOR_APP_SOURCES
 
 set(EDITOR_RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Editor/Application/DX12_Editor.rc")
 
-add_executable(DX12_Editor WIN32 ${EDITOR_APP_SOURCES} ${EDITOR_RESOURCES})
+add_executable(DX12_Editor WIN32 ${EDITOR_APP_SOURCES} ${EDITOR_RESOURCES}
+    # ImGuizmo 源码编译（仅 Editor 可执行文件使用，不污染 Engine Core）
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imguizmo/ImGuizmo.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imguizmo/ImSequencer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imguizmo/ImCurveEdit.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imguizmo/ImGradient.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imguizmo/GraphEditor.cpp"
+)
 
 target_compile_definitions(DX12_Editor PRIVATE
     UNICODE _UNICODE
@@ -413,6 +425,7 @@ configure_file(
 target_include_directories(DX12_Editor PRIVATE
     "${CMAKE_BINARY_DIR}/Generated/Editor"
     ${CMAKE_CURRENT_SOURCE_DIR}/Editor/Application
+    ${CMAKE_CURRENT_SOURCE_DIR}/Engine/ThirdParty/imguizmo
 )
 
 # 复制 Editor 配置文件到输出目录
@@ -442,7 +455,6 @@ target_link_libraries(DX12_Editor PRIVATE
     DX12Background
     DX12Resource
     DX12Core
-    imguizmo::imguizmo
     user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib
 )
 if(EXISTS "${FIDELITYFX_DIR}/signedbin/amd_fidelityfx_upscaler_dx12.dll")

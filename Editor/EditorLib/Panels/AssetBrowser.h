@@ -6,6 +6,7 @@
 #include <d3d12.h>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -26,6 +27,7 @@ class GameContext;
 namespace DX12Engine::Resource {
 struct SceneDescription;
 } // namespace DX12Engine::Resource
+#include "Scene/SceneConstructor.h"
 
 // ========================================================================
 // EditorAssetManager — 资产管理器面板
@@ -77,9 +79,17 @@ public:
                            DX12Engine::Boot::GameContext *gameContext);
     void SetLayoutProxy(std::function<void(PreviewId)> onSetPreviewId, std::function<void()> onShowPreviewPanel);
 
+    /// 设置场景切换回调（加载新场景前调用，用于释放旧场景资源）
+    /// @return true 表示需要继续加载场景，false 表示场景已存在，无需重复加载
+    void SetSceneSwitcher(std::function<bool(const std::string &, const std::filesystem::path &)> onSwitchScene);
+
     /// 异步加载场景描述（供 Editor 启动默认场景等使用）
     /// SceneConstructor 生命周期由内部管理，加载完成后自动释放
     void LoadSceneDescription(const DX12Engine::Resource::SceneDescription &desc);
+
+    /// 从文件路径异步加载场景（不触发 SwitchScene 回调，供 Tab 切换使用）
+    /// @param sceneFilePath .scene.json 文件路径
+    void LoadSceneFromFile(const std::filesystem::path &sceneFilePath);
 
     /// 注册一个缩略图：将文件路径映射到 GPU 句柄
     void RegisterThumbnail(const std::string &filePath, D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle, uint32_t slice);
@@ -112,6 +122,9 @@ private:
     void DrawContentIcons();
     void RegisterPreviewRenderCallback();
     void OnFileDoubleClick(const std::string &filePath);
+
+    /// 场景切换回调（由 Editor 注册，返回 true 表示需要继续加载场景）
+    std::function<bool(const std::string &, const std::filesystem::path &)> m_onSwitchScene;
 
     /// 获取文件/文件夹的 Windows 系统图标（返回 ImTextureID 用于 ImGui::Image）
     ImTextureID GetIconTexture(const std::string &extension, bool isDirectory);
@@ -170,4 +183,7 @@ private:
     // ── 布局代理回调（AssetBrowser 通知 Layout 更新 UI） ──
     std::function<void(PreviewId)> m_onSetPreviewId;
     std::function<void()> m_onShowPreviewPanel;
+
+    // ── 当前正在加载的 SceneConstructor（编辑器生命周期，值成员，复用避免悬空回调） ──
+    DX12Engine::Scene::SceneConstructor m_sceneCtor;
 };

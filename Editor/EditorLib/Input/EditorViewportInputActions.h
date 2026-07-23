@@ -19,5 +19,8 @@ DEFINE_ACTION(OrbitCamera);
 DEFINE_ACTION(Zoom);
 DEFINE_ACTION(Pan);
 DEFINE_ACTION(FocusSelection);
+DEFINE_ACTION(ToolCursor);
+DEFINE_ACTION(ToolTranslate);
+DEFINE_ACTION(ToolRotate);
 
 } // namespace DX12Engine::Input
