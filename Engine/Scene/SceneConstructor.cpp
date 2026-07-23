@@ -2,6 +2,7 @@
 #include "Boot/GameContext.h"
 #include "Common/d3dUtil.h"
 #include "Core/SharedDataStore/SharedDataStore.h"
+#include "ECS/Core/Components/Name.h"
 #include "ECS/Core/Components/Render.h"
 #include "ECS/Core/Components/Tags.h"
 #include "ECS/Core/Registry.h"
@@ -27,10 +28,13 @@ namespace DX12Engine::Scene {
 
 using namespace DX12Engine::Resource;
 
-void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext *context, Callback onComplete) {
+void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext *context, HeapTag heapTag,
+                                 Callback onComplete, const std::string &sceneFilePath) {
     m_desc = desc;
     m_context = context;
+    m_heapTag = heapTag;
     m_onComplete = std::move(onComplete);
+    m_sceneFilePath = sceneFilePath;
     m_loading = true;
 
     auto *log = context ? context->Logging : nullptr;
@@ -54,10 +58,10 @@ void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext
         if (path.empty())
             return path;
         if (std::filesystem::path(path).is_absolute())
-            return path;
+            return std::filesystem::path(path).generic_string();
         if (!baseURL.empty())
-            return (std::filesystem::path(root) / baseURL / path).string();
-        return (std::filesystem::path(root) / path).string();
+            return (std::filesystem::path(root) / baseURL / path).generic_string();
+        return (std::filesystem::path(root) / path).generic_string();
     };
 
     for (const auto &[key, path] : desc.dependencies.meshes) {
@@ -257,9 +261,27 @@ void SceneConstructor::OnDependenciesLoaded() {
     // 组装场景数据
     auto sceneData = std::make_shared<SceneConstructData>();
     sceneData->sceneName = m_desc.metadata.name;
+    sceneData->sceneFilePath = m_sceneFilePath;
     sceneData->entities = m_desc.entities;
     sceneData->geoMap = std::move(geoMap);
     sceneData->matMap = std::move(matMap);
+
+    // 携带场景环境数据（供 SceneConstructSystem 设置到 SceneManager）
+    sceneData->skybox = m_desc.skybox;
+    sceneData->environment = m_desc.environment;
+
+    // 携带天空盒 GPU 句柄（Tab 切换时重建用）
+    if (m_desc.skybox) {
+        const auto &sb = *m_desc.skybox;
+        auto texIt = texResourceMap.find(sb.texture);
+        if (texIt != texResourceMap.end() && texIt->second.IsValid())
+            sceneData->skyboxTextureHandle = texIt->second;
+        if (!sb.geometry.empty()) {
+            auto geoIt = sceneData->geoMap.find(sb.geometry);
+            if (geoIt != sceneData->geoMap.end() && geoIt->second.IsValid())
+                sceneData->skyboxGeometryHandle = geoIt->second;
+        }
+    }
 
     static std::atomic<uint32_t> s_sceneId{0};
     uint32_t sceneId = ++s_sceneId;
@@ -381,7 +403,7 @@ void SceneConstructor::OnDependenciesLoaded() {
                 //                          m_desc.metadata.name);
 
                 // SRV
-                uint32_t srvIdx = m_context->DescriptorHeaps->Allocate(Resource::PartitionType::Buffer);
+                uint32_t srvIdx = m_context->DescriptorHeaps->Allocate(m_heapTag, Resource::PartitionType::Buffer);
                 if (srvIdx != UINT32_MAX) {
                     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
                     srvDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -400,12 +422,12 @@ void SceneConstructor::OnDependenciesLoaded() {
                         return;
                     }
 
-                    D3D12_CPU_DESCRIPTOR_HANDLE cpuH =
-                        m_context->DescriptorHeaps->GetPartitionCpuHandle(Resource::PartitionType::Buffer, srvIdx);
+                    D3D12_CPU_DESCRIPTOR_HANDLE cpuH = m_context->DescriptorHeaps->GetPartitionCpuHandle(
+                        Resource::PartitionType::Buffer, srvIdx, m_heapTag);
                     device->CreateShaderResourceView(bufRes, &srvDesc, cpuH);
 
-                    D3D12_GPU_DESCRIPTOR_HANDLE gpuH =
-                        m_context->DescriptorHeaps->GetPartitionGpuHandle(Resource::PartitionType::Buffer, srvIdx);
+                    D3D12_GPU_DESCRIPTOR_HANDLE gpuH = m_context->DescriptorHeaps->GetPartitionGpuHandle(
+                        Resource::PartitionType::Buffer, srvIdx, m_heapTag);
                     m_context->MaterialMgr->SetMaterialBufferSRV(gpuH);
                     m_context->Logging->Info("[SceneConstructor] SRV created for scene material buffer");
                 } else {
@@ -413,19 +435,11 @@ void SceneConstructor::OnDependenciesLoaded() {
                                              m_desc.metadata.name);
                 }
 
-                // 发事件通知 SceneConstructSystem
-                Event::MessageDispatcher::GetInstance()->PostEvent(
-                    static_cast<uint32_t>(Event::EventType::SceneConstructReadyEvent), 0,
-                    static_cast<uint64_t>(sceneId), Event::EventPriority::P2_Normal);
-
                 // 通知 batch 子任务完成（onAllComplete 已触发，此处仅递减计数）
                 if (batch)
                     batch->OnSubTaskEnd();
 
-                m_context->Logging->Info("[SceneConstructor] Scene '{}' ready (id={})", m_desc.metadata.name, sceneId);
-                if (m_onComplete)
-                    m_onComplete(true);
-                m_loading = false;
+                OnSceneReady(sceneId);
             } catch (const std::exception &e) {
                 m_context->Logging->Error("[SceneConstructor] onComplete exception: {}", e.what());
                 if (m_onComplete)
@@ -440,15 +454,26 @@ void SceneConstructor::OnDependenciesLoaded() {
         m_context->BackgroundExecutor->SubmitLoadTask(std::move(task));
     } else {
         // 无材质，无需上传，直接发事件
-        Event::MessageDispatcher::GetInstance()->PostEvent(
-            static_cast<uint32_t>(Event::EventType::SceneConstructReadyEvent), 0, static_cast<uint64_t>(sceneId),
-            Event::EventPriority::P2_Normal);
-        m_context->Logging->Info("[SceneConstructor] Scene '{}' ready (no materials, id={})", m_desc.metadata.name,
-                                 sceneId);
-        if (m_onComplete)
-            m_onComplete(true);
-        m_loading = false;
+        OnSceneReady(sceneId);
     }
+}
+
+// ========================================================================
+// OnSceneReady — 场景所有依赖（含材质 buffer）GPU 就绪后的回调
+// ========================================================================
+
+void SceneConstructor::OnSceneReady(uint64_t sceneId) {
+    // 发事件通知 SceneConstructSystem
+    // payload: 高位 = GENERATOR_TYPE_SCENE_CONSTRUCTOR, 低位 = sceneId
+    uint64_t payload = (static_cast<uint64_t>(GENERATOR_TYPE_SCENE_CONSTRUCTOR) << 32) | static_cast<uint64_t>(sceneId);
+    Event::MessageDispatcher::GetInstance()->PostEvent(
+        static_cast<uint32_t>(Event::EventType::GeneratorTaskCompleteEvent), 0, payload,
+        Event::EventPriority::P2_Normal);
+
+    m_context->Logging->Info("[SceneConstructor] Scene '{}' ready (id={})", m_desc.metadata.name, sceneId);
+    if (m_onComplete)
+        m_onComplete(true);
+    m_loading = false;
 }
 
 void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::EntityDesc &eDesc,
@@ -457,6 +482,14 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
                                        ECS::Registry *registry, Boot::GameContext *context) {
     auto *log = context->Logging;
     auto *geoMgr = context->GeometryResourceManager;
+
+    // 0. NameComponent — 名称与持久化 ID
+    {
+        ECS::NameComponent nameComp;
+        nameComp.persistentId = ECS::NextPersistentId();
+        nameComp.name = eDesc.name.empty() ? "Entity" : eDesc.name;
+        registry->AddComponent<ECS::NameComponent>(entity, std::move(nameComp));
+    }
 
     // 1. Transform
     if (eDesc.transform) {
