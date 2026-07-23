@@ -46,6 +46,7 @@
     "viewport_no_rt": "Viewport - No Render Target",
     "viewport_grid_spacing": "Grid Spacing",
     "viewport_grid_tooltip": "World units",
+    "viewport_empty_hint": "Open a scene file to start editing",
     "content_root_not_set": "Content root not set",
 
     "no_results": "No results found",
@@ -54,6 +55,12 @@
 
     "search": "Search...",
     "refresh": "Refresh",
-    "grid_spacing": "Grid Spacing"
+    "grid_spacing": "Grid Spacing",
+
+    "toolbar_cursor": "Cursor",
+    "toolbar_translate": "Translate",
+    "toolbar_rotate": "Rotate",
+    "toolbar_cursor_view": "View",
+    "toolbar_cursor_select": "Select"
   }
 }

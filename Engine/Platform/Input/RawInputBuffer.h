@@ -122,8 +122,8 @@ public:
     }
 
     void ResetMouseDelta() {
-        m_mouseDeltaX = 0.0f;
-        m_mouseDeltaY = 0.0f;
+        m_mouseDeltaX = 0;
+        m_mouseDeltaY = 0;
     }
 
 private:

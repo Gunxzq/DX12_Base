@@ -50,6 +50,9 @@ void InputSystem::Update(const RawInputBuffer &rawBuffer, const std::unordered_s
 
     // 边缘检测
     PerformEdgeDetection(currentTime);
+
+    // 推送回调
+    InvokeCallbacks();
 }
 
 const InputActionState &InputSystem::GetActionState(ActionId actionId) const {
@@ -226,6 +229,93 @@ void InputSystem::ResetAllStates() {
     }
     for (auto &[id, prev] : m_prevFrameActive) {
         prev = false;
+    }
+}
+
+// ========================================================================
+// 推送回调
+// ========================================================================
+
+ActionCallbackId InputSystem::BindCallback(ActionId actionId, std::function<void(const InputActionState &)> callback,
+                                           TriggerBehavior trigger) {
+    ActionCallbackId id = m_nextCallbackId++;
+    m_callbacks.push_back({id, actionId, std::move(callback), trigger});
+    return id;
+}
+
+void InputSystem::UnbindCallback(ActionCallbackId id) {
+    auto it =
+        std::remove_if(m_callbacks.begin(), m_callbacks.end(), [id](const CallbackEntry &e) { return e.id == id; });
+    m_callbacks.erase(it, m_callbacks.end());
+}
+
+/**
+ * @brief 遍历所有注册的回调，根据当前输入状态和触发条件调用相应的回调函数
+ * @date 2026-07-23
+ */
+void InputSystem::InvokeCallbacks() {
+    for (auto &entry : m_callbacks) {
+        auto it = m_actionStates.find(entry.actionId);
+        if (it == m_actionStates.end())
+            continue;
+
+        const auto &state = it->second;
+        bool shouldTrigger = false;
+
+        switch (entry.trigger) {
+        case TriggerBehavior::WhileHeld:
+            // 数字状态 + 轴状态同时检查
+            if (state.GetHeld()) {
+                shouldTrigger = true;
+            } else {
+                float x, y;
+                state.GetAxis2D(x, y);
+                shouldTrigger = (std::abs(x) > 0.001f || std::abs(y) > 0.001f);
+            }
+            break;
+        case TriggerBehavior::OnPressed:
+            shouldTrigger = state.GetPressed();
+            break;
+        case TriggerBehavior::OnReleased:
+            shouldTrigger = state.GetReleased();
+            break;
+        case TriggerBehavior::Axis2D: {
+            float x, y;
+            state.GetAxis2D(x, y);
+            shouldTrigger = (std::abs(x) > 0.001f || std::abs(y) > 0.001f);
+            break;
+        }
+        case TriggerBehavior::OnTapped:
+            shouldTrigger = state.GetTapped();
+            break;
+        case TriggerBehavior::OnDoubleTap:
+            shouldTrigger = state.GetDoubleTapped();
+            break;
+        case TriggerBehavior::OnHoldRelease:
+            shouldTrigger = state.GetHoldRelease();
+            break;
+        case TriggerBehavior::OnRepeat:
+            shouldTrigger = state.GetRepeatTrigger();
+            break;
+        case TriggerBehavior::Analog1D: {
+            // Analog1D 状态或 Axis2D 中仅单轴有值时触发
+            float val1D = state.GetValue1D();
+            bool hasAnalog1D = (std::abs(val1D) > 0.001f);
+            if (!hasAnalog1D) {
+                float x, y;
+                state.GetAxis2D(x, y);
+                bool xActive = std::abs(x) > 0.001f;
+                bool yActive = std::abs(y) > 0.001f;
+                hasAnalog1D = xActive != yActive; // 恰好一个轴有值
+            }
+            shouldTrigger = hasAnalog1D;
+            break;
+        }
+        }
+
+        if (shouldTrigger && entry.callback) {
+            entry.callback(state);
+        }
     }
 }
 

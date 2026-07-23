@@ -29,6 +29,7 @@
       { "device": "Mouse", "axis": "Wheel" }
     ],
     "Pan": [
+      { "key": "Mouse_Left" },
       { "key": "Mouse_Middle" }
     ],
     "FocusSelection": [

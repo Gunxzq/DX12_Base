@@ -46,6 +46,7 @@
     "viewport_no_rt": "视口 - 无渲染目标",
     "viewport_grid_spacing": "网格间距",
     "viewport_grid_tooltip": "世界单位",
+    "viewport_empty_hint": "打开场景文件开始编辑",
     "content_root_not_set": "未设置资源根目录",
 
     "no_results": "无结果",
@@ -54,6 +55,12 @@
 
     "search": "搜索...",
     "refresh": "刷新",
-    "grid_spacing": "网格间距"
+    "grid_spacing": "网格间距",
+
+    "toolbar_cursor": "光标",
+    "toolbar_translate": "平移",
+    "toolbar_rotate": "旋转",
+    "toolbar_cursor_view": "视图",
+    "toolbar_cursor_select": "选择"
   }
 }
