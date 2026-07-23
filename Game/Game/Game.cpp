@@ -52,13 +52,16 @@ bool Game::Initialize() {
     m_opaqueRenderer->SetMaterialManager(m_context->MaterialMgr);
     m_opaqueRenderer->Initialize();
 
-    // 4. 初始化相机
+    // 4. 初始化相机（引擎 CORE 不初始化相机，由各端自行管理）
     // Moon 地图 tile 范围：X=1350~1620, Z=1350~1620
     // 相机放在城市中心上空，45° 俯视
     if (m_context->CameraMgr) {
+        m_context->CameraMgr->Initialize(1280, 720);
+        m_context->CameraMgr->SetGameContext(m_context);
         auto &mainCamera = m_context->CameraMgr->GetMainCamera();
         mainCamera.Position = DirectX::XMFLOAT3(1500.0f, 200.0f, 1500.0f);
         mainCamera.Rotation = DirectX::XMFLOAT3(XMConvertToRadians(-45.0f), 0.0f, 0.0f);
+        m_context->CameraMgr->UpdateBasisFromRotation();
         m_context->CameraMgr->UpdateMainCamera();
     }
 
@@ -95,13 +98,15 @@ bool Game::Initialize() {
     // 为聚光灯预创建阴影贴图（1024x1024）
     LightManager::GetInstance().CreateShadowMapForSpotLight(0, 1024, m_context->GetNextFence());
 
-    // 反射探针管理器 — 已在 Bootstrap::CreateContext 中初始化，直接使用
+    // 反射探针管理器 — 已在 Bootstrap::CreateContext 中初始化，通过 RenderScene 子模块访问
     {
-        auto &probeMgr = *m_context->ReflectionProbeMgr;
-
-        // 创建测试探针（256x256, 普通优先级），位置与反射测试立方体重合
-        probeMgr.AddProbe({10.0f, 32.0f, 3.0f}, 50.0f, 256, 1);
-        m_context->Logging->Info("[Probe] Created test probe at (10, 32, 3), 256x256");
+        auto *rs = m_context->SceneMgr->GetRenderScene();
+        auto *probeMgr = rs ? rs->GetReflectionProbeManager() : nullptr;
+        if (probeMgr) {
+            // 创建测试探针（256x256, 普通优先级），位置与反射测试立方体重合
+            probeMgr->AddProbe({10.0f, 32.0f, 3.0f}, 50.0f, 256, 1);
+            m_context->Logging->Info("[Probe] Created test probe at (10, 32, 3), 256x256");
+        }
     }
 
     // 5. 注册引擎级系统（窗口大小变化、全屏切换等）
@@ -156,7 +161,10 @@ bool Game::Initialize() {
                 XMStoreFloat4x4(&passConstants.View, camera.ViewMatrix);
                 XMStoreFloat4x4(&passConstants.Proj, camera.ProjMatrix);
                 XMStoreFloat4x4(&passConstants.ViewProj, camera.ViewProjMatrix);
+                XMStoreFloat4x4(&passConstants.InvView, camera.InverseView);
+                XMStoreFloat4x4(&passConstants.InvProj, camera.InverseProj);
                 XMStoreFloat4x4(&passConstants.InvViewProj, camera.InverseViewProj);
+                XMStoreFloat4x4(&passConstants.PrevViewProj, camera.PrevViewProjMatrix);
 
                 // 存储其他数据
                 passConstants.CameraPos = camera.Position;
@@ -168,8 +176,10 @@ bool Game::Initialize() {
                 passConstants.FrameCount = m_context->FrameDriver->GetFrameStats().frameNumber;
 
                 // ========================================================================
-                // 上传光源数据到 GPU
-                LightManager::GetInstance().UpdateAndUpload(m_context->GetNextFence(), camera);
+                // 上传光源数据到 GPU（通过 RenderScene 子模块访问）
+                auto *renderScene = m_context->SceneMgr->GetRenderScene();
+                if (renderScene && renderScene->GetLightManager())
+                    renderScene->GetLightManager()->UpdateAndUpload(m_context->GetNextFence(), camera);
 
                 // 上传水常量到 GPU（WaterManager 自管 RingBuffer）
                 WaterManager::GetInstance().UpdateAndUpload(m_context->GetNextFence());
@@ -211,10 +221,12 @@ bool Game::Initialize() {
     // ── Reflection Probe 面板 ──
     DebugUIManager::Get().RegisterPanel(
         {.name = "ReflectionProbes", .group = "Debug", .drawFunc = [this](float dt, uint32_t frame) {
-             auto &probeMgr = *m_context->ReflectionProbeMgr;
-             ImGui::Text("Active probes: %u", probeMgr.GetActiveProbeCount());
+             auto *rs = m_context->SceneMgr->GetRenderScene();
+             auto *probeMgr = rs ? rs->GetReflectionProbeManager() : nullptr;
+             if (!probeMgr) return;
+             ImGui::Text("Active probes: %u", probeMgr->GetActiveProbeCount());
              ImGui::Separator();
-             ImGui::Text("Probe array SRV: 0x%llx", probeMgr.GetProbeCubemapArraySRV().ptr);
+             ImGui::Text("Probe array SRV: 0x%llx", probeMgr->GetProbeCubemapArraySRV().ptr);
              ImGui::Text("(Resource allocation verified at init)");
          }});
 
@@ -259,7 +271,7 @@ void Game::RegisterEngineSystems() {
     // WindowResizeSystem
     SystemRegistry::Register({.name = "WindowResizeSystem",
                               .func =
-                                  [this](Registry &, const MessageContext &ctx) {
+                                  [this](const MessageContext &ctx) {
                                       uint32_t width = ctx.GetLow32();
                                       uint32_t height = ctx.GetHigh32();
                                       if (m_context && m_context->DeviceContext) {
@@ -286,7 +298,7 @@ void Game::RegisterEngineSystems() {
     // FullscreenSystem
     SystemRegistry::Register({.name = "FullscreenSystem",
                               .func =
-                                  [this](Registry &, const MessageContext &ctx) {
+                                  [this](const MessageContext &ctx) {
                                       bool bRequestFullscreen = ctx.GetLow32() != 0;
                                       m_context->Window->SetFullscreen(bRequestFullscreen);
                                   },
@@ -297,7 +309,7 @@ void Game::RegisterEngineSystems() {
 
     SystemRegistry::Register({.name = "CullingCameraUpdate",
                               .func =
-                                  [this](Registry &, const MessageContext &) {
+                                  [this](const MessageContext &) {
                                       float dt = m_context->MainTimer->GetDeltaTime();
                                       float predictionFactor = 0.5f;
                                       auto &camMgr = CameraManager::GetInstance();
@@ -350,8 +362,13 @@ void Game::Shutdown() {
 
     Resource::GpuResourceManager::GetInstance().Shutdown();
 
-    // 清理反射探针资源
-    m_context->ReflectionProbeMgr->Shutdown();
+    // 清理反射探针资源（通过 RenderScene 子模块访问）
+    {
+        auto *rs = m_context->SceneMgr->GetRenderScene();
+        auto *probeMgr = rs ? rs->GetReflectionProbeManager() : nullptr;
+        if (probeMgr)
+            probeMgr->Shutdown();
+    }
 
     m_isInitialized = false;
     m_context->Logging->Info("[Game] Game shutdown complete");

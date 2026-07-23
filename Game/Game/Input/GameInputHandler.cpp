@@ -46,7 +46,7 @@ void GameInputHandler::RegisterInputSystem() {
     // ========================================================================
     SystemRegistry::Register({.name = "CameraControlSystem",
                               .func =
-                                  [this](Registry &registry, const MessageContext &ctx) {
+                                  [this](const MessageContext &ctx) {
                                       float deltaTime = m_context->MainTimer->GetDeltaTime();
                                       if (deltaTime <= 0.0f)
                                           return;
@@ -79,7 +79,7 @@ void GameInputHandler::RegisterPickingSystems() {
     SystemRegistry::Register(
         {.name = "PickingProcessSystem",
          .func =
-             [this](Registry &, const MessageContext &ctx) {
+             [this](const MessageContext &ctx) {
                  if (!m_context || !m_visibleRaycaster || !m_context->Window)
                      return;
 
