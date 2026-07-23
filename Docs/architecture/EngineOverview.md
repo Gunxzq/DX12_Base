@@ -10,12 +10,12 @@
 ```
 Game/Editor (应用层)
   │  入口、配置、窗口、输入
-  ├── GameWorld (游戏世界)
-  │   ├── GameWorld.cpp          → Initialize / Update / Clear
-  │   ├── GameWorld_Scene.cpp    → 场景物体创建（已基本迁移到 JSON）
-  │   ├── GameWorld_Assets.cpp   → 资产加载（已基本迁移到异步管线）
-  │   ├── GameWorld_Builder.cpp  → Builder 系统注册
-  │   └── GameWorld_RenderSystems.cpp → 渲染系统注册
+  ├── GameWorld (游戏世界 — 主循环 + 子模块编排)
+  │   ├── GameWorld.cpp              → Initialize / Update / Clear
+  │   ├── GameSceneManager           → 场景生命周期管理
+  │   ├── GameRenderPipeline         → 构建器/渲染器/队列 + 系统注册
+  │   │   └── GameRenderPipeline.cpp → 全部 16 个系统注册方法
+  │   └── GameResources              → GPU 资源初始化（白纹理、预触）
   │
   └── Game::Run() → FrameDriver::Tick()
        ├── Immediate 回调（LightManager/WaterManager 上传）
@@ -188,3 +188,280 @@ WaterManager (单例)                                     ───→  WaterRen
 | `Frame.md` | 帧生命周期、Phase 顺序 |
 | `RenderDataAccess.md` | 渲染数据访问模式 |
 | `AllocatorAndEnttFixes.md` | 本次修复的 bug 记录 |
+
+---
+
+## 八、Editor/Game 端差异：ECS-Builder-Renderer 管道
+
+> 2026-07-23 补充：Editor 和 Game 端共用同一套 ECS-Builder-Renderer 管道，但通过不同的可见性策略满足各自需求。
+
+### 8.1 大型引擎参考
+
+#### Unity
+
+```
+Unity 渲染管线（SRP/URP/HDRP）：
+  Editor 和 Game 共用同一套管线代码，无分支
+
+  Editor 额外渲染（选中轮廓、Gizmo）：
+    └─ 通过 Handles.DrawCamera + CommandBuffer 注入
+    └─ 不是另一套管线，而是在现有管线中插入额外 Pass
+
+  可见性控制：
+    └─ Camera.cullingMask（按 Layer 过滤）
+    └─ SceneView 使用独立 Camera，走自己的 cullingMask
+    └─ 不修改 Builder，不修改 Renderer，只配置 Camera 的可见性
+
+  核心原则：
+    └─ 管线不分叉，视图配置决定可见性
+```
+
+#### Unreal
+
+```
+Unreal 渲染场景（FScene）：
+  Editor 和 Game 共用同一个 FScene，无分叉
+
+  Editor 额外渲染：
+    └─ FSceneView 的 ShowFlags 控制
+    └─ ShowFlags.SetEditorPrimitives() / SetGameplay() / ...
+    └─ 视口按需开关，不修改底层 FScene
+
+  可见性控制：
+    └─ 每个 FEditorViewportClient 有自己的 ShowFlags 集合
+    └─ 同一批 Actor 进入不同视口，ShowFlags 决定哪些可见
+    └─ 不修改 Builder，不修改 World，只配置视口的显示标志
+
+  核心原则：
+    └─ 场景不分叉，视口配置决定可见性
+```
+
+#### 对我们的启示
+
+| 维度 | Unity/Unreal 的做法 | 我们当前的做法 |
+|:-----|:--------------------|:--------------|
+| **管道路径** | 同一套管线，不分叉 | 同一套 Builder-Renderer，方向正确 |
+| **可见性控制** | 视口/Camera 级别（cullingMask / ShowFlags） | **Builder 级别（EntityFilter 提前过滤）** |
+| **编辑器叠加** | 额外 Pass 注入现有管线（CommandBuffer / ShowFlags） | 未实现 |
+| **场景数据** | 所有实体在同一场景，视口配置决定可见性 | 通过 SceneTagComponent 在 Builder 层过滤 |
+
+**关键差异：** Unity/Unreal 不在 Builder 层过滤实体。Builder 处理所有实体，渲染决策推迟到视口/Camera 级别。这意味着同一批实体可以被不同视口以不同方式渲染（主场景显示 gameplay、编辑器视口显示辅助线）。
+
+### 8.2 当前方案的局限
+
+```
+Builder 层过滤的问题：
+  └─ 过滤掉的实体无法被编辑器叠加渲染使用
+  └─ 例如：选中实体的轮廓高亮需要实体进入渲染队列
+  └─ 例如：Gizmo 需要目标实体的深度信息
+  └─ 过滤策略是"有或无"的二元选择，不够灵活
+
+更灵活的方式：
+  └─ Builder 处理所有可见实体（不过滤）
+  └─ 渲染时由视口/Camera 配置决定可见性
+  └─ 编辑器叠加渲染作为额外 Pass 注入
+```
+
+### 8.3 Editor 端差异
+
+```
+Editor 端：
+  ECS Registry（全局数据容器，多源头）
+    ├─ SceneManager → 场景实体（用户编辑的关卡）
+    ├─ PreviewSystem → 预览实体（缩略图、材质球）
+    ├─ DebugSystem → 调试可视化（碰撞体、光线）
+    └─ 各系统各行其是，互不干扰
+
+  Builder 策略：
+    └─ 处理所有带 RenderMeshComponent 的实体
+    └─ 不过滤，不提前剔除
+
+  视口配置（EditorViewport）：
+    └─ 拥有自己的 Camera 实例
+    └─ 通过可见性标志控制渲染内容
+    └─ 叠加编辑器专用 Pass：
+          ├─ 选中实体高亮轮廓
+          ├─ ImGuizmo
+          └─ 调试可视化
+
+  SceneTagComponent 用途：
+    └─ 不用于 Builder 过滤
+    └─ 用于场景序列化（保存场景时知道哪些实体属于哪个场景）
+    └─ 用于 UI（Outliner 按场景分组显示）
+```
+
+### 8.4 Game 端差异
+
+```
+Game 端：
+  ECS Registry（全局数据容器，单一世界）
+    ├─ SceneManager → 关卡实体（场景加载）
+    ├─ ParticleSystem → 粒子实体（运行时生成）
+    ├─ AnimationSystem → 动画状态实体
+    ├─ PhysicsSystem → 碰撞体实体
+    └─ 所有游戏内容共享同一个世界
+
+  Builder 策略：
+    └─ 处理所有带 RenderMeshComponent 的实体
+    └─ 不过滤
+
+  视口配置：
+    └─ 主相机控制可见性
+    └─ 无编辑器叠加 Pass
+    └─ 无调试可视化
+```
+
+### 8.5 管道可定制性
+
+ECS-Builder-Renderer 管道是**统一且可定制的**，不是两套代码：
+
+```
+统一管道：
+  ECS Registry → 组件查询 → 构建渲染项 → 提交渲染
+
+定制点：
+  └─ 视口/Camera 配置（可见性、叠加 Pass）
+       ├─ Editor：SceneTagComponent 过滤 + 编辑器叠加 Pass
+       └─ Game：不过滤，无叠加 Pass
+```
+
+### 8.6 设计原则
+
+1. **ECS-Builder-Renderer 管道是统一的**，Editor 和 Game 共用同一套基础设施
+2. **可见性控制应在视口/Camera 级别**，不在 Builder 级别
+3. **编辑器叠加渲染作为额外 Pass 注入**，不修改主渲染管线
+4. **SceneTagComponent 用于序列化，不用于渲染过滤**
+
+---
+
+### 8.7 World 重构：ECS 的绝对源头
+
+> 2026-07-23 补充：大型引擎的启示——引擎核心应有唯一的绝对 ECS 源头（World），SceneManager 降级为场景序列化器，双端特化在 World 层完成。
+
+#### 8.7.1 问题
+
+当前 `SceneManager` 职责过重：它既是 ECS 实体管理容器，又是场景文件加载器，又被 Editor 和 Game 各自特化。但 `ECS::Registry` 作为全局数据容器并不属于 `SceneManager`——预览系统、调试系统都在往 Registry 里写实体，`SceneManager` 没有能力也不应该管理它们。
+
+#### 8.7.2 大型引擎参考
+
+```
+Unity：
+  SceneManager（场景加载/卸载）
+    └─ 只管理场景文件的生命周期
+    └─ 所有 GameObject 属于某个场景，但场景不管理 GameObject 的运行时行为
+  World 概念：
+    └─ 隐式存在（SceneManager 内部维护场景层级）
+    └─ DontDestroyOnLoad 对象存在于"持久场景"
+
+Unreal：
+  UWorld（绝对 ECS 源头）
+    ├─ 所有 Actor 属于某个 UWorld
+    ├─ ULevel（场景/关卡）是 UWorld 的子集
+    └─ 多个 UWorld 可共存（EditorWorld、PreviewWorld、PIEWorld）
+  UWorld 是绝对容器，ULevel 是序列化单元
+```
+
+#### 8.7.3 新架构：单一 World + 逻辑分区
+
+```
+Engine Core（绝对 ECS 源头）：
+  World（单一实例）
+    ├─ 持有 ECS::Registry
+    ├─ 所有实体都必须属于这个 World
+    ├─ 实体生命周期入口（CreateEntity / DestroyEntity）
+    └─ World 本身不分区，不感知任何逻辑分组
+
+  逻辑分区（由 Manager 的解释器视角提供）：
+    ├─ SceneManager 的视角：
+    │     └─ 查询所有带 SceneTagComponent 的实体
+    │     └─ 按 sceneId 分组 → 多 Tab 场景管理
+    │     └─ 负责这些实体的序列化/反序列化
+    │
+    ├─ PreviewManager 的视角：
+    │     └─ 查询所有带 PreviewTag 的实体
+    │     └─ 管理预览实体的创建/销毁
+    │     └─ 不参与场景保存
+    │
+    ├─ DebugManager 的视角：
+    │     └─ 查询所有带 DebugTag 的实体
+    │     └─ 管理调试可视化实体的创建/销毁
+    │     └─ 不参与场景保存
+    │
+    └─ 其他 Manager 同理
+          └─ 每个 Manager 通过 TagComponent 查询自己的"逻辑分区"
+
+Editor 端：
+  └─ 单一 World，多个 Manager 提供多个逻辑分区
+
+Game 端：
+  └─ 单一 World，无逻辑分区
+  └─ 所有实体都是"游戏内容"，不需要 Tag 区分
+  └─ SceneManager 只做关卡加载/卸载
+```
+
+#### 8.7.4 核心变化
+
+```
+之前（多个 World 实例）：
+  EditorWorld（场景实体）→ 独立 Registry
+  PreviewWorld（预览实体）→ 独立 Registry
+  DebugWorld（调试实体）→ 独立 Registry
+  └─ 问题：跨 World 的实体交互困难（如选中预览实体）
+  └─ 问题：渲染管线需要多个 World 的渲染项合并
+
+现在（单一 World + 逻辑分区）：
+  World（唯一的 Registry）
+    ├─ 场景实体 ← SceneManager 的视角
+    ├─ 预览实体 ← PreviewManager 的视角
+    ├─ 调试实体 ← DebugManager 的视角
+    └─ World 不分区，Manager 提供视角
+
+  优势：
+    ├─ 跨分区交互简单（选中预览实体 = 选中同一 World 的实体）
+    ├─ Builder 不需要合并多个 World 的渲染项
+    ├─ 渲染管线不需要区分"来自哪个 World"
+    └─ Game 端不需要任何分区概念
+```
+
+#### 8.7.5 SceneManager 的降级
+
+```
+SceneManager（不再管理 ECS，只做场景序列化 + 环境状态管理）：
+  LoadScene(path) → 创建实体到 World
+  SaveScene(path) → 从 World 中查询场景实体 → 写入文件
+  └─ 不再持有 ECS::Registry 引用
+  └─ 不再管理实体生命周期（委托给 World）
+  └─ 逻辑分区是 Editor 端特化，不属于 Engine Core
+
+  Editor 端特化（EditorSceneManager）：
+    ├─ 多 Tab 管理（多个场景文件同时打开）
+    ├─ Tab 切换 → 切换 sceneId 查询条件
+    ├─ 异步加载 + 竞态保护
+    ├─ 编辑器状态持久化
+    └─ SceneTagComponent 逻辑分区
+
+  Game 端特化（GameSceneManager）：
+    ├─ 单场景加载/卸载
+    ├─ 关卡切换过渡
+    └─ 不需要 SceneTagComponent（所有实体都是游戏内容）
+```
+
+#### 8.7.6 迁移路径
+
+| 步骤 | 内容 | 影响 |
+|:----:|:-----|:------|
+| 1 | 从 Engine Core 中提取 `World` 类，持有 `ECS::Registry` | 新增，不破坏现有代码 |
+| 2 | 将 `SceneManager::CreateEntity`/`RemoveEntity` 委托给 `World` | 接口兼容，内部重定向 |
+| 3 | 将 `ECS::Registry` 的全局访问改为通过 `World::GetRegistry()` | 逐步替换 |
+| 4 | `SceneManager` 降级为场景序列化器，不再持有 Registry | 重构，需验证 |
+| 5 | Editor 端各 Manager 通过 TagComponent 提供逻辑分区视角 | 渐进式 |
+
+#### 8.7.7 设计原则
+
+1. **World 是 ECS 的绝对源头**，所有实体必须属于某个 World
+2. **SceneManager 是场景序列化器**，不是 ECS 容器，也不是逻辑分区解释器
+3. **单一 World + 逻辑分区（Editor 端）**，非多 World 实例
+4. **Game 端无分区概念**，所有实体都是游戏内容
+5. **World 和 SceneManager 是组合关系**，SceneManager 持有 World* 引用
+
+> 详细设计见 `Docs/architecture/World.md`。

@@ -14,3 +14,4 @@
 | 4 | [BugFix_LightingPass_RootSigSampler](BugFix_LightingPass_RootSigSampler.md) | 光照 PASS 根签名缺少静态采样器导致 PSO 创建失败 | 2026-07-02 |
 | 5 | [BugFix_SSAO_AmbientResourceStateMismatch](BugFix_SSAO_AmbientResourceStateMismatch.md) | SSAO ambient 资源状态错乱导致 ResourceBarrier 不匹配 | 2026-07-03 |
 | 6 | [BugFix_Editor_DoubleProcessMessages](BugFix_Editor_DoubleProcessMessages.md) | Editor 主循环双重 ProcessMessages 导致鼠标 Delta 丢失（右键旋转失效） | 2026-07-15 |
+| 7 | [BugFix_ImGuizmo_ImGuiAPIVersionMismatch](BugFix_ImGuizmo_ImGuiAPIVersionMismatch.md) | ImGuizmo 与 ImGui 1.92.9 WIP 的 AddPolyline/AddRect 参数顺序不匹配 | 2026-07-22 |

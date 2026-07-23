@@ -41,7 +41,8 @@
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| **SceneManager** | **场景管理器架构：核心 SceneManager 设计、Game/Editor 双端特化、子场景模块体系、场景生命周期、加载器体系** | 📋 新设计 |
+| **World** | **ECS 绝对源头：单一 World + 逻辑分区（Editor 端），SceneManager 降级为场景序列化器** | 📋 新设计 |
+| **SceneManager** | **场景管理器架构：核心 SceneManager 设计（场景序列化器 + 环境状态容器）、Game/Editor 双端特化、子场景模块体系、场景生命周期、加载器体系、World 提取与 SceneManager 降级** | 📋 新设计 |
 | **SceneFileAndLoading** | 场景文件格式 + AssetManager 加载管线 + 场景构造 | 📋 新设计 |
 | **EventSystemAndDataLayer** | 事件系统四层架构 + 数据层（ECS / SharedDataStore）关系 | ✅ |
 | **ResourceManager** | 资源管理器架构、AssetManager 设计 | ✅ 活跃 |

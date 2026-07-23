@@ -63,19 +63,16 @@ Engine CORE                          Game 端                          Editor �
 │                              │     │                      │     │                          │
 │  • 实体 CRUD（公开 API）      │     └──────────────────────┘     └──────────────────────────┘
 │  • 环境状态管理               │            │                            │
-│  • 子场景模块管理              │            └──────────┬─────────────────┘
-│  • 生命周期事件广播            │                       │
+│  • RenderScene 渲染上下文      │            └──────────┬─────────────────┘
+│  • 生命周期事件（MessageDispatcher）│                  │
 │  • 待处理队列                  │            ┌──────────────────────┐
-└──────────────────────────────┘            │     子场景模块         │
-                                            │  ┌──────────────────┐ │
-                                            │  │  RenderScene     │ │
-                                            │  ├──────────────────┤ │
-                                            │  │  PhysicsScene    │ │
-                                            │  ├──────────────────┤ │
-                                            │  │  AudioScene      │ │
-                                            │  ├──────────────────┤ │
-                                            │  │  NavMeshScene    │ │
-                                            │  └──────────────────┘ │
+└──────────────────────────────┘            │   RenderScene         │
+                                            │  （渲染上下文容器）     │
+                                            │  • LightManager*       │
+                                            │  • ReflectionProbeMgr* │
+                                            │  • AmbientOcclusionMgr*│
+                                            │  • DescriptorHeaps*    │
+                                            │  • DeviceContext*      │
                                             └──────────────────────┘
 ```
 
@@ -101,7 +98,7 @@ enum class SceneTransition {
     // 后续可扩展：FadeOutIn, LoadingScreen 等
 };
 
-/// 实体变更类型（广播用）
+/// 实体变更类型（事件数据）
 enum class EntityChangeType {
     Added,
     Removed,
@@ -109,37 +106,17 @@ enum class EntityChangeType {
     TransformChanged,
 };
 
-/// 实体变更广播（同步，当前帧生效）
+/// 实体变更事件（通过 MessageDispatcher 异步分发）
 struct EntityChangeEvent {
     EntityChangeType type;
     uint64_t entity;  // EntityHandle（不暴露 ECS 内部类型）
-    // 按 type 可附加更多信息
 };
 
-/// 场景生命周期事件（广播，当前帧生效）
+/// 场景生命周期事件（通过 MessageDispatcher 异步分发）
 struct SceneLifecycleEvent {
     SceneState oldState;
     SceneState newState;
     std::string sceneName;  // 当前场景名称
-};
-
-/// 场景子模块基类接口
-class ISceneModule {
-public:
-    virtual ~ISceneModule() = default;
-    virtual const char* GetModuleName() const = 0;
-    
-    /// 实体添加时调用（同步）
-    virtual void OnEntityAdded(uint64_t entity) = 0;
-    /// 实体移除时调用（同步）
-    virtual void OnEntityRemoved(uint64_t entity) = 0;
-    /// 实体组件变更时调用（同步）
-    virtual void OnEntityComponentChanged(uint64_t entity, ComponentType type) = 0;
-    
-    /// 场景准备切换（卸载开始前）
-    virtual void OnScenePreUnload() = 0;
-    /// 场景切换完成（新场景已加载）
-    virtual void OnScenePostLoad() = 0;
 };
 
 /// 场景管理器基类
@@ -147,8 +124,9 @@ public:
 /// 设计原则：
 ///   - ECS Registry 是内部实现，不对外暴露
 ///   - 外部通过 EntityHandle（uint64_t）操作实体，不接触 entt::entity
-///   - 内部 System 和子场景模块通过 GetRegistryForInternalUse() 访问完整的 ECS 能力
-///   - 实体创建/销毁强制走 SceneManager 接口，确保 Retain/Release + 子场景通知
+///   - 内部 System 通过 GetRegistryForInternalUse() 访问完整的 ECS 能力
+///   - 实体创建/销毁强制走 SceneManager 接口，确保生命周期管理
+///   - 实体变更/场景生命周期事件通过 MessageDispatcher 异步分发，不再维护同步回调
 class SceneManager {
 public:
     SceneManager() = default;
@@ -161,17 +139,17 @@ public:
     // 初始化/销毁
     // ====================================================================
     
-    /// 初始化（ECS Registry 由 SceneManager 内部创建）
-    virtual void Initialize(Boot::GameContext* context);
+    /// 初始化（ECS Registry 由 SceneManager 内部创建；同时创建 RenderScene 渲染上下文）
+    virtual void Initialize();
     
-    /// 销毁，清理所有实体和子场景
+    /// 销毁，清理所有实体
     virtual void Shutdown();
     
     // ====================================================================
     // 实体管理（核心）
     //
     // 设计原则：生成器（SceneConstructor、CharacterLoader 等）负责组件创建，
-    // SceneManager 只负责管理（生命周期追踪、持久化、广播）。
+    // SceneManager 只负责管理（生命周期追踪、持久化）。
     // 生成器是 Scene System 的一部分，通过 GetRegistryForInternalUse() 访问 ECS 完整能力。
     // ====================================================================
     
@@ -183,12 +161,11 @@ public:
     std::vector<uint64_t> CreateEntities(uint32_t count);
     
     /// 将已创建的实体注册到 SceneManager 的管理中
-    /// 纳入追踪列表 + 广播 EntityChangeEvent::Added + 通知子场景模块
     /// 调用前，生成器应已完成组件的创建
     void RegisterEntity(uint64_t entity);
     void RegisterEntities(std::span<const uint64_t> entities);
     
-    /// 移除实体（内部自动处理 Retain/Release + 子场景通知）
+    /// 移除实体（内部自动处理 Retain/Release）
     void RemoveEntity(uint64_t entity);
     void RemoveEntities(std::span<const uint64_t> entities);
     
@@ -196,7 +173,6 @@ public:
     void RemoveAllEntities();
     
     /// 获取当前场景的所有实体 Handle 列表（扁平，无父子层级）
-    /// 父子层级是编辑器端概念，存储在 EditorStateFile 中
     const std::vector<uint64_t>& GetAllEntities() const;
     
     /// 获取实体组件（受控的组件访问）
@@ -235,39 +211,19 @@ public:
     SceneState GetState() const { return m_state; }
     const std::string& GetCurrentSceneName() const { return m_sceneName; }
     
-    /// 准备切换场景（由子类调用，或由加载器触发）
-    /// 内部处理：广播 PreUnload → 保留 Persist 实体 → 清除其余实体 → 更新状态
+    /// 准备切换场景
+    /// 内部处理：保留 Persist 实体 → 清除其余实体 → 更新状态
     void PrepareSceneSwitch(const std::string& newSceneName, SceneTransition transition);
     
     // ====================================================================
-    // 子场景模块管理
+    // RenderScene 渲染上下文
     // ====================================================================
     
-    template<typename T>
-    T* GetModule() {
-        static_assert(std::is_base_of_v<ISceneModule, T>, "T must inherit ISceneModule");
-        for (auto& mod : m_modules) {
-            if (auto* casted = dynamic_cast<T*>(mod.get()))
-                return casted;
-        }
-        return nullptr;
-    }
+    /// 获取 RenderScene 渲染上下文容器
+    RenderScene* GetRenderScene() const { return m_renderScene.get(); }
     
-    void RegisterModule(std::unique_ptr<ISceneModule> module);
-    
-    // ====================================================================
-    // 广播监听（ISceneListener 接口）
-    // ====================================================================
-    
-    class IListener {
-    public:
-        virtual ~IListener() = default;
-        virtual void OnEntityChange(const EntityChangeEvent& evt) {}
-        virtual void OnSceneLifecycle(const SceneLifecycleEvent& evt) {}
-    };
-    
-    void AddListener(IListener* listener);
-    void RemoveListener(IListener* listener);
+    /// 获取内部 Registry 指针（供 Builder 系统获取 ECS 上下文）
+    ECS::Registry* GetRegistry() const { return m_registry.get(); }
     
     // ====================================================================
     // 待处理队列处理（主线程每帧调用）
@@ -282,12 +238,11 @@ protected:
     // 内部 System 访问（不对外暴露）
     // ====================================================================
     
-    /// 内部 System 和子场景模块通过此方法访问完整的 ECS 能力
+    /// 内部 System 通过此方法访问完整的 ECS 能力
     /// 外部消费者（Editor、GameWorld、AssetBrowser）禁止调用
     ECS::Registry* GetRegistryForInternalUse() { return m_registry.get(); }
     
     // 子类可访问的状态
-    Boot::GameContext* m_context = nullptr;
     SceneState m_state = SceneState::None;
     std::string m_sceneName;
     
@@ -306,29 +261,15 @@ protected:
     Resource::SkyboxDesc m_skybox;
     Resource::EnvironmentDesc m_environment;
     
-    // 子场景模块
-    std::vector<std::unique_ptr<ISceneModule>> m_modules;
-    
-    // 监听器
-    std::vector<IListener*> m_listeners;
+    // 渲染上下文容器（直接持有）
+    std::unique_ptr<RenderScene> m_renderScene;
     
     // 待处理队列（线程安全，后台加载器写入，主线程 ProcessPendingChanges 消费）
-    // 使用锁或无锁队列
     ConcurrentQueue<PendingEntityChange> m_pendingChanges;
     
     // 内部方法：EntityHandle ←→ entt::entity 转换
     entt::entity ToInternal(uint64_t handle) const;
     uint64_t ToExternal(entt::entity e) const;
-    
-    // 广播实体变更
-    void BroadcastEntityChange(const EntityChangeEvent& evt);
-    void BroadcastSceneLifecycle(const SceneLifecycleEvent& evt);
-    
-    // 通知所有子场景模块
-    void NotifyModulesEntityAdded(uint64_t entity);
-    void NotifyModulesEntityRemoved(uint64_t entity);
-    void NotifyModulesPreUnload();
-    void NotifyModulesPostLoad();
 };
 
 } // namespace DX12Engine::Scene
@@ -353,8 +294,6 @@ Step 2: 注册到 SceneManager
     │
     ├─ SceneManager::RegisterEntity(handle)
     │     ├─ 追加到扁平实体列表（m_entities）
-    │     ├─ 广播 EntityChangeEvent::Added
-    │     │     └─ 子场景模块同步响应
     │     └─ SceneManager 持有了实体 Handle 的引用
 ```
 
@@ -369,25 +308,23 @@ Step 2: 注册到 SceneManager
 
 ### 2.4 场景切换流程
 
+> ⚠️ **当前设计决策**：编辑器端不再支持"切换即销毁"模式。
+> 场景切换应通过多 Tab 机制实现（见 §10），旧场景的 ECS Registry 和 GPU 资源保持驻留，
+> 切换 Tab 只切换活跃指针。资源释放仅在 Tab 关闭时执行。
+> 下方 `PrepareSceneSwitch` 保留为 Game 端使用（关卡切换），
+> Editor 端通过 `EditorSceneManager::SwitchScene` 内部调用。
+
 ```
 PrepareSceneSwitch("新场景", Immediate)
-    │
-    ├─ 广播 SceneLifecycleEvent(None → Unloading)
-    ├─ 通知子场景模块 NotifyModulesPreUnload()
     │
     ├─ 遍历所有实体（m_entities）
     │     ├─ 如果 IsPersistent(entity) → 跳过，保留
     │     └─ 否则 → 移除实体
-    │           ├─ 广播 EntityChangeEvent::Removed
-    │           ├─ 通知子场景模块 OnEntityRemoved()
     │           └─ SceneManager 内部：m_registry->DestroyEntity()
     │
     ├─ 重建 m_entities 列表（仅保留 persistent 实体）
     ├─ m_sceneName = "新场景"
-    ├─ m_state = Active
-    │
-    ├─ 通知子场景模块 NotifyModulesPostLoad()
-    └─ 广播 SceneLifecycleEvent(Unloading → Active)
+    └─ m_state = Active
 ```
 
 ### 2.5 待处理队列（ProcessPendingChanges）
@@ -414,13 +351,19 @@ PrepareSceneSwitch("新场景", Immediate)
         ├─ 对每个 Remove：调用 RemoveEntity
         └─ 队列清空
 
-**为什么是 ProcessPendingChanges 而非直接回调**：
+**待处理队列与事件分发的关系**：
+
+ProcessPendingChanges 只负责实体创建/销毁的异步操作调度（线程安全队列消费），
+实体变更后的通知（EntityChangeEvent、SceneLifecycleEvent）通过 MessageDispatcher 事件系统分发，
+由 FrameDriver 在统一的事件处理阶段派发到各消费者（RenderScene、Outliner 等）。
+
+**为什么走 ProcessPendingChanges + MessageDispatcher 而非直接回调**：
 
 | 方式 | 问题 |
 |:-----|:------|
 | 直接在后台线程回调中 AddEntity | 后台线程 ≠ 主线程，ECS Registry 非线程安全 |
-| 在回调中 PostEvent 事件驱动 | 事件传递延迟不可控，可能跨帧；且 ECS 组件的增删改频率高，事件驱动开销大 |
-| **ProcessPendingChanges 统一消费** | 主线程同一位置、同一帧内批量处理，延迟确定，实体变更与 ECS System 执行之间无竞态 |
+| 在回调中直接 ECS 操作 | 没有生命周期控制，无法确保 RegisterEntity 配对 |
+| **ProcessPendingChanges 统一消费 + 事件事后分发** | 主线程同一位置批量处理，延迟确定；实体变更通过 MessageDispatcher 解耦，不增加 SceneManager 的耦合度 |
 
 ---
 
@@ -441,7 +384,7 @@ PrepareSceneSwitch("新场景", Immediate)
     ├─ SceneManager::GetComponent<T>(handle)      ← 受控的组件访问
     └─ ❌ 不能直接访问 ECS::Registry
     
-内部 System / 子场景模块
+内部 System
     │
     └─ SceneManager::GetRegistryForInternalUse()  ← 完整 enTT 能力
          ├─ auto view = reg->view<Transform, Mesh>();
@@ -453,14 +396,14 @@ PrepareSceneSwitch("新场景", Immediate)
 
 | 动机 | 说明 |
 |:-----|:------|
-| **生命周期强制** | 实体创建/销毁是唯一入口，Retain/Release、子场景通知强制执行，不会遗漏 |
+| **生命周期强制** | 实体创建/销毁是唯一入口，Retain/Release 强制执行，不会遗漏 |
 | **ECS 可替换** | 可以从 enTT 迁移到自定义实体存储，不影响上层代码 |
 | **接口稳定** | 上层代码只依赖 `SceneManager`，不依赖 enTT 的类型系统 |
 | **跨平台/跨架构** | 未来需要网络同步、回放、确定性模拟时，可在 SceneManager 层统一拦截 |
 
 #### 内部 System 不受影响
 
-内部 System 和子场景模块通过 `GetRegistryForInternalUse()` 获得完整的 ECS 能力：
+内部 System 通过 `GetRegistryForInternalUse()` 获得完整的 ECS 能力：
 
 ```cpp
 // 内部 System（如 AnimationAdvancer），通过 SceneManager 传入 Registry
@@ -478,93 +421,108 @@ void AnimationAdvancer::Update(ECS::Registry* reg) {
 
 ---
 
-## 3. 子场景模块体系
+## 3. RenderScene 渲染上下文容器
 
 ### 3.1 设计动机
 
-场景数据按领域拆分，每个子模块管理场景在该领域的表现，避免 SceneManager 变成一个巨大的上帝类。
+`RenderScene` 不是"子场景模块"，也不是通过 `ISceneModule` 接口注册的。它是 `SceneManager` 的**直接成员**，作用是将渲染相关的管理器引用和共享基础设施指针聚合到一个上下文中，避免各消费者各自持有分散的指针。
+
+```
+RenderScene = 渲染上下文 Scope
+
+本质：
+  RenderScene 是管理器的引用聚合层，不是管理层
+  各管理器保持单例不变（LightManager、ReflectionProbeManager 等）
+  RenderScene 只负责将它们聚合到一个渲染上下文中
+```
+
+**关键原则：**
+
+| 原则 | 说明 |
+|:-----|:------|
+| **管理器保持单例** | LightManager、ReflectionProbeManager 等仍是全局单例，不按场景实例化 |
+| **RenderScene 是引用聚合** | 持有管理器单例的引用（非 ownership），场景切换时驱动差异化更新（Clear + Rebuild） |
+| **共享基础设施下沉** | 描述符堆集合、设备上下文等频繁传递的指针由 RenderScene 统一持有，消费者不再各自保存 |
+| **场景切换 = 差异化更新** | 切换时调用 `LightManager::Clear()` 清除旧场景数据，新场景加载后增量注册 |
 
 ```
 SceneManager
     │
-    ├── RenderScene
-    │     ├── 渲染代理（RenderProxy）列表
-    │     ├── 光照探针引用
-    │     ├── 可见性信息
-    │     └── 不负责渲染 Pass（渲染 Pass 由 Renderer 负责）
-    │
-    ├── PhysicsScene
-    │     ├── 碰撞体列表
-    │     ├── 物理材质
-    │     ├── 关节约束
-    │     └── 不负责物理模拟（PhysicsEngine 负责）
-    │
-    ├── AudioScene
-    │     ├── 音频发射器列表
-    │     ├── 声学区域
-    │     ├── 混响设置
-    │     └── 不负责音频播放（AudioEngine 负责）
-    │
-    └── NavMeshScene（后续）
-          ├── 寻路网格
-          ├── 阻挡区域
-          └── 不负责寻路计算（Pathfinding 负责）
+    └── RenderScene（渲染上下文 Scope）
+          ├── LightManager*              ← 引用单例，非 ownership
+          ├── ReflectionProbeManager*    ← 同上
+          ├── AmbientOcclusionManager*   ← 同上
+          ├── DescriptorHeaps*           ← 共享基础设施指针
+          ├── DeviceContext*             ← 同上
+          └── 不负责渲染 Pass（渲染 Pass 由 Renderer 负责）
 ```
 
-### 3.2 子模块职责边界
+### 3.2 容器模式：创建与访问
 
-| 子模块 | 管理的数据 | 不做什么 |
-|:-------|:-----------|:---------|
-| **RenderScene** | 渲染代理、光照探针索引、可见性集合 | 不管理渲染 Pass、不管理 PSO、不管理描述符堆 |
-| **PhysicsScene** | 碰撞体形状、物理材质、关节 | 不运行物理模拟（那是 PhysicsEngine 的迭代职责） |
-| **AudioScene** | 音频发射器位置、声学区域、混响参数 | 不播放音频（那是 AudioEngine 的职责） |
-| **NavMeshScene** | 导航网格、动态阻挡区域 | 不运行寻路算法 |
-
-### 3.3 同步更新机制
-
-子模块通过 ISceneModule 接口接收同步通知，而非事件驱动：
+RenderScene 由 `SceneManager::Initialize()` 内部创建为直接成员，无需各端手动注册。消费者通过 `GetRenderScene()` 获取 Scope：
 
 ```cpp
-// RenderScene 示例
-// 注意：ISceneModule 接口使用 uint64_t 作为实体句柄，
-// 内部实现中可以转换为 entt::entity 使用 ECS 能力
-class RenderScene : public ISceneModule {
-    void OnEntityAdded(uint64_t entity) override {
-        auto e = static_cast<entt::entity>(entity);
-        // 检查实体是否有 MeshComponent
-        if (auto* mesh = m_registry->TryGet<MeshComponent>(e)) {
-            // 创建渲染代理
-            RenderProxy proxy;
-            proxy.meshHandle = mesh->geometryHandle;
-            proxy.materialHandle = mesh->materialHandle;
-            proxy.transform = m_registry->Get<TransformComponent>(e).worldMatrix;
-            m_proxies.push_back(proxy);
-        }
-        // 检查实体是否有 LightComponent
-        if (auto* light = m_registry->TryGet<LightComponent>(e)) {
-            m_lights.push_back(light->GetLightData());
-        }
-    }
-    
-    void OnEntityRemoved(uint64_t entity) override {
-        // 移除对应的渲染代理
-        auto it = std::remove_if(m_proxies.begin(), m_proxies.end(),
-            [entity](const RenderProxy& p) { return p.entity == entity; });
-        m_proxies.erase(it, m_proxies.end());
-    }
-};
+// SceneManager::Initialize() 内部自动创建
+// Bootstrap::CreateContext() 中配置指针
+auto *rs = m_sceneManager.GetRenderScene();
+rs->SetLightManager(&LightManager::GetInstance());
+rs->SetDescriptorHeaps(context->DescriptorHeaps);
+rs->SetDeviceContext(context->DeviceContext);
+
+// 消费方通过 SceneManager 获取 Scope
+auto *rs = sceneMgr->GetRenderScene();
+rs->GetLightManager()->UpdateAndUpload(fence, camera);
+rs->GetDescriptorHeaps()->Allocate(...);
 ```
 
-### 3.4 为什么不走事件驱动
+**与直接使用单例相比，这种模式的好处：**
 
-| 考量 | 事件驱动 | 同步广播 |
-|:-----|:---------|:---------|
-| 延迟 | 当前帧或下一帧才消费 | 同一帧立即生效 |
-| 开销 | 入队/出队/调度 | 直接函数调用 |
-| 代码复杂度 | 需要事件类型定义 + 事件注册 | 接口虚函数 |
-| 适用场景 | 低频、跨线程、松耦合 | 高频、同线程、紧耦合 |
+| 对比 | 直接 `LightManager::GetInstance()` | 通过 RenderScene 访问 |
+|:-----|:-----------------------------------|:----------------------|
+| 依赖可见性 | 全局可见，任何地方都能调用 | 限制在场景上下文内 |
+| 基础设施传递 | 每个消费者各自保存 DescriptorHeaps 指针 | RenderScene 统一持有，一处注入 |
+| 场景切换 | 手动调用 Clear() | RenderScene 通过事件监听驱动 |
+| 测试性 | 难以替换 | 可注入 Mock 管理器 |
 
-**结论**：实体/组件的增删改频率高（Transform 每帧可能变几千次），适合同步广播。异步资源加载完成后的事件（如 `GeneratorTaskCompleteEvent`）走事件驱动。
+### 3.3 事件驱动的通知机制
+
+实体变更和场景生命周期通知不再走同步回调（ISceneModule），而是通过 `MessageDispatcher` 事件系统异步分发：
+
+```
+SceneManager 实体变更或场景切换
+    │
+    ├─ SceneManager 完成实体创建/移除/场景切换
+    ├─ 通过 MessageDispatcher PostEvent 分发事件
+    │     ├─ EntityChangeEvent（实体添加/移除/变更）
+    │     └─ SceneLifecycleEvent（场景切换开始/完成）
+    │
+    ▼
+FrameDriver 统一事件处理阶段
+    │
+    ├─ 按注册顺序依次派发事件
+    │     ├─ RenderScene::OnEntityAdded   → 创建渲染代理
+    │     ├─ RenderScene::OnScenePreUnload → LightManager::Clear()
+    │     ├─ Outliner::OnEntityChange      → 更新 UI 列表
+    │     └─ ...
+    │
+    └─ 所有消费者在同一帧内收到通知，状态一致
+```
+
+**为什么用事件代替 ISceneModule 同步回调：**
+
+| 考量 | ISceneModule 同步回调 | MessageDispatcher 事件 |
+|:-----|:----------------------|:----------------------|
+| **耦合度** | SceneManager 持有 m_modules 列表，直接调用虚函数 | SceneManager 只 PostEvent，不知道谁在消费 |
+| **线程安全** | 回调在调用者线程执行，必须确保主线程调用 | 事件入队，主线程统一消费，天然安全 |
+| **机制重复** | SceneManager 自建一套回调体系，与 MessageDispatcher 并存 | 复用已有事件系统，无重复 |
+| **帧控制** | 回调随时触发，FrameDriver 无法控制 | 事件在 FrameDriver 调度的时间点处理，确定性强 |
+| **适用场景** | 实体增删改都是低频操作（场景加载/卸载/编辑器编辑），高频操作走 System | 与实际需求一致 |
+
+**核心观察**：实体/组件的增删改是低频操作（场景加载时触发、编辑器编辑时触发），真正高频的 Transform 变化由 ECS System 处理，不经过事件系统。因此事件驱动的延迟完全可以接受，且带来了更好的解耦和线程安全特性。
+
+---
+
+## 4. GameSceneManager — Game 端特化
 
 ---
 
@@ -781,17 +739,22 @@ EditorSceneManager::MergeScene("另一个场景.json", MergeMode::KeepExisting)
 | 现有组件 | 当前角色 | 迁移后的角色 | 变更 |
 |:---------|:---------|:-------------|:-----|
 | **SceneConstructor** | 场景加载 + ECS 构造 | 场景文件的加载器（一种加载器） | 职责收窄：只负责文件解析→依赖加载→ECS 构造，不再管理场景生命周期 |
-| **EditorScene** | 包装 SceneConstructor | 废弃，由 EditorSceneManager 替代 | 完全替换，旧文件待删除 |
-| **EditorSceneManager** | 继承 SceneManager | 组合包装 SceneManager* | 取消继承，改为包装；移除 LoadDefaultScene/LoadSceneFile，不再负责加载编排 |
+| **EditorScene** | 包装 SceneConstructor | 废弃，由 EditorSceneManager 替代 | 完全替换，旧文件已删除 |
+| **EditorSceneManager** | 继承 SceneManager | 组合包装 SceneManager* | 取消继承，改为包装；移除 LoadDefaultScene/LoadSceneFile，不再负责加载编排；新增 SetupDefaultCamera() |
 | **GameSceneManager** | 不存在 | 组合包装 SceneManager*（新建） | 与 EditorSceneManager 同模式，提供 RegisterSceneConstructSystem/LoadSceneAsync |
 | **GameWorld** | 直接持有 SceneConstructor + Registry | 通过 GameSceneManager 访问场景 | 移除 m_sceneConstructor/m_asyncLoadDelay/m_asyncScenePath；m_registry 来自 GameSceneManager::GetRegistry() |
 | **SceneConstructSystem** | 响应事件构造 ECS 实体 | 保留，但改为调用 SceneManager::CreateEntity + RegisterEntity | 逻辑不变，落点从直接 m_registry 改为 SceneManager 的受控流程 |
 | **AssetBrowser** | 仅文件浏览 | 场景加载编排者 | 新增 LoadSceneDescription()，持有 SceneConstructor 生命周期 |
 | **SharedDataStore** | 中转 SceneConstructData | 保留，但数据生命周期缩短 | 构造完成后不再保留，转入 SceneManager 的 EntityDesc 列表 |
 | **ECS::Registry** | 实体存储，外部直接访问 | SceneManager 内部私有成员，不对外暴露 | 外部通过 SceneManager 的 EntityHandle API 操作实体；内部 System 通过 `GetRegistryForInternalUse()` 访问完整 ECS 能力 |
-| **LightManager** | 管理光源 | 接入 RenderScene 子模块 | LightManager 的数据迁移到 RenderScene，或 LightManager 作为 RenderScene 的内部组件 |
-| **GameContext** | 依赖注入容器，持有所有子系统指针 | 保留，但部分字段被高级抽象替代 | `Registry` 指针移除（归 SceneManager）；`FrameDriver`、`BackgroundExecutor` 等字段保留，但随 SceneManager 成熟逐步被其接口替代 |
-| **SchedulerContext** | 线程局部上下文，持有 Registry + DeviceContext 等 | 废弃 | 实际无人使用（`CameraManager` 唯一的调用是绕路拿 deltaTime，可通过 `GameContext` 直接访问），随 SceneManager 落地后移除 |
+| **LightManager** | 全局单例，管理光源 | 保持单例，通过 RenderScene 上下文访问 | RenderScene 持有引用，场景切换时驱动 Clear()；消费者改为 `sceneMgr->GetRenderScene()->GetLightManager()` |
+| **ReflectionProbeManager** | 全局单例 | 保持单例，通过 RenderScene 上下文访问 | 同 LightManager 模式 |
+| **AmbientOcclusionManager** | 全局单例 | 保持单例，通过 RenderScene 上下文访问 | 同 LightManager 模式 |
+| **CameraManager** | Bootstrap 初始化 | 各端自行初始化（Editor/Game 各自管理） | 已移出 Bootstrap；Editor 端通过 EditorSceneManager::SetupDefaultCamera() 初始化 |
+| **SchedulerContext** | 线程局部上下文 | 废弃 | 已移除（`GetSchedulerContext` 等全部删除，CameraManager 改直接访问 GameContext） |
+| **DescriptorHeaps** | 基础设施，各消费者各自持有指针 | RenderScene 统一持有，一处注入 | RenderScene 持有 DescriptorHeaps*，消费者通过 RenderScene 获取 |
+| **GameContext** | 依赖注入容器，持有所有子系统指针 | 保留，但部分字段被高级抽象替代 | `Registry` 指针移除（归 SceneManager）；`CameraMgr` 不再由 Bootstrap 初始化；`FrameDriver`、`BackgroundExecutor` 等字段保留 |
+| **ISceneModule / IListener** | 同步虚函数回调 + 广播监听 | 废弃，由 MessageDispatcher 事件替代 | 实体变更/场景生命周期通知通过 MessageDispatcher 异步分发，不再维护 SceneManager 内部的 m_modules/m_listeners 列表 |
 
 ### 6.2 与 SceneConstructor 的协作关系
 
@@ -808,10 +771,15 @@ SceneConstructor（场景文件加载器）
     └─ 路径 B（SceneManager 接入后）：PostEvent(GeneratorTaskCompleteEvent) 
           → SceneConstructSystem 
           → EditorSceneManager::CreateEntity + RegisterEntity  ← 统一入口
-          → SceneManager 内部追加到扁平实体列表 + 通知子场景模块
+          → SceneManager 内部追加到扁平实体列表
 ```
 
 ### 6.3 资源生命周期管理
+
+> ⚠️ **当前设计决策**：编辑器端场景切换不再触发 GPU 资源释放。
+> 资源释放仅在场景 Tab 关闭时执行（见 §10.3）。
+> 以下 `PrepareSceneSwitch` 的资源释放流程保留为 Game 端参考，
+> Editor 端改用 Tab 关闭时的统一释放路径。
 
 场景切换时的 GPU 资源释放，由 SceneManager 驱动：
 
@@ -822,7 +790,7 @@ SceneManager::PrepareSceneSwitch("新场景", Immediate)
     │     ├─ 收集实体引用的 GeometryHandle / MaterialHandle / TextureHandle
     │     └─ 记录到一个资源释放列表
     │
-    ├─ 移除实体（ECS Destroy + 子场景通知）
+    ├─ 移除实体（ECS Destroy）
     │
     ├─ 请求 GpuResourceManager::Release 释放 GPU 资源（延迟到 GPU 空闲）
     └─ 请求 GeometryResourceManager::Release 释放槽位
@@ -956,7 +924,7 @@ class ILoader {
 | EntityDesc 是否在运行时保留 | 仅 ECS 组件 vs 保留 EntityDesc | **Editor 端保留，Game 端不保留** | Editor 需要导出 JSON，Game 端不需要序列化元数据 |
 | 实体父子层级归属 | 核心 SceneManager vs 编辑器端 | **编辑器端 EditorStateFile** | 场景文件是扁平格式，父子层级只在编辑时构建，存储在 EditorStateFile 缓存中；Game 端不需要 |
 | 场景切换策略 | 全量清除 vs 差异化更新 | **两者都支持** | `RemoveAll` + `PersistEntity` 可组合出全量/增量/叠加 |
-| 子场景模块注册时机 | 编译期 vs 运行期 | **运行期 RegisterModule** | Game 和 Editor 注册不同的子场景模块组合 |
+| 子场景模块通知机制 | 同步回调（ISceneModule）vs 事件驱动（MessageDispatcher） | **MessageDispatcher 事件驱动** | 实体增删改是低频操作，事件驱动足够；解耦、线程安全、复用已有事件系统，减少 SceneManager 耦合度 |
 | **EditorSceneManager 设计模式** | 继承 SceneManager vs 组合包装 | **组合包装 SceneManager*** | 基类设计不是为派生而生的；组合模式不违反 LSP；编辑器功能是横向扩展而非纵向特化 |
 | **GameSceneManager 设计模式** | 继承 SceneManager vs 组合包装 | **组合包装 SceneManager***（同 Editor） | 与 Editor 一致，统一模式 |
 | **场景加载职责归属** | SceneManager 负责 vs AssetBrowser 编排 | **AssetBrowser 编排** | 加载是业务流程，不是管理能力；SceneManager 只负责实体生命周期 |
@@ -971,11 +939,457 @@ class ILoader {
 | **P0 ✅** | 实现 `SceneManager` 基类核心接口（实体管理、生命周期、环境状态） | P0 文档 |
 | **P0 ✅** | 实现 `EditorSceneManager` 组合包装（替代 `EditorScene`，支持导出） | P0 |
 | **P0 ✅** | 实现 `GameSceneManager` 组合包装（场景加载、系统注册） | P0 |
-| **P1** | 实现 `RenderScene` 子模块（迁移 LightManager 的渲染代理数据） | P0 |
-| **P1** | 场景加载职责分离：AssetBrowser 编排，EditorSceneManager 仅管理 | P0 |
-| **P1** | 系统执行恢复：TaskGraphBuilder 中系统执行为空 lambda，需 SceneManager 重新调度 | P0 |
-| **P2** | 场景切换的资源释放（GPU 资源回收） | P1 |
+| **P0 ✅** | 实现 `RenderScene` 渲染上下文容器（聚合管理器引用 + 共享基础设施指针） | P0 |
+| **P0 ✅** | 场景加载职责分离：AssetBrowser 编排，EditorSceneManager 仅管理 | P0 |
+| **P0 ✅** | 移除 ISceneModule/IListener，改为 MessageDispatcher 事件驱动 | P0 |
+| **P1** | 场景切换的资源释放（GPU 资源回收） | P0 |
 | **P2** | 实现 Undo/Redo 系统 | P1 EditorSceneManager |
 | **P3** | 流式加载（StreamingLoader） | P2 GameSceneManager |
 | **P3** | 多场景 Tab 编辑 | P2 EditorSceneManager |
-| **P4** | `PhysicsScene` / `AudioScene` / `NavMeshScene` 子模块 | P1 子模块体系稳定 |
+| **P4** | 物理/音频/寻路等按需扩展（通过 MessageDispatcher 事件接入，非 ISceneModule） | P1 事件体系稳定 |
+
+---
+
+## 10. 编辑器多 Tab 场景架构
+
+### 10.1 设计原则
+
+多 Tab 架构遵循以下原则：
+
+| 原则 | 说明 |
+|:-----|:------|
+| **单一 ECS Registry** | 所有场景共享同一个 ECS Registry，切换场景时清除旧实体、加载新实体，而非多 Registry 并存 |
+| **数据驱动切换** | 切换不修改各管理器（LightManager 等），只替换 ECS 数据，管理器通过 EntityChangeEvent 自然响应 |
+| **ECS 数据与编辑器状态分离** | 场景 JSON（扁平，为 Game 设计）与 EditorStateFile（层级，为编辑器友好设计）通过 persistentId 关联 |
+| **Tab 关闭时释放资源** | 关闭 Tab 时释放 GPU 资源引用并写入磁盘，切换 Tab 时只操作内存 |
+
+### 10.2 Tab 管理
+
+#### 10.2.1 SceneTab 结构
+
+`SceneTab` 是轻量追踪结构，不持有独立的 ECS Registry：
+
+```cpp
+struct SceneTab {
+    std::string name;               // 场景显示名称
+    std::filesystem::path filePath; // 场景文件路径
+    bool dirty = false;             // 是否有未保存修改
+};
+```
+
+#### 10.2.2 初始状态与默认场景
+
+编辑器启动时 **不创建默认场景 Tab**，Viewport 初始为空，提示用户打开或创建场景。
+
+```
+编辑器启动时：
+  m_openTabs = []                          ← 空，无任何 Tab
+  Viewport 显示空白或提示"打开场景文件"
+
+双击 forest.json 后：
+  m_openTabs = [
+    { name: "ForestScene", filePath: "Content/Scenes/forest.json", sceneId: 1 }
+  ]
+  m_activeTabIndex = 0
+
+双击 desert.json 后：
+  m_openTabs = [
+    { name: "ForestScene", ... },
+    { name: "DesertScene", filePath: "Content/Scenes/desert.json", sceneId: 2 }
+  ]
+  m_activeTabIndex = 1
+
+关闭最后一个 Tab 后：
+  m_openTabs = []                          ← 回到空状态
+  Viewport 显示空白
+```
+
+**关键行为**：
+- 无隐式 Tab，所有 Tab 都对应真实场景文件
+- `m_openTabs` 允许为空，`DrawTabBar` 在空时不渲染
+- 关闭最后一个 Tab 时清除实体，回到空状态
+- 启动时 Editor 负责显示提示（"打开场景文件"或"新建场景"）
+
+#### 10.2.3 ImGui Tab 栏渲染
+
+Tab 栏采用**与视口并列**的布局，非嵌入视口内部。TabBar 渲染为独立薄条，紧贴视口窗口上方，类似于 VS2022 的 dock tab 风格：
+
+```
+Dock 区域布局（垂直方向）：
+  ┌─────────────────────────────────────┐
+  │ [ForestScene] [DesertScene]  [×]    │ ← TabBar 薄条（独立窗口，不占视口空间）
+  ├─────────────────────────────────────┤
+  │                                     │
+  │         视口渲染图像                 │ ← Viewport 窗口，完整渲染区域
+  │                                     │
+  │         网格比例尺滑条               │
+  └─────────────────────────────────────┘
+```
+
+**实现方式**：
+
+- TabBar 是一个独立窗口，通过 `EditorLayout` 的 `SetViewportTabBarCallback` 注册
+- 渲染位置在 `EditorLayout::DrawViewport()` 与 `DrawDockSpace()` 之间
+- 使用 `ImGui::BeginTabBar`/`BeginTabItem` 渲染，不包含内容区，仅显示 Tab 标签
+- 视口窗口不包含 TabBar，渲染区域最大化
+
+**无 Tab 时（默认场景）**：TabBar 窗口不渲染，视口完整显示。
+
+### 10.3 场景切换流程
+
+#### 首次加载（双击场景文件）
+
+```
+AssetBrowser::OnFileDoubleClick("forest.json")
+  │
+  ├─ m_onSwitchScene → SwitchScene("forest", "Content/Scenes/forest.json")
+  │     ├─ 保存当前编辑器状态（相机、层级、选中）
+  │     ├─ 创建新 Tab（分配 sceneId）
+  │     └─ 更新 m_activeScenePath
+  │
+  └─ LoadSceneFromFile("forest.json")
+        └─ SceneLoader::LoadFromFile 解析 JSON
+        └─ m_sceneCtor.LoadScene(desc, ...)  ← 异步加载
+              │
+              ▼
+        OnSceneConstructReady(sceneData)
+              ├─ 捕获 m_sceneSwitchId（检测过期回调）
+              ├─ 创建实体 + 添加 SceneTagComponent(sceneId)
+              ├─ 缓存到 m_tabEntities / m_tabEntityDescs
+              ├─ 检查 m_sceneSwitchId 是否变化
+              │     ├─ 变化 → 丢弃实体（过期回调）
+              │     └─ 未变 → 继续
+              └─ 恢复编辑器状态
+```
+
+#### Tab 切换（点击已有 Tab）
+
+```
+Tab 点击 → DrawTabBar → m_pendingSwitchTab = i
+  │
+  ▼
+ProcessPendingTabSwitch()  ← FrameDriver::Tick() 后执行
+  │
+  ├─ 保存当前编辑器状态（相机、层级、选中）
+  ├─ 更新 m_activeTabIndex（不清除实体，SceneTagComponent 过滤由 Builder 负责）
+  └─ 恢复编辑器状态
+```
+
+- 实体已在 Registry 中，不需要重新加载
+- Builder 每帧通过 `SetEntityFilter` 按 `activeSceneId` 过滤
+- Outliner 通过 `GetActiveEntities()` 获取活跃 Tab 的实体列表
+
+### 10.4 关闭 Tab
+
+```
+CloseTab(index)
+  │
+  ├─ 如果关闭的是当前活跃 Tab 且存在其他 Tab
+  │     ├─ 保存当前编辑器状态
+  │     └─ 更新 m_activeTabIndex 到上一个 Tab（不清除实体）
+  │
+  ├─ 从 m_openTabs 移除
+  ├─ 清理该 Tab 的缓存数据（m_tabEntities, m_tabEntityDescs, ...）
+  │
+  └─ 如果是最后一个 Tab
+        ├─ RemoveAllEntities()  ← 清除所有实体
+        ├─ 清空 m_activeScenePath
+        └─ Viewport 显示提示 "Open a scene file to start editing"
+```
+
+关闭 Tab 时，GPU 资源引用计数通过 `GpuResourceManager::Update()` 在 fence 回调中自然递减，不需要显式释放。
+
+### 10.5 异步加载竞态保护
+
+使用场景切换序列号 `m_sceneSwitchId` 检测过期回调：
+
+```
+SwitchScene → m_sceneSwitchId++
+
+OnSceneConstructReady:
+  captureSwitchId = m_sceneSwitchId    ← 捕获当前值
+  // ...创建实体...
+  if (m_sceneSwitchId != captureSwitchId) {
+    // 用户已切换到另一个场景，丢弃本次结果
+    RemoveAllEntities()
+    return
+  }
+```
+
+### 10.6 与 EditorStateFile 的关系
+
+每个场景的编辑器状态（相机、层级、选中）存储在独立文件中：
+
+```
+Content/Cache/Editor/
+  ├─ forest.scene.json         ← 相机 + hierarchy + selection
+  ├─ desert.scene.json
+  └─ ...
+
+场景 JSON（扁平，Game 端使用）：
+  Content/Scenes/forest.scene.json
+  Content/Scenes/desert.scene.json
+```
+
+两者通过场景文件名关联，各自独立存储，互不包含。
+
+### 10.7 文件位置
+
+```
+<ProjectRoot>/Content/Cache/Editor/     ← 编辑器缓存
+  ├─ forest.scene.json                  ← 场景编辑器状态
+  ├─ desert.scene.json
+  ├─ ...
+  └─ （thumbnails.thumb 在 Content/Cache/Thumbnails/ 下）
+```
+
+---
+
+## 11. SceneManager 职责边界
+
+> 2026-07-23 补充：明确 SceneManager 与非场景实体的关系，以及组件值修改的归属。
+
+### 11.1 ECS Registry 是唯一的数据容器
+
+**ECS Registry 是全局数据容器，不是 SceneManager 的私有财产。** 任何模块都可以创建/销毁实体和组件：
+
+```
+ECS Registry（全局数据容器）
+  │
+  ├─ SceneManager —— 场景实体
+  │     ├─ LoadScene / SaveScene（场景文件 ↔ ECS 的序列化桥梁）
+  │     ├─ CreateEntity / RemoveEntity（增删）
+  │     ├─ GetEntity / QueryEntities（查）
+  │     └─ ❌ 不负责组件值的修改（改）
+  │
+  ├─ PreviewSystem —— 预览实体
+  │     ├─ 资产预览（Mesh、Material 缩略图）
+  │     └─ 这些实体不在任何场景中
+  │
+  ├─ DebugSystem —— 调试实体
+  │     ├─ 调试球体、射线、碰撞体可视化
+  │     └─ 运行时创建，不持久化
+  │
+  └─ 运行时系统（未来）
+        ├─ 角色、动画、弹道、血量等游戏逻辑实体
+        └─ 由 Gameplay 系统创建，不经过 SceneManager
+```
+
+### 11.2 SceneManager 的职责
+
+| 职责 | 说明 |
+|:-----|:------|
+| **场景文件 ↔ ECS 的序列化桥梁** | LoadScene 加载 JSON → 创建实体；SaveScene 读取实体 → 写入 JSON |
+| **场景实体 CRUD** | CreateEntity / RemoveEntity / GetEntity / QueryEntities |
+| **场景生命周期管理** | 加载、卸载、切换、叠加场景 |
+| **环境状态管理** | 天空盒、光照、水面等环境参数 |
+| **场景实体集合维护** | 标记哪些实体属于哪个场景（通过 SceneTagComponent） |
+
+### 11.3 SceneManager 不负责的
+
+| 不属于 SceneManager 的职责 | 归属 |
+|:---------------------------|:------|
+| **组件值的修改** | 各 System 自行负责（GizmoSystem 改 Transform、AnimationSystem 改骨骼） |
+| **选中实体** | SelectionService（独立） |
+| **组件属性编辑** | ComponentEditorRegistry（注册制） |
+| **非场景实体的创建/销毁** | 预览系统、调试系统、运行时游戏系统 |
+| **输入路由** | InputSystem + 各 System 的输入回调 |
+
+### 11.4 组件值修改的归属
+
+```
+组件值修改 ── 谁触发、谁负责，不经过 SceneManager
+  │
+  ├─ GizmoSystem
+  │     └─ 拖拽 Gizmo → 直接写 TransformComponent.position
+  │
+  ├─ ComponentEditorRegistry（属性卡）
+  │     └─ 用户在属性卡中修改 → 直接写对应组件字段
+  │
+  ├─ AnimationSystem
+  │     └─ 每帧更新骨骼矩阵 → 直接写 SkinnedComponent
+  │
+  ├─ PhysicsSystem
+  │     └─ 物理模拟 → 直接写 TransformComponent.position
+  │
+  └─ ... 其他系统
+```
+
+SceneManager 只负责**增删查**，**改**由各系统自行负责。这使得 SceneManager 保持薄层，不成为所有修改的瓶颈。
+
+### 11.5 选中实体与 SceneManager 的解耦
+
+**选中实体不依赖 SceneManager。** 无论实体来自场景、预览系统还是调试系统，都可以被选中：
+
+```
+EditorSelection（独立服务）
+  ├─ SetSelectedEntity(entity) → 广播 OnSelectionChanged
+  ├─ GetSelectedEntity() → Entity
+  └─ 不关心实体来自哪个场景/系统
+
+OutlinerPanel → 点击 → SetSelectedEntity
+Viewport → 射线检测 → SetSelectedEntity
+Properties → 监听 OnSelectionChanged → 读取组件 → 绘制
+Viewport Gizmo → 监听 OnSelectionChanged → 更新 Gizmo 目标
+```
+
+### 11.6 设计原则
+
+1. **ECS Registry 是唯一的全局数据容器**，不是 SceneManager 的私有财产
+2. **SceneManager 是场景实体的权威管理者**，但不是所有实体的唯一源头
+3. **组件值的修改归属各 System**，SceneManager 只做 CRUD 中的 C、R、D（创建、读取、删除），不做 U（更新）
+4. **选中实体是全局状态**，独立为 SelectionService，不依赖 SceneManager
+5. **场景实体通过 SceneTagComponent 标记**，SceneManager 维护实体 ↔ 场景的映射关系
+
+---
+
+## 12. World 提取与 SceneManager 降级
+
+> 2026-07-23 补充：World 作为 ECS 绝对源头从 SceneManager 中提取，SceneManager 降级为场景序列化器 + 环境状态容器。
+
+### 12.1 动机
+
+当前 `SceneManager` 职责过重：它既是 ECS 实体管理容器，又是场景文件加载器，又被 Editor 和 Game 各自特化。但 `ECS::Registry` 作为全局数据容器并不属于 `SceneManager`——预览系统、调试系统都在往 Registry 里写实体，`SceneManager` 没有能力也不应该管理它们。
+
+**核心问题：SceneManager 混淆了"场景管理"和"ECS 容器"两个角色。**
+
+### 12.2 新架构：World + SceneManager 分离
+
+```
+World（ECS 绝对源头，Engine Core）      SceneManager（场景序列化器，Engine Core）
+  ├─ 持有 ECS::Registry                    ├─ 持有 World* 引用
+  ├─ CreateEntity / DestroyEntity          ├─ LoadScene(path) → world.CreateEntity()
+  ├─ 所有实体必须属于这个 World             ├─ SaveScene(path) → 查询 → 写入
+  ├─ World 本身不分区                       ├─ 环境状态：Skybox/Environment
+  └─ 不感知任何逻辑分组                     ├─ 场景生命周期：切换/卸载/叠加
+                                           └─ 不再持有 Registry
+
+  Editor 端特化：
+    EditorSceneManager（逻辑分区 + 多 Tab 管理）
+      ├─ 继承/包装 SceneManager
+      ├─ 通过 SceneTagComponent 查询场景实体集合
+      ├─ 多 Tab 管理（多个场景文件同时打开）
+      ├─ SceneSnapshot 快照
+      └─ ApplyTabState 恢复全局管理器状态
+
+  Game 端特化：
+    GameSceneManager（关卡加载/切换）
+      ├─ 包装 SceneManager
+      ├─ 单场景加载/卸载
+      ├─ 关卡切换过渡
+      └─ 不需要 SceneTagComponent（所有实体都是游戏内容）
+```
+
+### 12.3 角色对比
+
+| 角色 | 类 | 归属 | 数据持有 | 序列化 | 逻辑分区 |
+|:-----|:---|:------|:---------|:-------|:---------|
+| **ECS 源头** | `World` | Engine Core | `ECS::Registry` | ❌ | ❌ 不感知 |
+| **场景序列化器** | `SceneManager` | Engine Core | `World*`、环境状态 | ✅ JSON ↔ ECS | ❌ 不感知 |
+| **编辑器场景管理器** | `EditorSceneManager` | Editor | `SceneManager*`、`SceneSnapshot` | ✅ 委托给 SceneManager | ✅ SceneTagComponent |
+| **游戏场景管理器** | `GameSceneManager` | Game | `SceneManager*` | ❌ 委托给 SceneManager | ❌ 不需要 |
+| **预览管理器** | `PreviewManager` | Editor | `World*` | ❌ | ✅ PreviewTag（Editor 端） |
+| **调试管理器** | `DebugManager` | Editor | `World*` | ❌ | ✅ DebugTag（Editor 端） |
+
+### 12.4 SceneManager 的降级
+
+#### 保留的职责（Engine Core）
+
+| 职责 | 说明 |
+|:-----|:------|
+| **场景序列化** | LoadScene 从 JSON 创建实体到 World；SaveScene 从 World 查询实体写入 JSON |
+| **环境状态管理** | 天空盒、环境光、光照等场景级参数 |
+| **场景生命周期** | 加载、卸载、切换、叠加场景 |
+
+#### Editor 端特化职责（EditorSceneManager）
+
+| 职责 | 说明 |
+|:-----|:------|
+| **逻辑分区** | 通过 SceneTagComponent 查询当前场景的实体集合 |
+| **多 Tab 管理** | 多个场景文件同时打开，Tab 切换切换 sceneId 查询条件 |
+| **异步加载竞态保护** | 场景切换序列号检测过期回调 |
+| **SceneSnapshot 快照** | per-tab 完整状态聚合，Tab 切换时恢复 |
+| **ApplyTabState** | 切换 Tab 时 Clear + Rebuild 全局管理器状态 |
+
+#### 移除的职责
+
+| 职责 | 迁往 | 说明 |
+|:-----|:------|:------|
+| **持有 ECS::Registry** | → `World` | World 成为 Registry 的唯一所有者 |
+| **实体生命周期管理** | → `World` | CreateEntity/DestroyEntity 委托给 World |
+| **实体注册** | 废弃 | World 创建即管理，不再需要 RegisterEntity 步骤 |
+| **实体清单维护** | 废弃 | 按 SceneTagComponent 动态查询（Editor 端），不再维护扁平列表 |
+| **实体持久化** | 废弃 | PersistEntity/DontDestroyOnLoad 机制已移除，Editor 端用 SceneTagComponent 替代 |
+| **待处理队列** | 废弃 | ProcessPendingChanges 骨架已移除，异步加载通过 BackgroundExecutor 回调直接完成 |
+| **预移除回调** | 废弃 | RegisterEntityPreRemoveCallback 已移除，GPU 资源释放由 EditorSceneManager 的 CloseTab 流程处理 |
+
+### 12.5 最终 SceneManager 接口
+
+```cpp
+// 当前 SceneManager（清理后）：
+class SceneManager {
+    World* m_world;                               // 引用 World，非拥有
+    // 不再持有 Registry
+    // 不再持有实体清单
+    // 不再持有持久化集合
+
+    // 初始化/销毁
+    void Initialize(World* world);
+    void Shutdown();
+
+    // 委托给 World
+    uint64_t CreateEntity() { return m_world->CreateEntity(); }
+    void RemoveEntity(uint64_t entity) { m_world->DestroyEntity(static_cast<Entity>(entity)); }
+    void RemoveAllEntities() { m_world->RemoveAllEntities(); }
+
+    // 环境状态
+    void SetSkybox(const Resource::SkyboxDesc& skybox);
+    void SetEnvironment(const Resource::EnvironmentDesc& env);
+
+    // 场景生命周期
+    void PrepareSceneSwitch(const std::string& newSceneName, SceneTransition transition);
+
+    // 子场景模块
+    RenderScene* GetRenderScene();
+    ECS::Registry* GetRegistry() { return m_world->GetRegistry(); }
+};
+```
+
+### 12.6 逻辑分区：Editor 端特化
+
+逻辑分区不再属于引擎 CORE 的 SceneManager，而是 Editor 端 EditorSceneManager 的特化行为：
+
+```
+// Editor 端——通过 SceneTagComponent 查询"场景实体"的视角
+EditorSceneManager::GetSceneEntities(sceneId)
+    └─ world->GetRegistry()->view<SceneTagComponent>()
+          └─ filter: tag.sceneId == sceneId
+          └─ 返回当前场景的实体列表
+
+// 引擎 CORE——SceneManager 不感知 SceneTagComponent
+// SceneManager 只做 LoadScene/SaveScene 的序列化工作
+```
+
+### 12.7 与现有设计的关系
+
+| 现有组件 | 迁移前 | 迁移后 |
+|:---------|:-------|:-------|
+| **SceneManager** | 持有 Registry，管理实体生命周期 | 持有 World*，序列化器 + 解释器 |
+| **World** | 不存在 | 新增，ECS 绝对源头 |
+| **GameWorld** | 直接持有 Registry 指针 | 通过 World 访问 Registry |
+| **EditorSceneManager** | 包装 SceneManager* | 包装 SceneManager*（接口不变，内部重定向） |
+| **PreviewSystem** | 通过 SceneManager 的 Registry 创建实体 | 直接通过 World 创建实体 |
+| **SceneTagComponent** | SceneManager 维护 | 保留，SceneManager 通过 Tag 查询逻辑分区 |
+
+### 12.8 迁移路径
+
+| 步骤 | 内容 | 影响 |
+|:----:|:-----|:------|
+| 1 | 从 Engine Core 中提取 `World` 类，持有 `ECS::Registry` | 新增，不破坏现有代码 |
+| 2 | `SceneManager` 移除 `m_registry`，改为持有 `World*` | SceneManager 内部重构 |
+| 3 | `SceneManager::CreateEntity`/`RemoveEntity` 委托给 `World` | 接口兼容，内部重定向 |
+| 4 | `Bootstrap` 创建 `World` 实例，传给 `SceneManager` | Bootstrap 装配顺序调整 |
+| 5 | 逐步替换 `SceneManager::GetRegistry()` 调用为 `World::GetRegistry()` | 各调用点替换 |
+| 6 | Editor 端各 Manager 通过 TagComponent 提供逻辑分区视角 | 渐进式 |
+
+> 详细设计见 `Docs/architecture/World.md`。
