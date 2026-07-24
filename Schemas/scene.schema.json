@@ -1,6 +1,6 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "https://dx12engine.dev/schemas/scene.schema.json",
+    "$id": "https://raw.githubusercontent.com/Gunxzq/DX12_Base/Refactor/Schemas/scene.schema.json",
     "title": "Scene File",
     "description": "场景文件格式定义。场景由环境参数 + 依赖声明 + 实体列表组成，实体的类型由其组件组合决定。",
     "type": "object",

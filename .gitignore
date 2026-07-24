@@ -45,3 +45,6 @@ logs/
 
 # --- 生成资产 (Generated Assets) ---
 Content/
+
+# 但场景 JSON 文件需要被 Git 追踪
+!Content/Scenes/*.scene.json
