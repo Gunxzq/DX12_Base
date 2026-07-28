@@ -186,7 +186,7 @@ void DebugUIManager::MergeIconFont(const std::string &ttfPath) {
     ImFontConfig iconConfig;
     iconConfig.MergeMode = true;
     iconConfig.GlyphMinAdvanceX = 15.0f;
-    static const ImWchar iconRanges[] = {0xeb91, 0xec17, 0};
+    static const ImWchar iconRanges[] = {0xe600, 0xec17, 0};
 
     ImFont *iconFont = io.Fonts->AddFontFromFileTTF(ttfPath.c_str(), 15.0f, &iconConfig, iconRanges);
     if (iconFont) {

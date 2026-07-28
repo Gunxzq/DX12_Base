@@ -85,7 +85,8 @@ public:
 
     // ── 分区管理 ──
     void AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE heapType, PartitionType partition, uint32_t baseOffset, uint32_t size,
-                      HeapTag tag = HeapTag::Default);
+                      HeapTag tag = HeapTag::Default,
+                      Resource::DescriptorSlotFlags slotFlags = static_cast<Resource::DescriptorSlotFlags>(0));
     D3D12_GPU_DESCRIPTOR_HANDLE GetPartitionGpuHandle(PartitionType partition, uint32_t index,
                                                       HeapTag tag = HeapTag::Default) const;
     D3D12_CPU_DESCRIPTOR_HANDLE GetPartitionCpuHandle(PartitionType partition, uint32_t index,

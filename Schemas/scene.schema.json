@@ -25,7 +25,7 @@
             }
         },
         "environment": {
-            "description": "世界级环境参数",
+            "description": "世界级环境参数（旧格式，推荐使用 sceneEnvironment）",
             "type": "object",
             "properties": {
                 "ambientLight": {
@@ -36,6 +36,25 @@
                     "description": "环境光颜色 [r, g, b, a]"
                 },
                 "directionalLight": { "$ref": "#/definitions/LightComponent" }
+            }
+        },
+        "sceneEnvironment": {
+            "description": "管理器全局场景数据（环境光、天空盒等），不进入 ECS Registry",
+            "type": "object",
+            "properties": {
+                "ambient": {
+                    "type": "object",
+                    "properties": {
+                        "ambientLight": {
+                            "type": "array",
+                            "items": { "type": "number" },
+                            "minItems": 4,
+                            "maxItems": 4,
+                            "description": "环境光颜色 [r, g, b, a]"
+                        }
+                    }
+                },
+                "skybox": { "$ref": "#/definitions/SkyboxDesc" }
             }
         },
         "dependencies": {
@@ -75,6 +94,12 @@
             "required": ["components"],
             "properties": {
                 "name": { "type": "string", "description": "实体名称（调试用）" },
+                "persistentId": { "type": "integer", "minimum": 1, "description": "持久化 ID，单调递增，作为跨实体引用的唯一标识" },
+                "relationships": {
+                    "type": "array",
+                    "items": { "$ref": "#/definitions/Relationship" },
+                    "description": "实体关系列表（扁平 JSON 的 ID 引用，不嵌套）"
+                },
                 "components": {
                     "type": "object",
                     "properties": {
@@ -241,10 +266,33 @@
         "CameraComponent": {
             "type": "object",
             "properties": {
-                "fov": { "type": "number", "minimum": 1, "maximum": 179, "default": 60 },
+                "fov": { "type": "number", "minimum": 1, "maximum": 179, "default": 60, "description": "视野角度（度），仅 Perspective 投影时使用" },
+                "orthoSize": { "type": "number", "minimum": 0.1, "default": 10.0, "description": "正交视口高度，仅 Orthographic 投影时使用" },
                 "nearPlane": { "type": "number", "minimum": 0.01, "default": 0.1 },
                 "farPlane": { "type": "number", "minimum": 0.1, "default": 1000.0 },
+                "projection": { "type": "string", "enum": ["perspective", "orthographic"], "default": "perspective" },
                 "isMain": { "type": "boolean", "default": false }
+            }
+        },
+
+        "Relationship": {
+            "type": "object",
+            "required": ["kind", "targetId"],
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": ["parent", "socket", "group", "follow"],
+                    "description": "关系类型：parent=变换父级, socket=骨骼挂点, group=逻辑分组, follow=跟随目标"
+                },
+                "targetId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "目标实体的 persistentId"
+                },
+                "socketName": {
+                    "type": "string",
+                    "description": "骨骼挂点名称（如 hand_r, head, neck），仅 kind=socket 时使用"
+                }
             }
         },
 
@@ -272,6 +320,63 @@
             "properties": {
                 "range": { "type": "number", "default": 50.0 },
                 "resolution": { "type": "integer", "default": 256 }
+            }
+        },
+
+        "SkyboxDesc": {
+            "description": "天空盒配置。geometry 支持两种形式：string（引用 dependencies.meshes 中的 key，旧格式）或 object（程序化生成，推荐）",
+            "type": "object",
+            "properties": {
+                "texture": {
+                    "type": "string",
+                    "description": "引用 dependencies.textures 中的 key"
+                },
+                "geometry": {
+                    "description": "几何体：\"mesh_key\"（文件引用）或 {\"type\": \"cube\" / \"sphere\", ...}（程序化生成）",
+                    "oneOf": [
+                        { "type": "string" },
+                        { "$ref": "#/definitions/ProceduralGeometryDesc" }
+                    ]
+                },
+                "color": {
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "default": [1, 1, 1, 1],
+                    "description": "兜底颜色（纹理加载失败时使用）"
+                }
+            }
+        },
+
+        "ProceduralGeometryDesc": {
+            "description": "程序化几何体参数。type='cube' 时忽略其余字段；type='sphere' 时使用 radius/rings/segments",
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["cube", "sphere"],
+                    "description": "几何体类型"
+                },
+                "radius": {
+                    "type": "number",
+                    "default": 1.0,
+                    "minimum": 0.1,
+                    "description": "球体半径（仅 sphere 类型使用）"
+                },
+                "rings": {
+                    "type": "integer",
+                    "default": 16,
+                    "minimum": 3,
+                    "description": "球体环数（仅 sphere 类型使用）"
+                },
+                "segments": {
+                    "type": "integer",
+                    "default": 16,
+                    "minimum": 3,
+                    "description": "球体分段数（仅 sphere 类型使用）"
+                }
             }
         },
 

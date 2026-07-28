@@ -1,4 +1,5 @@
 #include "DescriptorSlotAllocator.h"
+#include "Logger/Logger.h"
 #include <algorithm>
 #include <cassert>
 
@@ -58,8 +59,14 @@ void DescriptorSlotAllocator::Reserve(uint32_t targetCapacity) {
     if (targetCapacity <= m_capacity)
         return;
 
-    // 扩展容量
-    Expand(targetCapacity);
+    // 初始容量填充（不检查 EnableExpand — 这是初始化路径，不是运行时扩容）
+    if (!HasFlag(m_config.flags, DescriptorSlotFlags::LinearAlloc)) {
+        for (uint32_t i = m_capacity; i < targetCapacity; ++i) {
+            m_freeIndices.push_back(i);
+        }
+    }
+
+    m_capacity = targetCapacity;
 }
 
 /**

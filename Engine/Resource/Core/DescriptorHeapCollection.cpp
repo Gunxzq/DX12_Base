@@ -149,7 +149,8 @@ DescriptorHeapCollection::TagHeap *DescriptorHeapCollection::FindTagHeap(HeapTag
 // 分区管理
 // ========================================================================
 void DescriptorHeapCollection::AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE heapType, PartitionType partition,
-                                            uint32_t baseOffset, uint32_t size, HeapTag tag) {
+                                            uint32_t baseOffset, uint32_t size, HeapTag tag,
+                                            Resource::DescriptorSlotFlags slotFlags) {
     auto &tagHeap = GetOrCreateTagHeap(tag);
     auto it = tagHeap.heaps.find(heapType);
     if (it == tagHeap.heaps.end()) {
@@ -183,7 +184,7 @@ void DescriptorHeapCollection::AddPartition(D3D12_DESCRIPTOR_HEAP_TYPE heapType,
     DescriptorSlotAllocatorConfig allocatorConfig;
     allocatorConfig.initialCapacity = size;
     allocatorConfig.maxCapacity = size;
-    allocatorConfig.flags = DescriptorSlotFlags::LinearAlloc | DescriptorSlotFlags::EnableExpand;
+    allocatorConfig.flags = slotFlags;
 
     auto allocator = std::make_unique<DescriptorSlotAllocator>();
     allocator->Initialize(allocatorConfig);
@@ -263,6 +264,7 @@ uint32_t DescriptorHeapCollection::Allocate(HeapTag tag, PartitionType partition
     auto it = tagHeap.partitions.find(partition);
     if (it != tagHeap.partitions.end())
         return it->second.allocator->Allocate();
+
     // Fallback: 未创建分区的类型直接分配在物理堆上
     auto hit = tagHeap.heaps.find(PartitionToD3D12Type(partition));
     if (hit == tagHeap.heaps.end())

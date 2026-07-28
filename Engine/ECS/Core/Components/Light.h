@@ -10,7 +10,7 @@ struct LightComponent {
     DirectX::XMFLOAT4 strength = {1.0f, 1.0f, 1.0f, 1.0f};
     float range = 10.0f;
     float falloffStart = 1.0f;
-    float falloffEnd = 10.0f;
+    float falloffEnd = 30.0f;
     float spotPower = 8.0f;
     float castShadow = 1.0f;
     float shadowBias = 0.005f;
