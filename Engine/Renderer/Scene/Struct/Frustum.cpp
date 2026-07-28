@@ -148,7 +148,7 @@ void Frustum::ComputePlanesFromCorners() {
     //
     // 平面方程: N·P + d = 0，正半空间（N·P + d > 0）为内部。
 
-    auto load = [](const XMFLOAT3& f) { return XMLoadFloat3(&f); };
+    auto load = [](const XMFLOAT3 &f) { return XMLoadFloat3(&f); };
 
     // 视锥体中心点（用于判断法线方向）
     XMVECTOR nearC = load(m_nearCenter);
@@ -169,40 +169,28 @@ void Frustum::ComputePlanesFromCorners() {
     };
 
     // 左平面
-    m_planes[PLANE_LEFT] = buildPlane(
-        load(m_corners[CORNER_NEAR_BL]),
-        load(m_corners[CORNER_FAR_BL]),
-        load(m_corners[CORNER_NEAR_TL]));
+    m_planes[PLANE_LEFT] =
+        buildPlane(load(m_corners[CORNER_NEAR_BL]), load(m_corners[CORNER_FAR_BL]), load(m_corners[CORNER_NEAR_TL]));
 
     // 右平面
-    m_planes[PLANE_RIGHT] = buildPlane(
-        load(m_corners[CORNER_NEAR_BR]),
-        load(m_corners[CORNER_NEAR_TR]),
-        load(m_corners[CORNER_FAR_BR]));
+    m_planes[PLANE_RIGHT] =
+        buildPlane(load(m_corners[CORNER_NEAR_BR]), load(m_corners[CORNER_NEAR_TR]), load(m_corners[CORNER_FAR_BR]));
 
     // 下平面
-    m_planes[PLANE_BOTTOM] = buildPlane(
-        load(m_corners[CORNER_NEAR_BL]),
-        load(m_corners[CORNER_NEAR_BR]),
-        load(m_corners[CORNER_FAR_BL]));
+    m_planes[PLANE_BOTTOM] =
+        buildPlane(load(m_corners[CORNER_NEAR_BL]), load(m_corners[CORNER_NEAR_BR]), load(m_corners[CORNER_FAR_BL]));
 
     // 上平面
-    m_planes[PLANE_TOP] = buildPlane(
-        load(m_corners[CORNER_NEAR_TL]),
-        load(m_corners[CORNER_FAR_TL]),
-        load(m_corners[CORNER_NEAR_TR]));
+    m_planes[PLANE_TOP] =
+        buildPlane(load(m_corners[CORNER_NEAR_TL]), load(m_corners[CORNER_FAR_TL]), load(m_corners[CORNER_NEAR_TR]));
 
     // 近平面
-    m_planes[PLANE_NEAR] = buildPlane(
-        load(m_corners[CORNER_NEAR_BL]),
-        load(m_corners[CORNER_NEAR_BR]),
-        load(m_corners[CORNER_NEAR_TL]));
+    m_planes[PLANE_NEAR] =
+        buildPlane(load(m_corners[CORNER_NEAR_BL]), load(m_corners[CORNER_NEAR_BR]), load(m_corners[CORNER_NEAR_TL]));
 
     // 远平面
-    m_planes[PLANE_FAR] = buildPlane(
-        load(m_corners[CORNER_FAR_BL]),
-        load(m_corners[CORNER_FAR_TL]),
-        load(m_corners[CORNER_FAR_BR]));
+    m_planes[PLANE_FAR] =
+        buildPlane(load(m_corners[CORNER_FAR_BL]), load(m_corners[CORNER_FAR_TL]), load(m_corners[CORNER_FAR_BR]));
 
     NormalizePlanes();
 }
@@ -245,6 +233,42 @@ void Frustum::GetSectionSize(float distanceFromCamera, float &outWidth, float &o
     // 非调试模式下无法获取参数，返回默认值
     outWidth = 0.0f;
     outHeight = 0.0f;
+}
+
+// ========================================================================
+// AABB 相交测试
+// ========================================================================
+
+bool Frustum::Intersects(const Math::BoundingAABB &aabb) const {
+    using namespace DirectX;
+
+    // 提取 AABB 的 8 个角点
+    XMFLOAT3 corners[8];
+    corners[0] = {aabb.min.x, aabb.min.y, aabb.min.z};
+    corners[1] = {aabb.min.x, aabb.min.y, aabb.max.z};
+    corners[2] = {aabb.min.x, aabb.max.y, aabb.min.z};
+    corners[3] = {aabb.min.x, aabb.max.y, aabb.max.z};
+    corners[4] = {aabb.max.x, aabb.min.y, aabb.min.z};
+    corners[5] = {aabb.max.x, aabb.min.y, aabb.max.z};
+    corners[6] = {aabb.max.x, aabb.max.y, aabb.min.z};
+    corners[7] = {aabb.max.x, aabb.max.y, aabb.max.z};
+
+    for (const auto &plane : m_planes) {
+        XMVECTOR planeNormal = XMVectorSet(XMVectorGetX(plane), XMVectorGetY(plane), XMVectorGetZ(plane), 0.0f);
+        float planeD = XMVectorGetW(plane);
+
+        // p-vertex: AABB 在平面法线方向上最远的角点
+        int px = (XMVectorGetX(planeNormal) >= 0.0f) ? 1 : 0;
+        int py = (XMVectorGetY(planeNormal) >= 0.0f) ? 1 : 0;
+        int pz = (XMVectorGetZ(planeNormal) >= 0.0f) ? 1 : 0;
+        int pIdx = px * 4 + py * 2 + pz;
+
+        XMVECTOR pVertex = XMLoadFloat3(&corners[pIdx]);
+        float dot = XMVectorGetX(XMVector3Dot(pVertex, planeNormal));
+        if (dot + planeD < 0.0f)
+            return false;
+    }
+    return true;
 }
 
 } // namespace DX12Engine::Renderer

@@ -27,6 +27,9 @@ public:
                                 const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc = nullptr);
     void Free(RenderTargetHandle handle, uint64_t fenceValue);
 
+    // 释放指定句柄的描述符槽位（不释放 D3D 资源），用于 resize 时立即回收槽位避免泄漏
+    void FreeSlots(RenderTargetHandle handle);
+
     ID3D12Resource *GetResource(RenderTargetHandle handle) const;
     D3D12_CPU_DESCRIPTOR_HANDLE GetRtvHandle(RenderTargetHandle handle) const;
     D3D12_CPU_DESCRIPTOR_HANDLE GetSrvHandle(RenderTargetHandle handle) const;
@@ -64,6 +67,9 @@ private:
     uint32_t CreateNewEntry(const RenderTargetDesc &desc, HeapTag tag, const D3D12_RENDER_TARGET_VIEW_DESC *rtvDesc);
     bool IsDescMatch(const RenderTargetDesc &a, const RenderTargetDesc &b) const;
 
+    /// 淘汰最久未使用的空闲条目，释放其描述符槽位和 D3D 资源
+    void EvictLRU();
+
     ID3D12Device *m_device = nullptr;
     DescriptorHeapCollection *m_descriptorHeaps = nullptr;
 
@@ -71,6 +77,7 @@ private:
     std::vector<PendingFree> m_pendingFree;
     uint32_t m_allocatedCount = 0;
     uint32_t m_nextGeneration = 1;
+    uint64_t m_frameCounter = 0; // 帧计数器，用于 LRU 淘汰判断
     bool m_initialized = false;
 };
 

@@ -82,7 +82,7 @@ bool RenderTargetPool::IsDescMatch(const RenderTargetDesc &a, const RenderTarget
 uint32_t RenderTargetPool::FindMatchingEntry(const RenderTargetDesc &desc) {
     for (uint32_t i = 0; i < m_pool.size(); ++i) {
         auto &entry = m_pool[i];
-        if (!entry.inUse && entry.resource != nullptr && IsDescMatch(entry.desc, desc)) {
+        if (!entry.inUse && entry.resource != nullptr && entry.rtvSlot != UINT32_MAX && IsDescMatch(entry.desc, desc)) {
             return i;
         }
     }
@@ -176,11 +176,19 @@ RenderTargetHandle RenderTargetPool::Allocate(const RenderTargetDesc &desc, Heap
         return {};
     }
 
+    ++m_frameCounter;
+
     uint32_t poolIndex = FindMatchingEntry(desc);
+    bool reused = (poolIndex != UINT32_MAX);
     if (poolIndex == UINT32_MAX) {
         poolIndex = CreateNewEntry(desc, tag, rtvDesc);
         if (poolIndex == UINT32_MAX) {
-            return {};
+            // RTV 槽位不足：尝试淘汰 LRU 条目后重试
+            EvictLRU();
+            poolIndex = CreateNewEntry(desc, tag, rtvDesc);
+            if (poolIndex == UINT32_MAX) {
+                return {};
+            }
         }
     }
 
@@ -192,6 +200,7 @@ RenderTargetHandle RenderTargetPool::Allocate(const RenderTargetDesc &desc, Heap
     handle.poolIndex = poolIndex;
     handle.generation = entry.generation;
     handle.rtvSlot = entry.rtvSlot;
+
     return handle;
 }
 
@@ -227,6 +236,70 @@ void RenderTargetPool::Free(RenderTargetHandle handle, uint64_t fenceValue) {
     pending.generation = entry.generation;
     pending.fenceValue = fenceValue;
     m_pendingFree.push_back(pending);
+}
+
+void RenderTargetPool::FreeSlots(RenderTargetHandle handle) {
+    if (!m_initialized || !handle.IsValid())
+        return;
+    if (handle.poolIndex >= m_pool.size())
+        return;
+
+    auto &entry = m_pool[handle.poolIndex];
+    if (entry.generation != handle.generation)
+        return;
+
+    // 释放 RTV 描述符槽位（仅释放槽，不释放 D3D 资源）
+    if (entry.rtvSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(entry.heapTag, PartitionType::Rtv, entry.rtvSlot, UINT64_MAX);
+        entry.rtvSlot = UINT32_MAX;
+    }
+    // 释放 SRV 描述符槽位
+    if (entry.srvSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(entry.heapTag, PartitionType::Buffer, entry.srvSlot, UINT64_MAX);
+        entry.srvSlot = UINT32_MAX;
+    }
+}
+
+// ========================================================================
+// LRU 淘汰：释放最久未使用的空闲条目
+// ========================================================================
+void RenderTargetPool::EvictLRU() {
+    uint32_t lruIndex = UINT32_MAX;
+    uint64_t oldest = UINT64_MAX;
+
+    // 扫描所有空闲条目，找 rtvSlot 有效的 least recently used
+    for (uint32_t i = 0; i < m_pool.size(); ++i) {
+        auto &entry = m_pool[i];
+        if (!entry.inUse && entry.rtvSlot != UINT32_MAX && entry.lastUsedFrame < oldest) {
+            oldest = entry.lastUsedFrame;
+            lruIndex = i;
+        }
+    }
+
+    if (lruIndex == UINT32_MAX)
+        return;
+
+    auto &entry = m_pool[lruIndex];
+
+    // 释放 RTV 槽位
+    if (entry.rtvSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(entry.heapTag, PartitionType::Rtv, entry.rtvSlot, 0);
+        entry.rtvSlot = UINT32_MAX;
+    }
+    // 释放 SRV 槽位
+    if (entry.srvSlot != UINT32_MAX && m_descriptorHeaps) {
+        m_descriptorHeaps->Free(entry.heapTag, PartitionType::Buffer, entry.srvSlot, 0);
+        entry.srvSlot = UINT32_MAX;
+    }
+    // 释放 D3D 资源
+    if (entry.resource) {
+        entry.resource->Release();
+        entry.resource = nullptr;
+    }
+    // 递增 generation，使任何持有旧 handle 的访问失效
+    entry.generation = m_nextGeneration++;
+
+    auto *logger = Logger::Logger::GetInstance();
 }
 
 /**
@@ -269,7 +342,10 @@ D3D12_CPU_DESCRIPTOR_HANDLE RenderTargetPool::GetRtvHandle(RenderTargetHandle ha
 
     const auto &entry = m_pool[handle.poolIndex];
     if (entry.generation != handle.generation) {
-        return {};
+        // generation 只有 8 位位域，mask 后比较
+        if ((entry.generation & 0xFF) != handle.generation) {
+            return {};
+        }
     }
 
     return m_descriptorHeaps->GetCpuHandle(PartitionType::Rtv, entry.rtvSlot, entry.heapTag);

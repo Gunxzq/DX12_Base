@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Common/d3dUtil.h"
+#include "Math/BoundingVolume.h"
 #include <array>
 
 namespace DX12Engine::Renderer {
@@ -30,6 +31,9 @@ public:
     DirectX::XMFLOAT3 GetCenterLine() const;
 
     void GetSectionSize(float distanceFromCamera, float &outWidth, float &outHeight) const;
+
+    /// 测试 AABB 是否与视锥体相交（视锥体包含或部分包含 AABB）
+    bool Intersects(const Math::BoundingAABB &aabb) const;
 
     // ===== 调试/序列化 =====
 
