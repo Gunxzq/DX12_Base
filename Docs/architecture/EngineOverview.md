@@ -465,3 +465,158 @@ SceneManager（不再管理 ECS，只做场景序列化 + 环境状态管理）�
 5. **World 和 SceneManager 是组合关系**，SceneManager 持有 World* 引用
 
 > 详细设计见 `Docs/architecture/World.md`。
+
+---
+
+## 九、ECS 统一数据源与 Manager 的分工
+
+> 2026-07-27 补充：ECS 是运行时唯一数据源，Manager 降级为 GPU 打包器。
+
+### 9.1 问题
+
+当前部分 Manager（如 LightManager）持有私有数据源：
+
+```
+LightManager（当前）
+  ├─ m_lights[] ← 私有数组
+  ├─ 不与 ECS 打通
+  └─ 属性卡无法编辑、剔除系统无法感知
+```
+
+属性卡基于 ECS 驱动，Manager 的私有数据既不可编辑也无法参与剔除/射线检测。而渲染管线需要连续 GPU buffer，ECS 组件天然不满足这个需求——需要在 ECS 和 GPU 之间有一层打包转换。
+
+### 9.2 分层
+
+```
+ECS Registry（唯一运行时数据源）
+  ├─ LightComponent + TransformComponent  ← 定义"这里有灯光"
+  ├─ CameraComponent + TransformComponent ← 定义"这里有相机"
+  ├─ WaterComponent                        ← 定义"这里有水面"
+  └─ ... 其他场景实体数据
+        │
+        ▼ System 每帧读取
+Manager（聚合器 + GPU 打包器）
+  ├─ LightManager
+  │     ├─ 从 ECS View 收集可见光源
+  │     ├─ 打包为连续 GPU light buffer
+  │     └─ 管理 shadow map 数组
+  ├─ CameraManager
+  │     ├─ 从 isMain CameraComponent 读取参数
+  │     └─ 计算 view/proj 矩阵
+  └─ WaterManager
+        ├─ 从 WaterComponent 读取波浪参数
+        └─ 上传到 GPU CB
+```
+
+### 9.3 角色重定义
+
+| 角色 | 数据持有 | 职责 | 生命周期 |
+|:-----|:---------|:-----|:---------|
+| **ECS 组件** | 实体属性（位置、灯光参数） | 定义"有什么"，参与剔除/拾取/编辑 | 实体的增删改 |
+| **Manager** | 无私有数据源 | 读取 ECS → 聚合 → 打包 GPU buffer | 引擎启动到关闭 |
+| **System** | 不持有数据 | 在 ECS 和 Manager 之间做转换 | 每帧执行 |
+
+### 9.4 过渡
+
+当前 LightManager 持私有 `m_lights[]` 数组。过渡路径：
+
+```
+阶段一（现状）：SceneConstructor 同时写入 ECS + Manager
+阶段二（目标）：SceneConstructor 只写 ECS，LightManager::Update 从 ECS 读取打包
+```
+
+此过渡可以渐进完成，先验证 CameraComponent 模式（从 ECS 驱动 CameraManager），再将同样模式推广到 LightManager、WaterManager。
+
+#### 实施状态（2026-07-28）
+
+| Manager | 收集方法 | 状态 |
+|:--------|:---------|:------|
+| **CameraManager** | 从 `isMain` CameraComponent 读取参数 | ✅ 已有 |
+| **LightManager** | `CollectFromECS(registry)` 遍历 `LightComponent + TransformComponent` | ✅ 已实施 |
+| **WaterManager** | `CollectFromECS(registry)` 遍历 `WaterComponent`，提取波浪参数 | ✅ 已实施 |
+
+**调用时序**：
+
+```
+Immediate 回调每帧：
+  LightManager::CollectFromECS(registry)
+  WaterManager::CollectFromECS(registry)
+  ↓
+  LightManager::UpdateAndUpload(fence, camera)
+  WaterManager::UpdateAndUpload(fence)
+```
+
+**SceneConstructor** 变更：`LightComponent` 创建从 TODO 变为完整实现；`WaterComponent` 波浪参数直接写入 ECS，不再调用 `WaterManager::RegisterWaveParams`。
+
+### 9.5 判断准则
+
+新模块是否适合 ECS + Manager 模式：
+
+```
+需要做 ECS 组件？
+  ├─ 数据是否对应现实场景中的"物体"（灯、相机、水面）？ → 是 → ECS
+  └─ 数据是否单一全局参数（环境光强度、雾密度）？   → 可单例，可 ECS
+
+需要做 Manager？
+  ├─ 多个实体的数据需要聚合为连续 GPU buffer？ → 需要 → Manager
+  ├─ 数据管理 shadow map / 纹理数组等 GPU 资源？  → 需要 → Manager
+  └─ 仅简单的参数传递 → 不需要 Manager，System 直接上传
+```
+
+### 9.6 SceneEnvironment 语义边界
+
+> 2026-07-28 补充：`SceneEnvironment` 作为管理器特有全局数据与 ECS 实体数据的显式语义分隔。
+
+并非所有场景数据都能放入 ECS 实体。场景 JSON 中通过 `sceneEnvironment` 字段（参见 `SceneDescription.h`）明确区分两类数据：
+
+```
+SceneDescription
+  ├─ sceneEnvironment（管理器全局数据，不进入 ECS Registry）
+  │     ├─ ambient：环境光（→ LightManager::SetAmbientLight）
+  │     └─ skybox：天空盒（→ SkyboxManager::SetSkybox）
+  │     └─ (未来扩展：fog、postProcess、timeOfDay 等)
+  │
+  └─ entities（ECS 实体数据，写入 ECS Registry）
+        ├─ 有 TransformComponent → 场景中的"物体"
+        ├─ 参与剔除/拾取/编辑/序列化
+        └─ Manager 从 ECS view 收集 → 打包 GPU buffer
+```
+
+**分界线的判断规则**：
+
+| 条件 | 归属 | 示例 |
+|:-----|:-----|:------|
+| 有位置/变换，可独立编辑 | `entities[]` (ECS 组件) | 灯、相机、水面、网格物体 |
+| 无实体身份，全局参数 | `sceneEnvironment` | 环境光颜色、天空盒纹理、雾密度、后处理设置 |
+
+**典型不在 entities 中的数据**（Manager 特有，不参与剔除/拾取/编辑）：
+
+| 数据 | 管理方 | 理由 |
+|:-----|:-------|:------|
+| 环境光 (ambientLight) | LightManager | 全局光照参数，无位置 |
+| 天空盒 (texture/geometry/color) | SkyboxManager | 全局背景，无实体身份 |
+| 雾密度/颜色（未来） | FogManager | 全局视觉效果 |
+| 后处理（未来） | PostProcessManager | 全局画面调色 |
+
+**JSON 示例**：
+
+```json
+{
+  "version": 1,
+  "sceneEnvironment": {
+    "ambient": { "ambientLight": [0.25, 0.25, 0.35, 1.0] },
+    "skybox": { "texture": "sky_cubemap", "geometry": "skybox_mesh" }
+  },
+  "entities": [
+    { "name": "Sun", "components": { "transform": {...}, "light": {...} } },
+    { "name": "MainCamera", "components": { "transform": {...}, "camera": {...} } }
+  ]
+}
+```
+
+**设计要点**：
+
+1. **`sceneEnvironment` 中的数据不进入 ECS Registry**，直接由 SceneConstructor 传递给对应的 Manager
+2. **`entities` 中的数据全部写入 ECS**，Manager 通过 ECS view 按需读取收集
+3. `materials`（内联材质定义）和 `dependencies`（资产依赖）不属于任何一个分类——它们是场景序列化的辅助元数据，不直接对应运行时状态
+4. 此语义边界写入 `SceneDescription.h` 的结构体定义中，是 JSON 文件格式的一部分

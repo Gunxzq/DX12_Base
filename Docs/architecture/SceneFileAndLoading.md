@@ -10,7 +10,12 @@
 
 ## 1. 场景文件格式
 
-JSON 格式，编辑时嵌套存储（编辑器友好），加载时展平为扁平 ECS（运行时高效）。
+JSON 格式，扁平化存储，实体间的关系通过 ID 引用表达（`relationships` 数组），不嵌套、不递归。
+
+> **设计决策**：扁平 JSON + ID 引用 vs 嵌套树。
+> 选择扁平的理由：（1）解析线性 O(n)，可并行；（2）增量加载只需 append；（3）ECS 天然扁平，`RelationshipComponent` 直接映射 JSON 字段；
+> （4）关系只是数据，可以随意切断，不破坏文件结构。
+> 详见 `Docs/architecture/RelationshipModel.md`。
 
 ### 1.1 顶层结构
 
@@ -68,15 +73,85 @@ JSON 格式，编辑时嵌套存储（编辑器友好），加载时展平为扁
     "entities": [
         {
             "name": "Statue",
+            "persistentId": 1001,
             "components": {
                 "transform": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
                 "mesh": { "geometry": "statue", "material": "stone" }
+            }
+        },
+        {
+            "name": "MainCamera",
+            "persistentId": 1002,
+            "components": {
+                "transform": { "position": [0, 5, -10] },
+                "camera": { "fov": 60, "near": 0.1, "far": 1000, "projection": "perspective", "isMain": true }
             },
-            "children": [...]
+            "relationships": [
+                { "kind": "parent", "targetId": 1001 }
+            ]
         }
-    ]
+    ],
+    "hash": "a1b2c3d4e5f67890"
 }
 ```
+
+顶层可选字段说明：
+| 字段 | 类型 | 说明 |
+|:-----|:------|:------|
+| `version` | uint32 | 场景格式版本 |
+| `metadata` | object | 场景元数据（名称、描述） |
+| `baseURL` | string | 依赖路径前缀 |
+| `sceneEnvironment` | object | **管理器全局数据**（环境光、天空盒等，不进入 ECS Registry）。区别于 `entities`（ECS 实体数据），见下方 §1.1.1 |
+| `dependencies` | object | 外部资产依赖 |
+| `materials` | object | 内联材质定义 |
+| `entities` | array | **ECS 实体列表**（有 TransformComponent 的场景物体） |
+| `hash` | string | 场景内容 FNV-1a 64-bit 十六进制 hash（可选，由工具链填充） |
+
+#### 1.1.1 sceneEnvironment 字段结构
+
+`sceneEnvironment` 统一存放管理器专有、无实体身份的全局场景参数，**不进入 ECS Registry**。
+
+| 子字段 | 类型 | 对应 Manager | 说明 |
+|:-------|:------|:-------------|:------|
+| `ambient` | object | `LightManager` → `SetAmbientLight` | 环境光全局参数（当前仅 `ambientLight` 数组） |
+| `skybox` | object | `SkyboxManager` → `SetSkybox` | 天空盒配置（纹理、几何体、兜底颜色） |
+
+`skybox.geometry` 支持两种形式：
+
+**程序化生成（推荐）**——`geometry` 为 object，指定形状类型和参数：
+```json
+"skybox": {
+    "texture": "sky_cubemap",
+    "geometry": {
+        "type": "cube"
+    },
+    "color": [0.5, 0.6, 1.0, 1.0]
+}
+```
+
+球体带细分参数：
+```json
+"geometry": {
+    "type": "sphere",
+    "radius": 1.0,
+    "rings": 16,
+    "segments": 16
+}
+```
+
+**外部文件引用**——`geometry` 为 string，引用 `dependencies.meshes` 中的 key（向后兼容）：
+```json
+"geometry": "skybox_mesh",
+"dependencies": {
+    "meshes": {
+        "skybox_mesh": "Models/cube.dxmesh"
+    }
+}
+```
+
+程序化生成时由 `SceneConstructor` 在 `OnDependenciesLoaded` 阶段调用 `GeometryGenerator` 生成立方体或球体的 VB/IB，创建 DEFAULT 堆 GPU 缓冲并注册到 `GeometryResourceManager`，不依赖外部 mesh 文件。详见 `GeometryGenerator` 接口文档。
+
+> **设计原则**：`sceneEnvironment` 中的数据无 TransformComponent、不被剔除、不被拾取、不被属性卡编辑。它们由 Manager 直接在初始化阶段设置。`entities` 中的 ECS 实体数据则参与完整的剔除/拾取/编辑/序列化流程。详见 `Docs/architecture/EngineOverview.md §9.6`。
 
 ### 1.2 依赖收集
 
@@ -125,16 +200,67 @@ JSON 格式，编辑时嵌套存储（编辑器友好），加载时展平为扁
 
 `SceneLoader` 在解析阶段 resolve 为内联数据。运行时默认管线不依赖此路径。
 
-### 1.5 组件映射
+### 1.5 实体字段
+
+每个实体包含以下字段：
+
+| 字段 | 类型 | 必需 | 说明 |
+|:-----|:------|:------|:------|
+| `name` | string | ✅ | 实体名称（运行时同步到 `NameComponent`） |
+| `persistentId` | string | ✅ | 持久化 ID（fnv1a 64-bit 十六进制 hash 字符串），永不重复。作为场景 JSON 中跨实体引用的唯一标识 |
+| `components` | object | ✅ | ECS 组件数据（见 §1.6 组件映射） |
+| `relationships` | array | ❌ | 关系列表，每个元素 `{ kind, targetId, socketName? }`，`targetId` 为目标实体的 persistentId |
+| `children` | array | ❌ | **已废弃** — 扁平 JSON 不支持嵌套 children。旧文件中的 children 会在加载时展平并转换为 `relationships`（kind=parent） |
+
+### 1.6 组件映射
 
 每个 entity 的 `components` 节直接对应 ECS 组件：
 
-| JSON 字段 | ECS 组件 | 处理器 |
-|-----------|----------|--------|
-| `transform` | `TransformComponent` | SceneConstructSystem 构造时预计算世界矩阵 |
-| `mesh` | `MeshComponent` | 从 geoMap / matMap 查找 GPU handle |
-| `light` | `LightComponent` | 注册到 LightManager |
-| `camera` | `CameraComponent` | 注册到 CameraManager |
+> **层级说明**：以下 ECS 组件均为运行时场景实体数据（Scene/Entity Layer），不属于引擎 CORE 基础设施。引擎 CORE 只提供 `World`（ECS 源头）、`SceneManager`（序列化器）、`WindowFrameResources`（窗口尺寸 GPU 资源）等基础设施抽象。组件本身是纯数据结构，无行为、无生命周期。
+
+| JSON 字段 | ECS 组件 | 层 | 处理器 |
+|-----------|----------|:---|--------|
+| `transform` | `TransformComponent` | Scene Entity Data | SceneConstructSystem 构造时预计算世界矩阵 |
+| `mesh` | `MeshComponent` | Scene Entity Data | 从 geoMap / matMap 查找 GPU handle |
+| `light` | `LightComponent` | Scene Entity Data | 注册到 LightManager |
+| `camera` | `CameraComponent` | Scene Entity Data | 注册到 CameraManager |
+
+### 1.7 实体关系（Relationships）
+
+实体间的关系在 `relationships` 数组中表达，使用目标实体的 `persistentId`（fnv1a 64-bit hash 字符串）引用：
+
+```json
+"relationships": [
+    { "kind": "parent", "targetId": "a1b2c3d4e5f67890" },
+    { "kind": "socket", "targetId": "a1b2c3d4e5f67890", "socketName": "hand_r" }
+]
+```
+
+**导入流程**（SceneConstructor）：
+
+```
+第 1 遍：遍历所有实体 → registry->create() → 建 hash→entt::entity 映射
+第 2 遍：遍历 relationships → 用映射表将 targetId 解析为 entt::entity handle
+运行时：RelationshipComponent.targetEntity 直接存储 entt::entity（O(1) 访问）
+```
+
+**导出流程**（Editor 端 ExportToDescription）：
+
+```
+从 SceneSnapshot::entityDescs 缓存读取 persistentId
+→ 直接写入 JSON 的 targetId 字段
+→ 不需要从 ECS 反查
+```
+
+**设计要点**：
+
+- **关系是数据，不是树** — 引擎 CORE 只负责存储 `RelationshipComponent { targetId, kind }`，不解释、不维护树结构、不做级联删除
+- **关系可切断** — Gameplay 脚本随时可以删除 `RelationshipComponent`，切断后实体自然独立
+- **骨架层级不是场景关系** — 基于骨骼的角色是单一 ECS 实体，骨骼树属于动画系统，不在关系模型中
+- **引擎 CORE 不自动传播 Transform** — 相机跟随、武器挂点同步等行为由 Gameplay 层脚本实现
+- **Editor 端的联动**（拖动父带动子）由 Editor 端自行实现，不在 CORE 中
+
+详见 `Docs/architecture/RelationshipModel.md`。
 
 ---
 
@@ -362,3 +488,50 @@ CreateHeap + CreatePlacedResource（单一大堆，零碎片）
 ### 7.4 当前阶段
 
 当前仍处于编辑器/调试阶段，精细化模式是合理的。场景大堆作为发布版优化，在场景管理器实现后再考虑。
+
+---
+
+## 8. 编辑器序列化（ExportToDescription）已知缺口
+
+编辑器的 `ExportToDescription()` 从 ECS 运行时状态重建 `SceneDescription`，用于 JSON 文件保存。以下字段在当前实现中**尚未导出**或**依赖缓存**：
+
+| 组件/字段 | 状态 | 原因 | 后续支持 |
+|:----------|:-----|:------|:---------|
+| **SkinnedComponent** | ❌ 未导出 | ECS 中无反向映射（skeleton/animationClip key 未缓存） | 在 `m_entityDescs` 缓存中增加 `skinned` 字段 |
+| **CameraComponent** | ✅ 已修复 | ECS `CameraComponent` 已创建，`SceneConstructor::ConstructEntity` 已实现，`ExportToDescription` 已支持直接读取 ECS 组件 | — |
+| **BillboardComponent** | ⚠️ 依赖缓存 | 从 `m_entityDescs` 中读取缓存的 key；新创建（未缓存）的 billboard 实体丢失 | 无缓存的实体 fallback 读取 ECS 组件原始参数 |
+| **TerrainComponent** | ⚠️ 依赖缓存 | 同 billboard，key 从缓存读取 | 同上 |
+| **Material extraParams** | ⚠️ 数据丢失 | `MaterialDesc::to_json` 不写入 `"extra"` 字段，但 `from_json` 可以读取 | `to_json` 补充 `extra` 序列化 |
+| **Material hash** | ✅ 已修复 | `SaveToFile` 自动从 JSON 内容计算 FNV-1a 64-bit hash 并写入 `"hash"` 字段 | — |
+| **Children 层级** | ✅ 已修复 | `ExportToDescription` 通过 `collectChildren` 递归遍历并匹配子实体名称重建层级 | — |
+| **Light color alpha** | ✅ 已修复 | LightDesc::color 改为 4 分量 `{x, y, z, 1.0f}` | — |
+| **$schema 字段** | ✅ 已修复 | `SaveToJSON` 写入 `"$schema": "https://dx12engine.dev/schemas/scene.schema.json"` | — |
+| **JSON 键顺序** | ✅ 已修复 | `SaveToJSON` 改用 `nlohmann::ordered_json`，按 schema 字段顺序排列 | — |
+| **依赖路径** | ✅ 已修复 | 从 `m_originalDependencies` 读取原始相对路径，不再写入空字符串 | — |
+| **内联材质** | ✅ 已修复 | 从 `m_originalMaterials` 还原材质定义 | — |
+| **baseURL** | ✅ 已修复 | 从 `m_originalBaseURL` 还原 | — |
+
+### 8.1 序列化数据流（当前状态）
+
+```
+ECS 运行时实体
+  ↓ ExportToDescription()
+SceneDescription（含 m_originalDependencies/materials/baseURL）
+  ↓ SaveToJSON() → ordered_json
+JSON 文件（$schema + 键顺序 + hash）
+```
+
+### 8.2 写入字段覆盖（按 schema 定义顺序）
+
+| 字段 | to_json 写入 | 说明 |
+|:-----|:-----------|:-----|
+| `$schema` | ✅ 写入 | `"https://dx12engine.dev/schemas/scene.schema.json"` |
+| `version` | ✅ 始终写入 | |
+| `baseURL` | ✅ 非空时写入 | |
+| `metadata` | ✅ 非空时写入 | |
+| `environment` | ✅ 始终写入 | |
+| `skybox` | ✅ 存在时写入 | C++ 字段，schema 可选，当前编辑器支持 |
+| `dependencies` | ✅ 非空时写入 | |
+| `materials` | ✅ 非空时写入 | |
+| `entities` | ✅ 始终写入 | |
+| `hash` | ✅ 自动计算写入 | SaveToFile 中计算 FNV-1a 64-bit |

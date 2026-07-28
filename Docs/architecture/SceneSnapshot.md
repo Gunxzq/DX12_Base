@@ -74,7 +74,42 @@ EditorSceneManager（内存 per-tab 缓存） ← 运行时数据
   └─ WaterManager（单例）
 ```
 
-### 2.2 问题清单
+### 2.2 快照 vs 运行时数据源（关键设计原则）
+
+**快照不是运行时数据源。运行时唯一的数据源是 ECS Registry。**
+
+```
+正确的关系：
+
+场景加载（一次性的）：
+  JSON → SceneConstructor → ECS Registry（运行时数据源）
+                               ↓
+                          快照（持久化缓存，用于 Tab 切换重建）
+
+运行时（每帧）：
+  ECS Registry（唯一数据源） → SceneTagComponent.sceneId 过滤
+                               ├─ Outliner 遍历显示
+                               ├─ Builder 构建渲染项
+                               └─ Raycaster 拾取
+
+场景保存/切换时（离散事件）：
+  ECS Registry → ExportToDescription → 写入快照 → 写入磁盘 JSON
+```
+
+**快照的职责边界**：
+- 快照只用于：场景重建（Tab 切换时）、场景保存（ExportToDescription）、磁盘缓存
+- 快照不用于：Outliner 显示、Builder 过滤、运行时查询
+- 运行时的实体增删改（Outliner 创建、删除、编辑）**只操作 ECS Registry**，不同步快照
+- 快照在场景切换/保存时由 ExportToDescription 统一重新采集
+
+**"刷新大纲"的含义**：大纲每帧从 ECS Registry 重新查询（SceneTagComponent 过滤），不需要手动同步。ECS Registry 添加组件后下一帧自然可见。
+
+**这个设计的后果**：
+- 快照中的 `entities` 和 `entityDescs` 只反映场景加载/保存时的状态
+- 运行时通过 Outliner 创建的实体、修改的组件值，在保存前不会出现在快照中
+- ExportToDescription 在保存时会重新遍历 ECS Registry 采集最新数据，所以快照的陈旧不会导致数据丢失
+
+### 2.3 问题清单
 
 | 问题 | 表现 | 后果 |
 |:-----|:------|:------|
@@ -109,6 +144,9 @@ struct SceneSnapshot {
 
     /// 实体描述列表（用于导出 JSON 和 Tab 切换时重建）
     std::vector<Resource::EntityDesc> entityDescs;
+
+    /// 场景光源列表（per-tab 隔离，ApplyTabState 时 Clear→Rebuild）
+    std::vector<Resource::LightDesc> lightDescs;
 
     /// 相机状态（位置 + 朝向）
     struct CameraState {
@@ -237,7 +275,7 @@ private:
 | 职责 | 说明 |
 |:-----|:------|
 | **RegisterSceneConstructSystem** | 响应 GeneratorTaskCompleteEvent，构造 ECS 实体 |
-| **EntityDesc 缓存** | 维护 `m_entityDescs` 映射，供 Outliner 编辑和 JSON 导出 |
+| **EntityDesc 缓存** | 维护 `m_entityDescs` 映射，作为路径查找表（geometry/material key→路径），供 Outliner 编辑和 JSON 导出回退使用 |
 | **场景文件管理** | NewScene / SaveScene / SaveSceneAs |
 | **多 Tab 管理** | Tab 创建/切换/关闭 |
 | **ECS 实体入口** | CreateEntity / RegisterEntity（包装 SceneManager） |
@@ -339,19 +377,23 @@ OnSceneConstructReady(sceneData)
 ```
 ProcessPendingTabSwitch()
   │
-  ├─ 1. 保存当前 Tab 的 UX 状态到 snap
-  │     ├─ snap.camera = current camera
-  │     ├─ snap.hierarchy = current hierarchy
-  │     └─ snap.selection = current selection
+  ├─ 1. SaveCurrentSnapshotToDisk()          ← 离开前保存当前 Tab 状态
+  │     ├─ snap.camera = CameraMgr            ← 已实现
+  │     ├─ snap.selectedEntity = GetSelectionCallback()  ← 从 OutlinerPanel 获取 persistentId
+  │     └─ 写入磁盘 .snapshot.json
   │
   ├─ 2. 更新 m_activeTabIndex
   │
-  ├─ 3. ApplySnapshot(m_activeTabIndex)      ← Clear + Rebuild
+  ├─ 3. ApplyTabState(m_activeTabIndex)      ← Clear + Rebuild 全局管理器
   │
-  └─ 4. 从 snap 恢复 UX 状态
-        ├─ camera ← snap.camera
-        ├─ hierarchy ← snap.hierarchy
-        └─ selection ← snap.selection
+  ├─ 4. 恢复目标 Tab 的 UX 状态
+  │     ├─ RestoreSnapshotCamera()            ← 从 snap 恢复相机
+  │     └─ (选中由事件驱动恢复)
+  │
+  └─ 5. PostEvent(TabSwitchedEvent)
+        └─ OutlinerSelectionRestoreSystem (System)
+              └─ RestoreSelection(snap.selectedEntity)  ← 按 persistentId 匹配实体
+              └─ persistentId=0 → ClearSelectedEntity()  ← 无选中实体时清除旧选中
 ```
 
 ### 6.3 关闭 Tab（CloseTab）
@@ -359,7 +401,7 @@ ProcessPendingTabSwitch()
 ```
 CloseTab(index)
   │
-  ├─ 1. 保存快照到磁盘
+  ├─ 1. 保存快照到磁盘（含当前选中状态）
   │     └─ m_snapshots[index].SaveTo(cachePath)
   │
   ├─ 2. 从 m_snapshots 移除
@@ -508,3 +550,86 @@ P2:
             EntityDesc                             SelectionState
             GeoHandle/MatHandle                    SkyboxDesc（缓存）
 ```
+
+---
+
+## 11. Tab 切换状态管理矩阵
+
+Tab 切换时，不同系统模块的状态需要不同处理：有些需要保存到快照后重建，有些可以共享，有些需要重置。
+
+### 11.1 状态分类
+
+| 类别 | 含义 | 示例 |
+|:-----|:------|:------|
+| **缓存 → 重建** | 离开时写入快照，进入时从快照恢复 | 相机位置、选中实体 |
+| **Clear → Rebuild** | 离开时清空，进入时重建，数据在快照中 | 天空盒、环境光 |
+| **共享** | 所有 Tab 共用同一状态，不隔离 | 视口 RT、工具栏模式、ImGui Docking |
+| **自洽** | 状态由 ECS 数据驱动，无需额外管理 | Properties 面板、Outliner 列表 |
+| **需重置** | 切换后需要主动清理，否则干扰新 Tab | ImGuizmo 内部状态、输入上下文 |
+
+### 11.2 完整状态矩阵
+
+| 系统模块 | 类别 | 快照字段 | 保存时机 | 恢复时机 | 当前状态 |
+|:---------|:-----|:---------|:---------|:---------|:---------|
+| **ECS Registry** | 共享 | — | 实体共存，仅 sceneId 过滤 | sceneId 切换 | ✅ |
+| **CameraManager** | 缓存→重建 | `cameraPosition`, `cameraForward` | `SaveCurrentSnapshotToDisk()` | `RestoreSnapshotCamera()` | ✅ |
+| **OutlinerPanel** 选中 | 缓存→重建 | `selectedEntity` (persistentId) | `SaveCurrentSnapshotToDisk()` | `TabSwitchedEvent` → `RestoreSelection()` | ✅ 本次新增 |
+| **SkyboxManager** | Clear→Rebuild | `skybox`, `skyboxTextureHandle`, `skyboxGeometryHandle` | `OnSceneConstructReady` | `ApplyTabState()` | ✅ |
+| **WaterManager** 环境贴图 | Clear→Rebuild | (从 SkyboxManager 级联) | 同上 | `ApplyTabState()` → `SetEnvironmentMap()` | ✅ |
+| **SceneManager** 环境数据 | Clear→Rebuild | `environment` | `OnSceneConstructReady` | `ApplyTabState()` | ✅ |
+| **LightManager** | Clear→Rebuild | `lightDescs` (LightDesc) | `OnSceneConstructReady` 从 LightManager 捕获 | `ApplyTabState()` 中 Clear + Rebuild | ✅ 本次新增 |
+| **RenderScene** | 共享(当前) | 无 | 全局单例 | — | ⚠️ 无 per-tab 隔离 |
+| **EditorViewport** RT | 共享 | — | 所有 Tab 共用视口 | — | ✅ |
+| **EditorGUI** 叠加层 | 共享 | — | ImGui 每帧重置 | — | ✅ |
+| **ImGuizmo** 内部状态 | 需重置 | — | 切换时 ImGuizmo 可能持有鼠标捕获 | 切换后下一帧自动释放 | ⚠️ 切换操作中可能残留 |
+| **EditorViewportToolbar** | 共享 | — | 工具模式是用户偏好，非场景内容 | — | ✅ |
+| **EditorGizmoSystem** 显隐 | 共享 | — | 由工具模式驱动 | — | ✅ |
+| **EditorCameraSystem** | 共享 | — | 由 CameraManager 驱动 | — | ✅ |
+| **Input 输入上下文** | 需重置 | — | Outliner 焦点状态每帧更新 | 切换后下一帧自动恢复 | ⚠️ 焦点可能漂移 |
+| **Properties 面板** | 自洽 | — | 由选中实体驱动 | 选中恢复后自动更新 | ✅ |
+
+### 11.3 切换流程总图
+
+```
+Tab A → Tab B
+
+[离开 Tab A]
+  SaveCurrentSnapshotToDisk()
+    ├─ snap.camera = CameraMgr                    ✅
+    ├─ snap.selectedEntity = GetSelectionCallback()  ✅ (peristentId)
+    └─ 写入磁盘 .snapshot.json                    ✅
+
+[进入 Tab B]
+  ├─ 更新 m_activeTabIndex / m_sceneFilePath      ✅
+  │
+  ├─ 从磁盘加载快照（如果内存快照为空）            ✅
+  │
+  ├─ ApplyTabState(B)                             ✅
+  │   ├─ Clear: SkyboxManager / SceneManager::m_skybox&m_environment
+  │   ├─ Clear: LightManager::Clear()
+  │   ├─ Clear: WaterManager::SetEnvironmentMap({})
+  │   ├─ Rebuild: SetSkybox(snap.skybox)
+  │   ├─ Rebuild: SetEnvironmentMap(SkyboxManager SRV)
+  │   └─ Rebuild: 遍历 snap.lightDescs → LightManager::Add/Set  ✅ 本次新增
+  │
+  ├─ RestoreSnapshotCamera(B)                     ✅
+  │
+  ├─ PostEvent(TabSwitchedEvent)                  ✅
+  │   └─ OutlinerSelectionRestoreSystem
+  │         └─ RestoreSelection(snap.selectedEntity)
+  │               └─ 按 persistentId 匹配实体 → 设回 m_selectedEntity
+  │
+  └─ (下一帧)
+        ├─ Outliner 绘制列表（按新 sceneId 过滤）  ✅ 自洽
+        ├─ Gizmo 在新选中实体上绘制                ✅ 自洽
+        └─ Properties 面板显示新选中实体的属性      ✅ 自洽
+```
+
+### 11.4 已知缺口
+
+| # | 缺口 | 影响 | 建议 |
+|:-:|:-----|:-----|:------|
+| 1 | **LightManager 无 per-tab 隔离** | 切换 Tab 后光源不变（当前只有测试光源） | 后续在 SceneSnapshot 中添加 `lightDescs` 字段，`ApplyTabState` 中 Clear→Rebuild |
+| 2 | **ImGuizmo 切换瞬间状态残留** | 若切换时正在拖拽 Gizmo，切换后可能产生异常操作 | 在 `ProcessPendingTabSwitch` 中调用 `ImGuizmo::SetOrthographic(false)` 或不再处理 |
+| 3 | **WaveParams 无 per-tab 隔离** | 水体的波浪参数注册到 WaterManager 是全局的，切换 Tab 不会重建 | 同 LightManager，后续在 SceneSnapshot 中扩展 |
+| 4 | **场景文件保存时依赖路径缺失** | `ExportToDescription` 的 dependencies 段只有 key 没有文件路径 | 需从原始场景文件或缓存中补充 key→path 映射 |

@@ -23,8 +23,7 @@
   │     ├─ 通过 Registry::type() 或遍历 component 类型列表
   │     │
   │     ├─ TransformComponent ──────→ ComponentEditorRegistry::Get<TransformComponent>()
-  │     │                                └─ ImGuizmo::Manipulate()  ← 3D 操作
-  │     │                                    └─ 回退到 DragFloat3（无 ImGuizmo 时）
+  │     │                                └─ DragFloat3（位置/旋转/缩放数值输入）
   │     │
   │     ├─ LightComponent ──────────→ ComponentEditorRegistry::Get<LightComponent>()
   │     │                                └─ 光源类型、颜色、强度、衰减
@@ -39,21 +38,38 @@
   │
   └─ "添加组件" 按钮
         └─ 弹出已注册组件列表 → 附加到实体
+
+                  ════════════════════════════════
+                  EditorGizmoSystem（独立 System）
+                    ├─ 在视口上方叠加 ImGuizmo::Manipulate()
+                    ├─ 从 EditorViewportToolbar 获取操作模式（Translate/Rotate）
+                    ├─ 从 CameraManager 获取 View/Proj 矩阵
+                    └─ 操作结果写回 TransformComponent
+                  ════════════════════════════════
 ```
 
 ### 分层职责
 
 ```
-EditorLayout::DrawPropertiesPanel()     ← 调度层：遍历组件，调用注册器
+EditorLayout::DrawProperties()            ← 调度层：遍历组件，调用注册器
   │
-  ├─ ComponentEditorRegistry            ← 注册层：存储组件类型 → 编辑方法的映射
-  │     ├─ Register<T>(name, drawFn)    ← 各模块在初始化时调用
-  │     └─ Get<T>() → drawFn           ← 属性卡遍历时查询
+  ├─ ComponentEditorRegistry              ← 注册层：存储组件类型 → 编辑方法的映射
+  │     ├─ Register<T>(name, drawFn)      ← 各模块在初始化时调用
+  │     └─ Get<T>() → drawFn             ← 属性卡遍历时查询
   │
-  └─ IComponentEditor<T>               ← 实现层：每个组件独立实现自己的 UI
-        └─ Draw(component, entityId)
-              └─ ImGui 控件 / ImGuizmo
+  └─ IComponentEditor<T>                  ← 实现层：每个组件独立实现自己的 UI
+        └─ Draw(component, entityId)      ← 纯 ImGui 控件（不含 ImGuizmo）
+
+EditorGizmoSystem                         ← 独立 System：视口 3D 操纵器
+  ├─ DrawGizmo()                          ← 注册为 EditorLayout 视口叠加回调
+  │     └─ ImGuizmo::Manipulate()
+  └─ 写回 TransformComponent              ← 在 ImGui 渲染阶段执行（Render Phase 之后）
 ```
+
+> **设计决策**：ImGuizmo 作为独立 System 而非嵌入 TransformEditor，原因：
+> 1. ImGuizmo 需要在**视口**中叠加绘制，而 TransformEditor 的回调在 Properties Panel 中执行
+> 2. ImGuizmo 可能被其他用途复用（非变换操作），独立 System 更易扩展
+> 3. 符合 EditorLayout 缩减原则——Layout 不持有任何具体功能模块的代码
 
 ---
 
@@ -137,7 +153,9 @@ void RegisterLightEditor() {
 
 ---
 
-## 四、ImGuizmo 集成方案
+## 四、ImGuizmo 集成方案（EditorGizmoSystem）
+
+ImGuizmo 作为独立系统 `EditorGizmoSystem` 运行，不嵌入 EditorLayout 或 TransformEditor。
 
 ### 交互流程
 
@@ -149,28 +167,75 @@ Viewport 鼠标点击
   ├─ Gizmo 操作模式切换（快捷键 / Toolbar）
   │     ├─ W → TRANSLATE
   │     ├─ E → ROTATE
-  │     └─ R → SCALE
+  │     └─ R → SCALE（后续）
   │
-  └─ ImGuizmo::Manipulate() 在 Viewport 渲染中绘制
-        ├─ 需要 View/Proj 矩阵
-        ├─ 操作结果写回 TransformComponent
-        └─ 操作结束后触发 Undo/Redo 记录
+  └─ EditorGizmoSystem::DrawGizmo() 在视口叠加回调中执行
+        ├─ 获取选中实体的 TransformComponent
+        ├─ 获取 Camera View/Proj 矩阵
+        ├─ 从 EditorViewportToolbar 获取操作模式
+        ├─ ImGuizmo::SetRect() / SetDrawlist()
+        ├─ ImGuizmo::Manipulate()
+        └─ ImGuizmo::IsUsing() → 矩阵分解 → 写回 TransformComponent
+```
+
+### EditorGizmoSystem 接口
+
+```cpp
+// Editor/EditorLib/Viewport/Systems/EditorGizmoSystem.h
+
+class EditorGizmoSystem {
+public:
+    void Initialize(DX12Engine::Boot::GameContext *context);
+    void Shutdown();
+
+    /// 设置 Gizmo 操作类型回调（从 EditorViewportToolbar 获取）
+    void SetGetGizmoOpCallback(std::function<int()> cb);
+
+    /// 设置选中实体查询回调
+    void SetGetSelectedEntityCallback(std::function<DX12Engine::ECS::Entity()> cb);
+
+    /// 在视口图像上叠加绘制 Gizmo（注册为 EditorLayout 的视口叠加回调）
+    void DrawGizmo(ImVec2 viewportMin, ImVec2 viewportMax);
+
+private:
+    DX12Engine::Boot::GameContext *m_context = nullptr;
+    std::function<int()> m_getGizmoOp;
+    std::function<DX12Engine::ECS::Entity()> m_getSelectedEntity;
+};
 ```
 
 ### 关键集成点
 
 | 集成点 | 说明 |
 |:-------|:------|
+| 绘制位置 | 注册为 EditorLayout 的视口叠加回调，在 DrawViewport() 内的图像渲染之后调用 |
 | 矩阵输入 | ViewMatrix（CameraManager）+ ProjMatrix（视口参数） |
-| 操作模式 | ImGuizmo::OPERATION + ImGuizmo::MODE |
+| 操作模式 | 从 EditorViewportToolbar::GetCurrentGizmoOp() 获取 |
+| 选中实体 | 通过回调从 EditorLayout/OutlinerPanel 获取 |
 | 回写时机 | ImGuizmo::IsUsing() 为 true 时每帧更新 TransformComponent |
-| 撤销支持 | 操作开始前快照，操作结束后 Push Undo |
+| 撤销支持 | 操作开始前快照，操作结束后 Push Undo（后续） |
 
 ### Gizmo 渲染位置
 
-应在 `EditorViewport` 渲染流程中，**叠加**在场景渲染之上：
-- 场景渲染完成 → 切换到 UI 命令列表 → ImGuizmo::Draw()
-- 不写入场景深度缓冲，始终在最上层
+在视口图像渲染完成后，通过 EditorLayout 的视口叠加回调机制绘制：
+- EditorLayout::DrawViewport() 渲染视口图像
+- 保存图像位置到 m_viewportMin/Max
+- 调用注册的视口叠加回调（包含 EditorGizmoSystem::DrawGizmo 和工具栏）
+- ImGuizmo 不写入场景深度缓冲，始终在最上层
+
+### 与 EditorLayout 的协作
+
+```
+EditorLayout::DrawViewport()
+  ├─ 渲染视口图像（TabBar 回调 → ImGui::Image）
+  ├─ 保存视口位置到 m_viewportMin/Max
+  ├─ 调用视口叠加回调列表（通知各子系统视口位置）  ← 新增通用机制
+  │     ├─ EditorViewportToolbar::DrawToolbar()    ← 工具栏（已有）
+  │     └─ EditorGizmoSystem::DrawGizmo()          ← Gizmo（新增）
+  └─ ImGui::End()
+```
+
+> EditorLayout 不感知 ImGuizmo，只提供通用的视口叠加回调注册机制。
 
 ---
 
@@ -257,9 +322,9 @@ Viewport 鼠标点击
 | 步骤 | 内容 | 依赖 |
 |:----:|:-----|:------|
 | 1.1 | 创建 `ComponentEditorRegistry` 注册器 | 无 |
-| 1.2 | 重构 `EditorLayout::DrawPropertiesPanel()` → 遍历注册表 | 1.1 |
-| 1.3 | ImGuizmo 集成：Viewport 中绘制 Gizmo + 变换回写 | 无 |
-| 1.4 | 注册 `TransformComponent` 编辑方法（ImGuizmo + 数值回退） | 1.1, 1.3 |
+| 1.2 | 重构 `EditorLayout::DrawProperties()` → 遍历注册表 | 1.1 |
+| 1.3 | 创建 `EditorGizmoSystem`（独立 System，视口叠加 Gizmo + 变换回写） | 无 |
+| 1.4 | 注册 `TransformComponent` 编辑方法（DragFloat3 数值输入） | 1.1 |
 | 1.5 | 注册已有组件的编辑方法（Light、Camera 等） | 1.1 |
 
 ### 阶段 2：增强（P2）
@@ -287,19 +352,24 @@ Viewport 鼠标点击
 ```
 Editor/EditorLib/
   ├─ Core/
-  │   └── EditorLayout.h/.cpp         ← 修改：DrawPropertiesPanel 改为遍历注册表
+  │   └── EditorLayout.h/.cpp         ← 修改：DrawProperties 改为遍历注册表，移除 ImGuizmo 代码
   ├─ Properties/                       ← 新增目录
   │   ├── ComponentEditorRegistry.h    ← 注册器
-  │   ├── ComponentEditorRegistry.cpp
-  │   ├── Editors/                     ← 各组件编辑实现
-  │   │   ├── TransformEditor.cpp      ← ImGuizmo 集成
-  │   │   ├── LightEditor.cpp
-  │   │   ├── CameraEditor.cpp
-  │   │   └── ...
-  │   └── ImGuizmo/                    ← ImGuizmo 第三方库
-  │       └── ImGuizmo.h/.cpp
+  │   ├── ComponentEditorRegistrations.h ← 注册函数声明
+  │   └── Editors/                     ← 各组件编辑实现
+  │       ├── TransformEditor.cpp      ← DragFloat3 数值输入（不含 ImGuizmo）
+  │       ├── LightEditor.cpp
+  │       ├── CameraEditor.cpp
+  │       └── ...
   └── Viewport/
-      └── EditorViewport.cpp           ← 修改：Gizmo 绘制叠加
+      ├── EditorViewport.cpp           ← 视口渲染管理
+      ├── EditorViewportToolbar.h/.cpp ← 工具栏 + 工具模式状态
+      └── Systems/
+          ├── EditorCameraSystem.h/.cpp ← 相机控制（已有）
+          └── EditorGizmoSystem.h/.cpp  ← 新增：Gizmo 视口叠加 + 变换回写
+
+Engine/ThirdParty/
+  └── imguizmo/                        ← ImGuizmo 源码（仅编辑器 exe 编译）
 ```
 
 ---

@@ -1,7 +1,7 @@
 # 全局待办清单
 
-> 日期：2026-07-23
-> 本次会话：Game 端语义拆分完成（GameRenderPipeline 系统注册迁移 + 旧文件清理）、输入系统扩展（TriggerBehavior 9 种 + Analog1D 状态）、SceneConstructor::OnSceneReady 实现、游戏相机初始视角修复（Rotation→基向量同步）、文档更新。
+> 日期：2026-07-27
+> 本次会话：`CameraComponent` ECS 结构体创建 + SceneConstructor 接入 + CameraEditor 注册 + ExportToDescription 导出。实体关系模型设计定案（扁平 JSON + ID 引用，引擎 CORE 只存不处理）。关系设计文档参见 `Docs/architecture/RelationshipModel.md`。
 >
 > 详细快照见 `Docs/snapshots/WorldRefactor_Snapshot_20260723.md`。
 >
@@ -45,6 +45,10 @@
 | **InputDeclaration 重复清理** | ✅ | 删除 InputDeclaration 内重复的 TriggerBehavior 枚举，改用 InputSystem::TriggerBehavior |
 | **SceneConstructor::OnSceneReady** | ✅ | 实现空壳方法，提取两处重复的"场景就绪"逻辑 |
 | **相机初始视角修复** | ✅ | 新增 `CameraManager::UpdateBasisFromRotation()`，Game 端相机 Rotation 正确同步到基向量 |
+| **EditorGizmoSystem 独立** | ✅ | ImGuizmo 从 EditorLayout 中抽离为独立 System，通过视口叠加回调绘制 |
+| **ImGuizmo 旋转回写** | ✅ | 四元数直接回写 TransformComponent，零转换 |
+| **Rotation 格式统一** | ✅ | TransformComponent::rotation → XMFLOAT4 四元数，GetMatrix 用 XMMatrixRotationQuaternion |
+| **场景序列化保存** | ✅ | 全部 *Desc 的 to_json + SceneLoader::SaveToFile + EditorSceneManager::SaveSceneAs 接入 |
 
 ---
 
@@ -63,8 +67,8 @@
 | # | 任务 | 优先级 | 说明 |
 |:-:|:-----|:-------|:------|
 | 4 | `DxMeshLoader` 完整实现 | P1 | 当前 `MeshLoadTask` 已读 `.dxmesh`，但需完善骨骼数据路径 |
-| 5 | **ImGuizmo 集成** | P1 | 在 EditorViewport 中叠加绘制 ImGuizmo（Translate/Rotate/Scale），操作结果写回 TransformComponent。需要：<br>• Viewport 渲染完成后叠加 Gizmo 绘制<br>• 快捷键切换操作模式（W/E/R）<br>• 操作前快照（为 Undo 做准备） |
-| 6 | **组件驱动属性卡** | P1 | 基于 `ComponentEditorRegistry` 注册制的属性卡系统，替代当前硬编码的 Properties 面板。需要：<br>• `ComponentEditorRegistry` 注册器（模板 Register<T> + 回调存储）<br>• `EditorLayout::DrawPropertiesPanel()` 重构为遍历注册表 + 按 Category 折叠<br>• 注册 TransformComponent 编辑方法（ImGuizmo + 数值回退）<br>• 注册已有 LightComponent / CameraComponent 等编辑方法<br>• "添加组件" 弹出菜单 / "移除组件" 按钮 |
+| 5 | **ImGuizmo 集成（EditorGizmoSystem）** | P1 | 已从 EditorLayout 中抽离为独立 `EditorGizmoSystem`，通过视口叠加回调在 Viewport 中绘制 Gizmo。<br>• 操作模式从 EditorViewportToolbar 获取（Translate/Rotate）<br>• 选中实体通过回调获取<br>• View/Proj 矩阵来自 CameraManager<br>• 操作结果写回 TransformComponent<br>• 待完善：旋转欧拉角完整回写、W/E/R 快捷键独立处理、Undo 快照 |
+| 6 | **组件驱动属性卡** | P1 | 基于 `ComponentEditorRegistry` 注册制的属性卡系统，替代当前硬编码的 Properties 面板。<br>• ✅ `ComponentEditorRegistry` 注册器（模板 Register<T> + 回调存储）<br>• ✅ `EditorLayout::DrawProperties()` 已重构为遍历注册表 + 按组件类型折叠 + 添加/移除按钮<br>• ✅ `RegisterTransformEditor()` 已注册（Position/Rotation/Scale 数值输入 + 四元数↔欧拉角转换）<br>• ✅ `RegisterLightEditor()` 已注册（类型/颜色/强度/范围/阴影参数）<br>• ✅ "添加组件" 弹出菜单（只显示实体上不存在的组件）<br>• ✅ "移除组件" 按钮（Transform 等核心组件不可移除）<br>• ✅ 编辑器 UI 标签已接入 `EditorStrings::Get()`（TransformEditor/LightEditor 均已迁移）<br>• ✅ `CameraComponent` 已创建（ECS 结构体 + SceneConstructor 创建 + CameraEditor 注册 + ExportToDescription 导出）<br>• ⚠️ `CameraComponent` 属于 **Scene Entity Data** 层，非引擎 CORE。后续设计讨论：投影类型（Perspective/Orthographic）、PiP 预览、视锥 Gizmo |
 | 7 | 多堆域 SRV 隔离（SkyboxManager → LightManager 等） | P2 | SkyboxManager 已支持 `HeapTag` 参数，SRV 创建在指定堆域。LightManager、ReflectionProbeManager 等需同样扩展，使其在多堆（Editor）模式下不占用 Default 堆域空间 |
 | 8 | AssetManager 注册表模式 | P2 | 见 `AssetLoaderImprovement.md`，用文件后缀分发替代 `switch(type)` |
 | 9 | TerrainLoadTask 拆分为并行子 Task | P1 | 几何体 + 纹理各走独立 Task |
@@ -75,6 +79,87 @@
 | 14 | **网格比例尺控件** | P2 | 当前水平滑条不符合习惯，改为垂直刻度尺样式 |
 | 15 | **RenderScene::OnScenePreUnload 驱动** | P2 | 场景切换时调用 LightManager::Clear() 等，当前为骨架实现 |
 | 16 | **Undo/Redo 系统** | P2 | EditorSceneManager 的 EntityDesc 编辑历史（菜单项已注册，实现为空壳） |
+
+### 新设计方向（2026-07-27 讨论定案）
+
+| # | 任务 | 优先级 | 说明 |
+|:-:|:-----|:-------|:------|
+| 17 | **CameraComponent 扩展 projectionType** | ✅ 完成 | `ProjectionType` 枚举、`orthoSize`、CameraEditor、schema、场景 JSON `test_scene.json` 已插入 MainCamera 实体用于测试 |
+| 18 | **关系系统实施** | ✅ 完成 | `RelationshipComponent` + `SocketAttachmentComponent`、`SceneConstructor` 加载、`ExportToDescription` 导出、schema 定义、`test_scene.json` 中空 `relationships:[]` 占位 |
+| 19 | **CameraManager 从场景 CameraComponent 初始化** | P2 | 场景加载后，从 `isMain=true` 的 CameraComponent 读取 FOV/近远面，替代当前硬编码配置。Game/Editor 端各自由 Gameplay 脚本决定相机位置 |
+| 20 | **Editor 端多选联动** | P3 | 拖拽父实体时，临时查 `RelationshipComponent.kind==parent` 的子实体，同步位移。不在引擎 CORE 中实现 |
+| 21 | **Outliner 实体创建（实体模板）** | P2 | Outliner 右键弹出 Godot 风格创建菜单（分类+搜索）。ECS 组件组合由 `Editor/Config/entity_templates.json` 定义，JSON 驱动。模板如 Camera = Transform + CameraComponent，Empty = Transform 等。不暴露原子 ECS 组件给用户 |
+
+### ECS 统一数据源 + Manager 打包器设计（2026-07-27 补充，2026-07-28 更新）
+
+详见 `Docs/architecture/EngineOverview.md §9`：
+
+- ECS Registry 是运行时唯一数据源，Manager **不持有私有数据**，只做 ECS → GPU buffer 的聚合打包
+- 需要剔除/拾取/属性卡编辑的数据（灯、相机、水面）必须在 ECS 中有对应的 Component
+- Manager 存在的唯一理由：多个实体的数据需要聚合为连续 GPU buffer，或管理 GPU 资源（shadow map、纹理数组）
+- 过渡路径：CameraComponent → LightManager → WaterManager 逐步迁移
+- 场景 JSON 统一由 SceneConstructor 写入 ECS 组件，Manager 不再接收直接注册调用
+
+#### Manager 收集模式实施状态（2026-07-28）
+
+| Manager | 方法 | 状态 | 说明 |
+|:--------|:-----|:-----|:------|
+| **CameraManager** | `UpdateMainCamera()` 从 `isMain` CameraComponent 读取 | ✅ 已有 | 场景加载时由 SceneConstructor 写入 CameraComponent |
+| **LightManager** | `CollectFromECS(registry)` 遍历 `LightComponent + TransformComponent` | ✅ 已实施 | 方向光 direction 从 TransformComponent.rotation 四元数推导；点/聚光灯 position 从 TransformComponent.position 获取 |
+| **WaterManager** | `CollectFromECS(registry)` 遍历 `WaterComponent`，从组件字段提取波浪参数 | ✅ 已实施 | WaterComponent 新增 amplitude/frequency/speed/direction 字段替代 `RegisterWaveParams` |
+
+**调用时序**（Editor/Game 的 Immediate 回调）：
+
+```
+BackgroundExecutor::Tick()
+  ↓
+CollectFromECS(registry)    ← 新增：LightManager + WaterManager 均从此入口收集
+  ├─ LightManager::CollectFromECS
+  └─ WaterManager::CollectFromECS
+  ↓
+UpdateAndUpload(fence, ...)  ← 不变：从内部向量打包上传 GPU
+```
+
+**SceneConstructor 变更**：
+- `LightComponent` 创建从 TODO 占位变为完整实现，支持 directional/point/spot 三种类型
+- `WaterComponent` 波浪参数直接写入 ECS（amplitude/frequency/speed/direction），不再调用 `WaterManager::RegisterWaveParams`
+
+#### SceneEnvironment 语义边界（2026-07-28 补充）
+
+并非所有场景数据都能放入 ECS 实体。详见 `Docs/architecture/EngineOverview.md §9.6`：
+
+- **T 恤线**：有 `TransformComponent`（位置/变换）的数据 → ECS 实体 `entities[]`；无实体身份的全局参数 → `sceneEnvironment`
+- **`sceneEnvironment`** 分组存放管理器特有全局数据：环境光（ambient）、天空盒（skybox），不进入 ECS Registry
+- **`entities[]`** 存放 ECS 实体数据（灯、相机、水面、网格物体等），Manager 通过 ECS view 按需收集
+- JSON 格式：`sceneEnvironment.ambient` / `sceneEnvironment.skybox` 替代顶层的 `environment` / `skybox`
+- 此语义边界已在 `SceneDescription.h` 的结构体定义中实现，是场景 JSON 文件格式的一部分
+
+### 实体模板设计要点
+
+- 不暴露原子 ECS 组件给用户（Cocos/Godot 模式下用户操作的是组合结果）
+- 模板定义在 JSON 中（`Editor/Config/entity_templates.json`），无需改 C++ 代码即可扩展
+- 新建实体时 Outliner 弹出 Godot 风格弹窗（分类树 + 搜索框）
+- 模板 JSON 文档见 `Docs/architecture/EntityTemplates.md`
+
+#### Outliner 实体模板弹窗遗留问题
+
+| # | 问题 | 说明 |
+|:-:|:-----|:------|
+| 1 | **Water 模板缺少 WaterManager 注册** | `CreateEntityFromTemplate` 仅添加了 `WaterComponent` 标记，未调用 `WaterManager::RegisterWaveParams`。当前已改为 ECS 组件存储波浪参数（amplitude/frequency/speed/direction），需确认模板 JSON 中的 `water` 字段能否被 `OutlinerPanel::CreateEntityFromTemplate` 正确读取并写入组件 |
+| 2 | **Mesh 模板未实现** | `CreateEntityFromTemplate` 中 mesh 分支被注释（`// mesh 暂不实现（需要从 AssetBrowser 选择具体网格/材质）`）。模板 JSON 中的 `mesh.geometry` / `mesh.material` 为空字符串，创建后无法渲染。后续需实现：① 模板创建时添加占位 MeshComponent；② 用户通过 AssetBrowser 拖拽网格/材质到实体上覆盖 |
+| 3 | **缺少文档** | `Docs/architecture/EntityTemplates.md` 尚未创建，模板 JSON schema 和规则无文档说明 |
+
+### 关系模型的约束
+
+详见 `Docs/architecture/RelationshipModel.md`：
+
+- 场景 JSON 保持扁平，关系通过 `persistentId`（fnv1a 64-bit hash 字符串）引用表达
+- **运行时直接存储 `entt::entity` handle**，O(1) 访问。SceneConstructor 加载时两遍解析：首遍建 hash→entt::entity 映射，次遍 resolve targetId
+- 导出时从 `SceneSnapshot::entityDescs` 缓存读取 hash，**不需要从 ECS 反查**
+- `entt::entity` 自带 generation，目标销毁后 handle 自动 invalid，不存在"查到错误内容"的问题
+- 引擎 CORE 只存储 `RelationshipComponent`，不做自动 Transform 传播、不做级联删除、不维护树缓存
+- 骨架层级（骨骼蒙皮）不是场景关系，属于动画系统
+- Game 端不为 Editor 端的便利买单——Editor 需要时自行建临时索引
 
 ### 共享数据中心
 

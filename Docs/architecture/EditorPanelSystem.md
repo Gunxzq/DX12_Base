@@ -381,3 +381,44 @@ Editor::Initialize() 中：
 4. **Dock 布局**
    - 如需新的 dock 区域，在 `EditorLayout::InitializeDockLayout()` 中新增拆分子节点
    - 面板的 `GetTargetDockId()` 返回新节点的 ID
+
+---
+
+## 四、组件属性卡（Component Editor）布局规范
+
+所有通过 `ComponentEditorRegistry::Register<T>()` 注册的属性卡编辑方法，须遵守以下布局约定：
+
+### 4.1 Key-on-Left 布局
+
+每条属性以 Key（字段名）在左、Value（控件）在右排列：
+
+```
+Field Name        [ 控件内容                   ]
+Another Field     [ 控件内容                   ]
+```
+
+```cpp
+// Key 在左
+ImGui::Text(EditorStrings::Get("key", "Fallback"));
+// Value 在右侧 120px 处开始
+ImGui::SameLine(120);
+ImGui::PushItemWidth(160);
+ImGui::SliderFloat("##SomeField", &comp->someField, 0.0f, 1.0f, "%.2f");
+ImGui::PopItemWidth();
+```
+
+### 4.2 规则
+
+| 规则 | 说明 |
+|:-----|:------|
+| **Key** | 用 `ImGui::Text()` + `EditorStrings::Get(key, fallback)` 显示多语言字段名 |
+| **对齐** | `SameLine(120)` 将所有控件对齐到同一列 |
+| **控件标签** | 用 `##` 前缀（如 `##Range`），避免显示冗余标签，同时保证 ImGui ID 唯一 |
+| **控件宽度** | 用 `PushItemWidth(160) / PopItemWidth()` 包裹每个控件，保持对齐 |
+| **颜色取色器** | 用 `ColorEdit4` 而非 `ColorEdit3`，A 通道作为强度，flags 不传互斥的 `DisplayMask_` 值 |
+| **强度** | 集成在颜色 A 通道中，不设独立强度滑条 |
+| **范例** | `LightEditor.cpp`、`CameraEditor.cpp`、`TransformEditor.cpp` |
+
+### 4.3 语言包
+
+新增属性卡时同步更新 `editor_strings_*.json`，添加对应 key 和所有语言的翻译。参见 `.atomcode.md` 规则 18。

@@ -920,6 +920,97 @@ Editor::Run() 主循环中：
 (3) FrameDriver::Tick()
 ```
 
+### 6.11 GPU 资源生命周期架构分层与选用原则
+
+项目中有**四种 GPU 资源回收/复用模式**，按生命周期特征自上而下分层。
+**时序性要求极高，层间操作依赖有向边不可逆，乱序即崩。**
+
+```
+                ┌─────────────────────────────────────────┐
+                │  层 1：引用计数（Retain/Release）         │
+                │  TextureManager / GeometryResourceManager │
+                │  适用：资产纹理、共享网格（长生命周期）    │
+                └────────────────┬────────────────────────┘
+                                 │ refCount 归零后
+                                 ▼
+                ┌─────────────────────────────────────────┐
+                │  层 2：Fence 延迟释放（PendingRelease）   │
+                │  GpuResourceManager / TextureManager      │
+                │  适用：所有 GPU 资源的释放路径             │
+                │  时序：Reclaim 每帧必须调用                │
+                │  完成 f=completedFence 时资源才真正销毁    │
+                └────────────────┬────────────────────────┘
+                                 │ fence 完成 → 归还到池
+                                 ▼
+                ┌─────────────────────────────────────────┐
+                │  层 3：空闲池复用（FindMatchingEntry）    │
+                │  RenderTargetPool / DepthStencilPool      │
+                │  适用：临时 RT（短生命周期，重复分配）     │
+                │  行为：fence 完成不销毁，留池等匹配       │
+                └────────────────┬────────────────────────┘
+                                 │ 长期未用 → PurgeUnused
+                                 ▼
+                ┌─────────────────────────────────────────┐
+                │  层 4：大堆 + PlacedResource（未来方向）  │
+                │  CreateHeap + CreatePlacedResource        │
+                │  适用：后处理别名 / 显存不足时的压缩策略  │
+                │  行为：同一块物理堆偏移在不同管线阶段复   │
+                │       用为不同资源描述（aliasing）        │
+                └─────────────────────────────────────────┘
+```
+
+#### 时序关键依赖链
+
+以下每条链上的操作顺序不可逆，**前一步未完成则后一步不可开始**：
+
+```
+Create(资源) → Use(渲染) → Release(标记 fence) → Reclaim(等 fence) → 资源回归池/销毁
+                                                      ↑
+                                              每帧主线程调用，使用同一 completedFence
+                                              漏调 → pending 无限堆积 → 显存泄漏
+```
+
+```
+RegisterTexture → Retain × N → Release × N → refCount == 0 → PendingRelease(fence)
+                                                               ↓
+                                                         Reclaim → FreeEntry
+                                                           ↑
+                                                    fence 完成才执行
+                                                    fence 未完成就 Reclaim → GPU 还在读 → 设备移除
+```
+
+```
+RenderTargetPool::Allocate → 使用 → Free(fence) → Reclaim(fence)
+                                                       ↓
+                                                 只设 lastUsedFrame=0，不销毁
+                                                 后续 Allocate 通过 FindMatchingEntry 直接复用
+                                                 只有 PurgeUnused(maxAgeFrames) 才销毁
+```
+
+```
+FrameResourceManager::BeginFrame(completedFence) → Allocate → UpdatePassConstants
+                          ↑
+                   回收旧帧 RingBuffer 空间
+                   必须在 Allocate 之前调用
+```
+
+#### 选用原则
+
+| 模式 | 适合的资源 | 寿命特征 | 复用特征 | 时序风险 |
+|:-----|:---------|:---------|:---------|:---------|
+| **引用计数** | 资产纹理、共享网格 | 场景级（秒~分） | 高（多实体共享） | Retain/Release 不对称 → 泄漏或提前释放 |
+| **Fence 延迟释放** | 所有 GPU 资源释放路径 | — | — | Reclaim 漏调 → 泄漏；fence 值错乱 → use-after-free |
+| **空闲池复用** | 临时 RT、DepthStencil | 帧级（毫秒~秒） | 中（同 desc 复用） | Free 后 Allocate 在同一帧 → 资源还在用 |
+| **RingBuffer** | 每帧 upload CB | 帧内顺序覆盖 | 低（3 帧轮换） | BeginFrame 前 Allocate → 空间未回收 |
+| **CreateHeap + Alias**（未来） | 后处理 RT、Shadow 别名 | 渲染阶段内（微秒~毫秒） | 高（同物理堆分时复用） | 别名过渡时 barrier 错序 → 数据竞争 |
+
+#### 关键约束
+
+1. **引用计数资产不适用 CreateHeap 别名**：资产纹理整场景存活，refCount 阻止其释放，没有别名机会。
+2. **CreateHeap 别名只在显存不足时才启用**：不是默认架构模式，而是一种压缩策略。PC 显存充裕时，`CreateCommittedResource` + 池化已足够。
+3. **同一帧内，同物理堆不同放置资源不能同时使用**：别名要求使用方显式 barrier 分时访问，否则产生未定义行为。
+4. **所有四种模式的 fence 值使用同一来源**：`FenceManager::GetFence(Type)->GetCompletedValue()`，确保帧序列一致。
+
 ---
 
 > **文档维护**：本文件应与 Bootstrap 持有的模块集合同步更新。
@@ -999,6 +1090,53 @@ GeometryResourceManager::RegisterGeometry
   DepthStencilPool::GetInstance().Reclaim(completedFence);
   RenderTargetPool::GetInstance().Reclaim(completedFence);
   ```
+
+### 时序关键性（⚠️ 乱序即崩）
+
+这条链上的每一步都依赖前一步完成，**不可跳过，不可颠倒，不可并行**：
+
+```
+Create(资源) ──→ Use(渲染) ──→ Release(fence=N) ──→ fence 到达 N ──→ Reclaim ──→ 销毁/回归池
+                                    ↑                      ↑
+                              fence 值必须是             Update/Reclaim
+                              GetNextSequence()          每帧主线程调用
+                              不是 GetCompletedFence()   漏调则 pending 无限堆积
+```
+
+**常见崩坏模式**：
+
+| 乱序操作 | 后果 |
+|:---------|:-----|
+| `Reclaim` 在 fence 到达前执行 | GPU 还在读，资源已被回收 → 设备移除 / 渲染花屏 |
+| `Release` 传入了错误的 fence 值（如 `GetCompletedFence`） | fence 立即满足，资源被提前回收 → GPU 仍在读 → 同上 |
+| `Update`/`Reclaim` 漏调一帧 | pendingReleases 堆积，资源泄漏；持续漏调 → 耗尽 GPU 显存 |
+| `Free` 后同一帧内又 `Allocate` 同 desc | 资源还在使用中就被重新分配 → 前帧渲染破坏 |
+| `Retain` 与 `Release` 次数不对称 | 引用计数永不归零 → 资源泄漏；或提前归零 → use-after-free |
+| `OnResize` 未检查尺寸变化就重建 | 池中 RT 残留，新 RT 覆盖描述符，旧 RT 丢失 → 泄漏 + GPU 状态错乱 |
+
+### 引用计数与延迟释放的联动时序
+
+`TextureManager` / `GeometryResourceManager` 的引用计数系统与 `GpuResourceManager` 的延迟释放构成**两层保护**：
+
+```
+RegisterTexture → refCount=1
+                   ↓
+Retain × N → refCount=N  (实体共享期间，资源绝对不会释放)
+                   ↓
+Release × N → refCount=0
+                   ↓
+          PendingRelease(fence=N)  ← 只是标记，不销毁
+                   ↓                   只有在这个窗口期内 re-register 同一纹理，
+          fence 到达 N                 才可能触发旧资源未释放就创建新资源
+                   ↓                   但引用计数+缓存机制已经挡住最常见路径
+          Reclaim → FreeEntry
+                   ↓
+          GpuResourceManager::Update
+                   ↓
+          resource->Release()  ← 真正销毁 D3D 资源
+```
+
+**关键结论**：只要 refCount > 0，资源就绝对不会进入销毁路径。这就是对于高复用资产（场景里 500 个建筑共享同一砖墙纹理）来说，即使使用 `CreateCommittedResource` 也不会产生"反复销毁-新建"循环的原因——引用计数阻止了它进入销毁路径。
 
 ### 对等检查
 ```

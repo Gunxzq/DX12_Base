@@ -637,7 +637,7 @@ EditorSceneManager
 |:-----|:------|
 | **注册 SceneConstructSystem** | 响应 `GeneratorTaskCompleteEvent`，通过 `CreateEntity` + `RegisterEntity` 构造实体 |
 | **EntityDesc 缓存** | 维护 `EntityDesc` 列表，支持 Outliner 编辑后同步 ECS 组件 |
-| **场景导出** | 从缓存的 EntityDesc 序列化为 `SceneDescription`（JSON 保存用） |
+| **场景导出** | `ExportToDescription()` 遍历 ECS Registry 实时读取组件数据，`m_entityDescs` 作为路径查找表（geometry/material key）回退，变换等动态数据以 ECS 为准 |
 | **默认场景描述** | 提供 `GetDefaultSceneDescription()` 静态方法，返回标准天空盒场景 |
 | **场景文件管理** | 新建/保存场景文件（加载编排由 AssetBrowser 负责） |
 
@@ -705,13 +705,14 @@ Outliner 编辑实体属性
     │     ├─ PushUndoState("Edit Entity")
     │     └─ MarkDirty()
     │
-    └─ 保存时 ExportToDescription() 从 m_entityDescs 序列化
+    └─ 保存时 ExportToDescription() 遍历 ECS Registry 实时读取组件数据，
+        m_entityDescs 仅作为路径查找表（geometry/material key）回退使用
     
 为什么 SceneManager 要持有 EntityDesc？
-    - 场景文件导出时需要完整的实体描述（包括编辑后的属性）
-    - ECS 组件是运行时高效表示，但缺少序列化所需的元数据
-    - EntityDesc 是"可持久化的实体快照"，ECS 组件是"运行时活跃状态"
-    - 两者双向同步：编辑 EntityDesc → 更新 ECS 组件；运行时变化 → 更新 EntityDesc（可选）
+    - ECS 组件存储运行时 GPU 句柄（GeometryHandle/MaterialHandle），不含源文件路径
+    - m_entityDescs 作为"路径查找缓存"保存几何体/材质的 source key
+    - 导出时变换等动态数据以 ECS 为权威源，路径从 m_entityDescs 缓存读取
+    - 两者关系：ECS 是运行时状态，m_entityDescs 是序列化元数据的缓存
 ```
 
 ### 5.5 差异合并（Merge）
@@ -1393,3 +1394,60 @@ EditorSceneManager::GetSceneEntities(sceneId)
 | 6 | Editor 端各 Manager 通过 TagComponent 提供逻辑分区视角 | 渐进式 |
 
 > 详细设计见 `Docs/architecture/World.md`。
+
+---
+
+## 13. SceneManager 与 SceneEnvironment 的关系
+
+> 2026-07-28 补充：`SceneEnvironment` 作为 Manager 全局数据与 ECS 实体数据的显式语义分隔。
+
+### 13.1 SceneManager 持有 SceneEnvironment
+
+`SceneManager` 作为场景序列化器，是 `SceneEnvironment`（管理器全局场景数据）的**持有者和序列化入口**：
+
+```
+SceneManager
+  ├─ SetEnvironment(EnvironmentDesc)  ← 设置环境光（→ LightManager::SetAmbientLight）
+  ├─ GetEnvironment() → EnvironmentDesc
+  ├─ SetSkybox(SkyboxDesc)            ← 设置天空盒（→ SkyboxManager::SetSkybox）
+  ├─ GetSkybox() → optional<SkyboxDesc>
+  │
+  └─ 序列化时：
+        ExportToDescription → desc.sceneEnvironment.ambient = GetEnvironment()
+                           → desc.sceneEnvironment.skybox  = GetSkybox()
+```
+
+### 13.2 数据流向
+
+```
+JSON 文件                              SceneConstructor                          SceneManager
+sceneEnvironment.ambient  ──→  SceneManager::SetEnvironment()  ──→  m_environment
+sceneEnvironment.skybox   ──→  SkyboxManager::SetSkybox()      ──→  m_skybox
+(不进入 ECS Registry)
+```
+
+### 13.3 与 ECS 实体数据的互斥关系
+
+| 类别 | 存储位置 | 写入时机 | 读取时机 |
+|:-----|:---------|:---------|:---------|
+| `sceneEnvironment` | `SceneManager` 成员变量 | 场景加载时，由 `SceneConstructor` 直接设置 | 编辑器导出时，由 `ExportToDescription` 读取 |
+| `entities` | `ECS::Registry` | 场景加载时，由 `SceneConstructSystem` 创建 ECS 实体 | Manager 每帧通过 ECS view 收集 |
+
+SceneManager **不管理** ECS 实体数据——实体数据由 `World` 统一管理，SceneManager 只负责序列化时从 World 查询。`sceneEnvironment` 是 SceneManager 持有的唯一运行时数据。
+
+### 13.4 JSON 中的位置
+
+```
+{
+  "version": 1,
+  "sceneEnvironment": {          ← SceneManager 持有，对应 GetEnvironment/GetSkybox
+    "ambient": { ... },
+    "skybox": { ... }
+  },
+  "dependencies": {...},         ← SceneConstructor 中间数据
+  "materials": {...},            ← SceneConstructor 中间数据
+  "entities": [...]              ← World（ECS Registry）持有，SceneManager 查询
+}
+```
+
+`dependencies` 和 `materials` 是场景序列化的辅助元数据，不属于 SceneManager 或 World 的运行时状态——它们只存在于 `SceneSnapshot` 缓存中，用于 `ExportToDescription` 时重建原始路径和材质定义。

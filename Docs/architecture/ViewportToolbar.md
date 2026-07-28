@@ -550,15 +550,37 @@ void DrawViewportToolbar() {
 
 ## 七、快捷键
 
-| 快捷键 | 行为 |
-|:-------|:------|
-| `Q` | 切换到 Cursor 工具 |
-| `W` | 切换到 Translate 工具 |
-| `E` | 切换到 Rotate 工具 |
-| `Ctrl+Z` | Undo（后续） |
-| `Ctrl+Shift+Z` | Redo（后续） |
-| `Delete` | 删除选中实体（后续） |
-| `F` | 聚焦到选中实体（已有） |
+### 7.1 工具切换快捷键
+
+| 快捷键 | 行为 | 生效条件 |
+|:-------|:-----|:---------|
+| `Q` | 切换到 Cursor 工具（再次点击切换 View/Select 子模式） | 视口悬停 + RMB 未按住 |
+| `W` | 切换到 Translate 工具 | 视口悬停 + RMB 未按住 |
+| `E` | 切换到 Rotate 工具 | 视口悬停 + RMB 未按住 |
+| `Ctrl+Z` | Undo（后续） | — |
+| `Ctrl+Shift+Z` | Redo（后续） | — |
+| `Delete` | 删除选中实体（后续） | — |
+| `F` | 聚焦到选中实体（已有） | 视口悬停 |
+
+> **关键约束**：Q/W/E 工具快捷键在 RMB（右键）按住时**自动禁用**，此时 WASDQE+Shift 全部用于自由视角相机控制。禁用通过双重机制实现：
+> 1. **InputConfig 层**：`ToolCursor/Translate/Rotate` 只注册在 `Viewport` 上下文中，无 `Mouse_Right` modifier
+> 2. **代码层**：`EditorViewportToolbar::RegisterInputCallbacks()` 回调中检查 `ImGui::IsMouseDown(1)`，RMB 按住时直接 return
+
+### 7.2 自由视角相机控制（RMB 按住时）
+
+| 操作 | 行为 |
+|:-----|:------|
+| `W/A/S/D` | 前后左右移动相机 |
+| `Q/E` | 垂直升降（Q 上升 / E 下降） |
+| `Shift` | 加速（移动速度 ×3） |
+| `Space / LeftCtrl` | 垂直升降（同 Q/E） |
+| 鼠标拖拽 | 旋转视角 |
+
+这些动作通过 `InputConfig` + `EditorCameraSystem` 双重拦截实现：
+- `default_input.json` 中 `Move`/`MoveUp`/`MoveDown`/`Sprint` 均配置 `"modifier": "Mouse_Right"`（第一层过滤）
+- `EditorCameraSystem.cpp` 回调中补充 `IsActionHeld(ActionId_OrbitCamera)` 检查（第二层保障）
+
+> ⚠️ `modifier: "Mouse_Right"` 在运行时因 `RawInputBuffer` 对鼠标键码的状态追踪路径与键盘不同而实际不生效。详见 `Docs/bugs/BugFix_InputConfig_ModifierMouseButton.md`。当前可靠的拦截手段是代码层的 `IsActionHeld` 检查。
 
 快捷键通过 `EditorViewportInputActions.h` 中已有的 `FocusSelection` 动作扩展，新增 `ToolCursor`、`ToolTranslate`、`ToolRotate` 动作：
 
@@ -663,23 +685,48 @@ void EditorViewportInput::Update(float deltaTime) {
 }
 ```
 
-### 10.2 ImGuizmo
+### 10.2 ImGuizmo（EditorGizmoSystem）
 
-ImGuizmo 的 `Manipulate()` 调用在 `EditorViewport` 的渲染 System 中执行。工具模式决定 `ImGuizmo::OPERATION`：
+ImGuizmo 已从 EditorLayout 中抽离为独立 `EditorGizmoSystem`，操作模式由工具模式决定：
+
+```
+EditorGizmoSystem::DrawGizmo()  ← 注册为 EditorLayout 视口叠加回调
+  ├─ 获取选中实体 TransformComponent
+  ├─ 获取 Camera View/Proj 矩阵
+  ├─ 从 EditorViewportToolbar::GetCurrentGizmoOp() 获取操作模式
+  ├─ ImGuizmo::SetRect() / SetDrawlist()
+  ├─ ImGuizmo::Manipulate()
+  └─ IsUsing() → 矩阵分解 → 写回 TransformComponent
+```
+
+工具模式与 ImGuizmo 操作类型的映射由 `EditorViewportToolbar::GetCurrentGizmoOp()` 维护：
 
 ```cpp
-// 在渲染 System 中
-ImGuizmo::OPERATION gizmoOp;
-switch (m_toolbar->GetCurrentTool()) {
-case ViewportTool::Translate: gizmoOp = ImGuizmo::TRANSLATE; break;
-case ViewportTool::Rotate:    gizmoOp = ImGuizmo::ROTATE;    break;
-default:                      gizmoOp = ImGuizmo::TRANSLATE; break;
+// EditorViewportToolbar.cpp
+int EditorViewportToolbar::GetCurrentGizmoOp() const {
+    switch (m_currentTool) {
+    case ViewportTool::Translate: return ImGuizmo::TRANSLATE;
+    case ViewportTool::Rotate:    return ImGuizmo::ROTATE;
+    default:                      return ImGuizmo::TRANSLATE;
+    }
 }
+```
 
-if (m_selectedEntity.IsValid()) {
-    ImGuizmo::Manipulate(viewMatrix, projMatrix, gizmoOp, ImGuizmo::WORLD,
-                         &transform.position.x);
-}
+`EditorGizmoSystem` 通过回调获取当前操作模式，不直接依赖工具栏：
+
+```cpp
+// Editor::Initialize() 中注册
+m_gizmoSystem = std::make_unique<EditorGizmoSystem>();
+m_gizmoSystem->Initialize(m_context);
+m_gizmoSystem->SetGetGizmoOpCallback(
+    [this]() -> int { return m_toolbar ? m_toolbar->GetCurrentGizmoOp() : ImGuizmo::TRANSLATE; });
+m_gizmoSystem->SetGetSelectedEntityCallback(
+    [this]() -> ECS::Entity { return m_layout->GetSelectedEntity(); });
+
+// 注册为视口叠加回调
+m_layout->SetViewportOverlayCallback([this](ImVec2 min, ImVec2 max) {
+    m_gizmoSystem->DrawGizmo(min, max);
+});
 ```
 
 ### 10.3 选中实体

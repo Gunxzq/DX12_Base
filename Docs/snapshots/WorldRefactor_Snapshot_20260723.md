@@ -1,7 +1,7 @@
 # 架构重构快照 — World 提取 + SceneManager 清理 + Game 端语义拆分
 
-> 日期：2026-07-23
-> 状态：📋 核心框架完成，Game 端迁移进行中
+> 日期：2026-07-25
+> 状态：✅ Game 端迁移完成，GameRenderPipeline 14 个 Register 方法已全部实现，旧文件已清理
 
 ---
 
@@ -82,24 +82,20 @@ Editor 端:
 
 ## 三、待办
 
-### P0 — Game 端编译通过
-
-| # | 任务 | 说明 | 文件 |
-|:-:|:-----|:------|:-----|
-| 1 | **GameWorld_*.cpp 引用旧成员** | `GameWorld_Builder.cpp` 等引用 `m_opaqueBuilder`、`m_registry` 等，需改为 `m_renderPipeline.GetOpaqueBuilder()` 等 | `GameWorld_Builder.cpp`, `GameWorld_RenderSystems.cpp` |
-| 2 | **GameRenderPipeline 系统注册实现** | `RegisterBuilderSystems()` 等 10 个方法声明在 `GameRenderPipeline.h` 但无实现，需从 `GameWorld_*.cpp` 迁移过来 | `GameRenderPipeline.cpp` |
-| 3 | **GameWorld.cpp 调用适配** | 当前 GameWorld.cpp 同时调用 `m_renderPipeline.RegisterBuilderSystems()` 和遗留的 `RegisterBuilderSystems()`，统一为只调用 `m_renderPipeline` | `GameWorld.cpp` |
-
-### P1 — 输入系统改造
+### P1 — 后续优化
 
 | # | 任务 | 说明 |
 |:-:|:-----|:------|
-| 4 | **声明式输入处理** | 参考 Editor 端 `EditorCameraSystem` 模式，将 `GameInputHandler` 改为 `InputSystem::BindCallback()` 注册 |
+| 1 | **声明式输入处理** | 参考 Editor 端 `EditorCameraSystem` 模式，将 `GameInputHandler` 改为 `InputSystem::BindCallback()` 注册 |
+| 2 | **GameContext 加 World*** | 可选：在 `GameContext` 中直接加 `World*` 指针，方便各模块直接访问 |
+| 3 | **Editor 端 World 直接访问** | `EditorLayout.cpp` 等通过 `m_context->SceneMgr->GetRegistry()` 的调用改为 `m_context->SceneMgr->GetWorld()->GetRegistry()` |
 
-### P2 — 后续优化
+### ✅ 已处理（原 P0/P2 项已在 07-25 前完成）
 
-| # | 任务 | 说明 |
-|:-:|:-----|:------|
-| 5 | **GameWorld_*.cpp 完全迁移** | 将 `GameWorld_Builder.cpp`、`GameWorld_RenderSystems.cpp` 等的内容完全迁移到 `GameRenderPipeline.cpp`，删除旧文件 |
-| 6 | **GameContext 加 World*** | 可选：在 `GameContext` 中直接加 `World*` 指针，方便各模块直接访问 |
-| 7 | **Editor 端 World 直接访问** | `EditorLayout.cpp` 等通过 `m_context->SceneMgr->GetRegistry()` 的调用改为 `m_context->SceneMgr->GetWorld()->GetRegistry()` |
+| # | 原任务 | 当前状态 |
+|:-:|:-------|:---------|
+| P0-1 | `GameWorld_*.cpp` 引用旧成员 | ✅ 旧文件已删除，所有构建器/渲染器访问走 `m_renderPipeline.GetXXX()` |
+| P0-2 | GameRenderPipeline 系统注册实现 | ✅ `GameRenderPipeline.cpp` 有 14 个 Register 方法完整实现（1455 行） |
+| P0-3 | GameWorld.cpp 调用适配 | ✅ 只调用 `m_renderPipeline.RegisterXXX()`，无重复旧调用 |
+| P2-5 | GameWorld_*.cpp 完全迁移 | ✅ 旧文件 `GameWorld_Builder.cpp`/`GameWorld_RenderSystems.cpp` 等已删除 |
+| P2-6 | GameContext 加 World* | 可选，待推进 |
