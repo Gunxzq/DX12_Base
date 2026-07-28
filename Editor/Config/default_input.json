@@ -2,22 +2,20 @@
   "version": "1.0",
   "bindings": {
     "Move": [
-      { "keys": ["W", "A", "S", "D"], "axis_map": {"W": "Y+", "S": "Y-", "A": "X-", "D": "X+"} },
-      { "keys": ["Up", "Left", "Down", "Right"], "axis_map": {"Up": "Y+", "Down": "Y-", "Left": "X-", "Right": "X+"} }
+      { "keys": ["W", "A", "S", "D"], "axis_map": {"W": "Y+", "S": "Y-", "A": "X-", "D": "X+"}, "modifier": "Mouse_Right" },
+      { "keys": ["Up", "Left", "Down", "Right"], "axis_map": {"Up": "Y+", "Down": "Y-", "Left": "X-", "Right": "X+"}, "modifier": "Mouse_Right" }
     ],
     "Look": [
       { "device": "Mouse", "axis": "Delta" }
     ],
     "MoveUp": [
-      { "key": "Space" },
-      { "key": "E" }
+      { "key": "Space", "modifier": "Mouse_Right" }
     ],
     "MoveDown": [
-      { "key": "LeftControl" },
-      { "key": "Q" }
+      { "key": "LeftControl", "modifier": "Mouse_Right" }
     ],
     "Sprint": [
-      { "key": "LeftShift", "requires": "W" }
+      { "key": "LeftShift", "requires": "Mouse_Right" }
     ],
     "Select": [
       { "key": "Mouse_Left" }
@@ -47,14 +45,14 @@
     "Redo": [
       { "key": "Y", "modifiers": ["LeftControl"] }
     ],
-    "GizmoTranslate": [
+    "ToolCursor": [
+      { "key": "Q" }
+    ],
+    "ToolTranslate": [
       { "key": "W" }
     ],
-    "GizmoRotate": [
+    "ToolRotate": [
       { "key": "E" }
-    ],
-    "GizmoScale": [
-      { "key": "R" }
     ],
     "Save": [
       { "key": "S", "modifiers": ["LeftControl"] }
@@ -69,11 +67,11 @@
   "contexts": {
     "Gameplay": {
       "priority": 10,
-      "enabled_actions": ["Move", "Look", "MoveUp", "MoveDown", "Sprint", "Select", "OrbitCamera", "FocusSelection", "Delete", "Duplicate", "Undo", "Redo", "GizmoTranslate", "GizmoRotate", "GizmoScale", "Save", "Open", "SaveAs"]
+      "enabled_actions": ["Move", "Look", "MoveUp", "MoveDown", "Sprint", "Select", "OrbitCamera", "FocusSelection", "Delete", "Duplicate", "Undo", "Redo", "Save", "Open", "SaveAs"]
     },
     "Viewport": {
       "priority": 15,
-      "enabled_actions": ["Move", "Look", "MoveUp", "MoveDown", "Sprint", "Select", "OrbitCamera", "Zoom", "Pan", "FocusSelection"]
+      "enabled_actions": ["Move", "Look", "MoveUp", "MoveDown", "Sprint", "Select", "OrbitCamera", "Zoom", "Pan", "FocusSelection", "ToolCursor", "ToolTranslate", "ToolRotate"]
     },
     "UI": {
       "priority": 20,

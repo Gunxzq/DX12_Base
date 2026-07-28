@@ -58,9 +58,40 @@
     "grid_spacing": "网格间距",
 
     "toolbar_cursor": "光标",
-    "toolbar_translate": "平移",
-    "toolbar_rotate": "旋转",
-    "toolbar_cursor_view": "视图",
-    "toolbar_cursor_select": "选择"
+    "toolbar_translate": "平移 (W)",
+    "toolbar_rotate": "旋转 (E)",
+    "toolbar_cursor_view": "视图 (Q)",
+    "toolbar_cursor_select": "选择 (Q)",
+
+    "properties_no_selection": "未选中实体",
+    "properties_add_component": "+ 添加组件",
+
+    "component_transform": "变换",
+    "component_transform_position": "位置",
+    "component_transform_rotation": "旋转",
+    "component_transform_scale": "缩放",
+
+    "component_light": "光源",
+    "component_light_type": "类型",
+    "component_light_color": "颜色",
+    "component_light_range": "范围",
+    "component_light_spot_power": "聚光强度",
+    "component_light_cast_shadow": "投射阴影",
+    "component_light_shadow_bias": "阴影偏移",
+    "component_light_falloff_start": "衰减起始",
+    "component_light_falloff_end": "衰减结束",
+
+    "component_camera": "相机",
+    "component_camera_projection": "投影",
+    "component_camera_fov": "视野",
+    "component_camera_ortho_size": "正交大小",
+    "component_camera_near": "近裁剪面",
+    "component_camera_far": "远裁剪面",
+    "component_camera_is_main": "主相机",
+
+    "preview_light": "光照",
+    "preview_light_strength": "强度",
+    "preview_light_x": "X",
+    "preview_light_y": "Y"
   }
 }

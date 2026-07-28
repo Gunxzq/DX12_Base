@@ -58,9 +58,40 @@
     "grid_spacing": "Grid Spacing",
 
     "toolbar_cursor": "Cursor",
-    "toolbar_translate": "Translate",
-    "toolbar_rotate": "Rotate",
-    "toolbar_cursor_view": "View",
-    "toolbar_cursor_select": "Select"
+    "toolbar_translate": "Translate (W)",
+    "toolbar_rotate": "Rotate (E)",
+    "toolbar_cursor_view": "View (Q)",
+    "toolbar_cursor_select": "Select (Q)",
+
+    "properties_no_selection": "No entity selected",
+    "properties_add_component": "+ Add Component",
+
+    "component_transform": "Transform",
+    "component_transform_position": "Position",
+    "component_transform_rotation": "Rotation",
+    "component_transform_scale": "Scale",
+
+    "component_light": "Light",
+    "component_light_type": "Type",
+    "component_light_color": "Color",
+    "component_light_range": "Range",
+    "component_light_spot_power": "Spot Power",
+    "component_light_cast_shadow": "Cast Shadow",
+    "component_light_shadow_bias": "Shadow Bias",
+    "component_light_falloff_start": "Falloff Start",
+    "component_light_falloff_end": "Falloff End",
+
+    "component_camera": "Camera",
+    "component_camera_projection": "Projection",
+    "component_camera_fov": "Field of View",
+    "component_camera_ortho_size": "Ortho Size",
+    "component_camera_near": "Near Plane",
+    "component_camera_far": "Far Plane",
+    "component_camera_is_main": "Main Camera",
+
+    "preview_light": "Light",
+    "preview_light_strength": "Strength",
+    "preview_light_x": "X",
+    "preview_light_y": "Y"
   }
 }

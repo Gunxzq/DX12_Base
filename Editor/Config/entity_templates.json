@@ -1,0 +1,93 @@
+{
+    "version": 1,
+    "templates": [
+        {
+            "name": "Empty",
+            "category": "General",
+            "description": "一个空的变换节点，可作为父级组织子物体",
+            "icon": "empty",
+            "icon_unicode": "e79c",
+            "components": {
+                "transform": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] }
+            }
+        },
+        {
+            "name": "Camera",
+            "category": "Rendering",
+            "description": "透视或正交相机，定义场景的观察视角",
+            "icon": "camera",
+            "icon_unicode": "e9f5",
+            "components": {
+                "transform": { "position": [0, 5, -10], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "camera": { "fov": 60, "nearPlane": 0.1, "farPlane": 1000.0, "projection": "perspective", "isMain": false }
+            }
+        },
+        {
+            "name": "Directional Light",
+            "category": "Lighting",
+            "description": "方向光，模拟太阳等无限远光源",
+            "icon": "light",
+            "icon_unicode": "e664",
+            "components": {
+                "transform": { "position": [0, 40, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "light": { "type": "directional", "color": [1, 1, 1, 1], "intensity": 1.0 }
+            }
+        },
+        {
+            "name": "Point Light",
+            "category": "Lighting",
+            "description": "点光源，向四周均匀发光",
+            "icon": "light",
+            "icon_unicode": "e65b",
+            "components": {
+                "transform": { "position": [0, 5, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "light": { "type": "point", "color": [1, 1, 1, 1], "intensity": 1.0, "range": 10.0 }
+            }
+        },
+        {
+            "name": "Spot Light",
+            "category": "Lighting",
+            "description": "聚光灯，锥形照射范围",
+            "icon": "light",
+            "icon_unicode": "e66c",
+            "components": {
+                "transform": { "position": [0, 10, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "light": { "type": "spot", "color": [1, 1, 1, 1], "intensity": 1.0, "range": 20.0 }
+            }
+        },
+        {
+            "name": "Cube",
+            "category": "Primitives",
+            "description": "立方体网格实体",
+            "icon": "mesh",
+            "icon_unicode": "e878",
+            "components": {
+                "transform": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "mesh": { "geometry": "", "material": "" },
+                "opaque": null
+            }
+        },
+        {
+            "name": "Billboard",
+            "category": "Rendering",
+            "description": "公告牌，始终面向相机的平面",
+            "icon": "billboard",
+            "icon_unicode": "",
+            "components": {
+                "transform": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+                "transparent": null
+            }
+        },
+        {
+            "name": "Water Plane",
+            "category": "Environment",
+            "description": "水体平面，包含波浪效果",
+            "icon": "water",
+            "icon_unicode": "e602",
+            "components": {
+                "transform": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [50, 1, 50] },
+                "water": { "amplitude": 0.5, "frequency": 1.0, "speed": 1.0, "direction": [1, 0, 0] }
+            }
+        }
+    ]
+}
