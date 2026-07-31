@@ -118,6 +118,14 @@
 三者零引用，只共享命名/序号约定。
 ```
 
+### 4.5 骨骼 = 可见部件（UKW 上下文，2026-08-01 确认）
+
+UKW 极老，**无独立骨架资产**：HOD 拼接部件（实体 `.x` 模型）本身就是骨骼。排除武装（gun/sword/Shield/Weapon_point 等）后，剩余部件即全部可见骨骼。
+
+- 含义 1：**IK 修改骨骼矩阵 = 直接驱动可见部件**，无中间蒙皮层级，天然直观
+- 含义 2：骨架为**链式层级 + 局部矩阵**（`arm1→arm2→Hand`、`leg1→leg2→leg3`），非锚点扁平结构；真实骨架树见 `02_RobotAndAnimation.md` §8.1
+- 含义 3：机体间骨骼命名/结构不统一（KD-06 大写 Arm1/Arm2/Arm3 + Wing/Tail），**链定义必须母版驱动**，不能硬编码骨骼名（详见 `02_RobotAndAnimation.md` §8.3）
+
 ---
 
 ## 五、Animation 原子资产（`.anim`）
@@ -283,12 +291,26 @@ enum class AssetType : uint8_t {
 
 | 阶段 | 内容 | 依赖 |
 |:----|:------|:------|
-| A | `.bone` 格式 + `SkeletonManager::LoadFromJSON` | HODParser 已有 TRS 输出 |
-| B | `.anim` 格式 + ANI 解析为剪辑 | `02_RobotAndAnimation.md` §二 结构分析 |
+| A | `.bone` 格式 + `SkeletonManager::LoadFromJSON` | ✅ 已完成（2026-07-31，含转置 bug 修复，与 nested.x 验证一致） |
+| B1 | **ANI 解析器**：文件名头 + HOD/HD2 块序列 → 每帧部件局部矩阵 → 按组提取（Tail 状态机） | ✅ 已完成（2026-07-31，`ANIParser`，1.008 + PUK 双格式，标记法 + 母版驱动，25 机体全量拆解） |
+| B1.5 | **ANI 母版管线**：`ANIParser::GetMaster()` 解析母版骨架（部件名 + A/B 层级）；`RobotMerger::MergeFromANI()` 母版驱动合并 → 输出 x/fbx/bone | ✅ 已实现（2026-07-31；绑定矩阵暂用同目录 Robo.hod，母版骨架用于校验，PUK 母版数据区 TRS 格式待逆向） |
+| B2 | `.anim` 现代化资产：全量转切分剪辑 + `AnimLoader` 接入 AssetManager | B1 |
+| B2.5 | **动画 + Tail 合并输出**：全部动画帧矩阵 + Tail 状态机按组分隔输出到单一 TXT（不分文件夹） | B1 + B1.5 |
 | C | `.character` 格式 + CharacterLoader + 依赖收集 | A + B + 材质槽数组化 |
 | D | 场景 `character` 组件 + SceneConstructor 装配 | C |
 | E | 动画状态机（Play/Pause/Seek） | B + SkinnedAnimation.md |
 | F | 挂点系统（socket 消费） | 现有 RelationshipComponent |
+| G | **运行时 IK（脚步着地 + 手部瞄准）** | 蒙皮管线（SkeletalMeshAssetPipeline）+ 骨架资产 |
+
+> **IK 方案（2026-08-01 定案，B 方案已实现）**：
+> - 关节**必然多轴**（EXVS 目标 + 四台机体实测确认），求解器选 **FABRIK/CCD 无轴约束迭代求解**，不做铰链锁轴
+> - **B 方案 ✅ 已完成**：AssetTool/CLI 新增 `ani2ik` 命令 + `IKSolver.h/.cpp`（FABRIK + 母版驱动链识别），KD-03/KD-06 离线验证通过（链识别 4/4、可达目标精确收敛、大写变体 Arm1→Arm2→Arm3→Hand 兼容）。详见 `02_RobotAndAnimation.md` §8.5
+> - **求解器暂不移入引擎**（用户决策）；通用 IK 库只覆盖位置求解、链识别/矩阵往返需自研，暂不引入第三方库
+> - 引擎侧 IK 链定义必须**母版驱动**（机体间骨骼命名不统一，KD-06 大写变体），详见 `02_RobotAndAnimation.md` §8
+
+> **分工原则（2026-07-31 定案）**：ANI 逆向分两步走——**先实现解析器**（得到骨骼关键帧数据），**如何变为现代化资产（.anim 格式 + 加载器）是下一步的事**。HOD 结果（.bone）已可作初始姿势/动画帧 0，ANI 解析时以母版骨架（HD2 类型=0 / HOD 首块）为命名契约，骨骼变换统一公式（Body_d 修正 + 层级累乘 + Ry180°）对 HOD 与 ANI 通用。
+>
+> **步骤划分（2026-07-31 更新）**：导入机体的合并部件功能调整为——① 解析 ANI 母版拿骨骼（部件名 + A/B）；② 合并部件输出母版对应 x/fbx/bone；③ 拿全部动画数据，Tail 按动画数据分隔输出到同一 TXT（不分文件夹）。当前完成 ①②（B1.5），③ 为下一任务（B2.5）。最终目标是包含动画信息的 FBX + 状态机 Tail 文本。
 
 ---
 

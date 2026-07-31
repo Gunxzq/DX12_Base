@@ -259,7 +259,7 @@ HODParser 已有输出格式，包含部件名/父子关系/TRS。无需额外�
 | **B** | **AssetToolGUI: 添加"导入机体"按钮** | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现 |
 | **C** | **引擎侧: SkeletonManager 加载 hod.json** — 从 JSON 加载骨架数据并注册 | `SkeletonManager.h/.cpp` | ❌ 未实现 |
 | **D** | **引擎侧: SkinnedComponent 接入** — 场景加载时创建 SkinnedComponent | `SceneConstructor.cpp` | ⚠️ 框架已有 |
-| **E** | **ANI 动画解析（暂缓）** | — | ❌ 暂缓 |
+| **E** | **ANI 动画解析** | `AssetTool/Core/ANIParser.cpp` | ✅ 已实现（2026-07-31，1.008 + PUK 双格式，标记法 + 母版驱动） |
 
 > 注意：Step A 的 CLI 版本（`main.cpp` 的 `CommandImportRobot`）不含 A1/A2 的修正步骤，功能落后于 GUI 版本。未来应考虑目录重构：`AssetTool/Core/` 公共逻辑、`AssetTool/CLI/`、`AssetTool/GUI/`。
 
@@ -286,7 +286,7 @@ AssetTool 转换时若缺少部分字段（如材质纹理引用、COLORSET 参�
 
 ### 6.3 动画解析（暂缓）
 
-`.ani` 文件解析（AN2/HD2 格式 + 状态机）当前不处理。骨架数据（.hod.json）已足够支持静态展示和蒙皮网格的 SubMesh 验证。
+`.ani` 文件解析（文件名头 + HOD 块序列 + Tail 状态机脚本）当前不处理。骨架数据（.hod.json）已足够支持静态展示和蒙皮网格的 SubMesh 验证。
 
 ### 6.4 后续可能的资产管线扩展
 

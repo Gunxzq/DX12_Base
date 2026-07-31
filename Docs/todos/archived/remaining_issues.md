@@ -23,6 +23,12 @@
 | 2 | 公告牌程序化体积生成 | P3 | `BillboardVolumeDesc` + CPU 生成，见 `BillboardSystemArchitecture.md` |
 | 3 | 蒙皮角色 JSON 加载 | P3 | 需 AssetTool 将 `.m3d` 导出为 `.dxmesh`（含 `DxMeshFlag_Skinned`） |
 
+### 动画管线（2026-07-31 定案）
+
+| # | 任务 | 优先级 | 说明 |
+|:-:|:-----|:-------|:------|
+| 3a | **ANI 解析器** | P1 | ✅ 已完成（2026-07-31）：`ANIParser` 读 `Script.ani`（文件名头 + HOD/HD2 块序列）→ 按组提取帧矩阵 + Tail 状态机。1.008 原版（HOD）与 PUK 2.008（AN2+HD2）双格式，标记法 + 母版驱动，无固定步长，25 机体全量拆解成功。**下一步：B2 `.anim` 现代化资产（全量转切分剪辑 + AnimLoader）**。详见 `Docs/architecture/CharacterAsset.md` §九 阶段 B1/B2 |
+
 ### 基础设施改进
 
 | # | 任务 | 优先级 | 说明 |

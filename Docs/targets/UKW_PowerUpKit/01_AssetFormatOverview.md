@@ -20,7 +20,7 @@ Ultimate Knight WindomXP PowerUp Kit/
 │   │   ├── hangar.hod      #     机库展示组装文件
 │   │   ├── Script.spt      #     状态机/角色定义（文本，Shift-JIS）
 │   │   ├── Script.spt.a    #     编译后的状态机（二进制/加密）
-│   │   ├── Script.ani      #     动画关键帧（二进制，"AN2" 格式）
+│   │   ├── Script.ani      #     动画帧序列（文件名头 + HOD 块，1.008 原版明文）
 │   │   ├── root.x          #     骨架根节点网格
 │   │   ├── Body.x / Body_d.x    # 身体（正常/受损）
 │   │   ├── Head.x / Head_.x     # 头部
@@ -75,7 +75,7 @@ Ultimate Knight WindomXP PowerUp Kit/
 | 场景组装脚本 | `Script.spt` | 文本（Shift-JIS） | 地图的装配指令（瓦片、建筑、光照、BGM） |
 | 角色状态机 | `Script.spt` | 文本（Shift-JIS） | 机体属性、AI、颜色方案、武器定义 |
 | 编译状态机 | `Script.spt.a` | 二进制（加密） | .spt 编译后的二进制形式 |
-| 动画 | `Script.ani` | 二进制（"AN2"） | 每骨骼关键帧数据 |
+| 动画 | `Script.ani` | 二进制（文件名头 + HOD 块，1.008 原版；PUK 2.008 为 HD2 块） | 每帧部件局部矩阵 |
 | 机体组装 | `.hod` | 二进制（"HOD"） | 部件 .x 文件列表 + 4x4 变换矩阵 |
 | 瓦片地图 | `.mpd` | 二进制（"MPD"） | 瓦片格网索引表 |
 | 网格 | `.x` | 二进制（"xof 0303bin"） | DirectX X File v3.03，含 Mesh/Normal/UV/Material |
@@ -424,7 +424,7 @@ void CipherFile(int key, char* path) {
 |--------|---------|-----------|------|
 | `.x` | **未加密** | 标准 DirectX XFile v3.03 | PowerUp Kit 已明文，可直接解析 |
 | `.hod` | XOR (key=0x0B7E7759) | 二进制（部件名+矩阵） | 需解密后读取 |
-| `.ani` | XOR (key=0x0B7E7759) | 二进制（"AN2" + "HD2" 块） | 需解密后读取 |
+| `.ani` | 1.008 原版实测明文（XOR 仅部分版本） | 二进制（文件名头 + HOD/HD2 块序列；PUK 2.008 为 AN2+HD2） | 直接读取 |
 | `.mpd` | XOR (key=0x0B7E7759) | 二进制（"MPD" 瓦片索引） | 需解密后读取 |
 | `.sdt` | XOR (key=0x0B7E7759) | 二进制（选择描述） | 需解密后读取 |
 | `.fx` | XOR (key=0x0B7E7759) | 文本 (HLSL) | 需解密后读取（但 data/*.txt 已明文） |
@@ -550,7 +550,7 @@ HODParser 已有完整输出，引擎侧需实现 JSON 加载接口。
 
 ```
 .ani 文件 → 未来解析为 AnimationClip → 动画 System
-  ├─ AN2 魔术头 + HD2 骨骼通道
+  ├─ 文件名头 "ANIRobo.hod" + 连续 HOD 块（每块 = 一帧部件局部矩阵）
   ├─ 每骨骼位置(float3) + 旋转(quaternion)
   └─ 状态机定义（Script.spt 中）
 ```

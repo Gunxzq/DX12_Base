@@ -15,6 +15,8 @@
 
 #include "Core/RobotMerger.h"
 #include "Core/HODParser.h"
+#include "Core/ANIParser.h"
+#include "Core/IKSolver.h"
 #include "Core/MPDParser.h"
 #include "Core/ScriptSPTParser.h"
 #include "Core/TextureConverter.h"
@@ -36,6 +38,7 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <cctype>
 
 namespace fs = std::filesystem;
 
@@ -1236,6 +1239,214 @@ static int CommandMap(const std::vector<std::string> &args) {
 // 使用 RobotMerger 核心逻辑（含 Body_d 修正、Ry(180°)、LR 交换）
 // ==========================================================================
 
+// ==========================================================================
+// 命令：ani2output — 解析 Script.ani 动画源文件，按组输出 HOD 帧 + Tail
+// ==========================================================================
+
+static int CommandANI2Output(const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        std::cerr << "Usage: AssetTool ani2output <Script.ani> <output_dir>\n";
+        return 1;
+    }
+
+    std::string aniPath = args[0];
+    std::string outDir = args[1];
+
+    std::cout << "[ani2output] " << aniPath << " → " << outDir << "\n";
+
+    AssetTool::ANIParser parser;
+    if (!parser.ParseFile(aniPath)) {
+        std::cerr << "[ani2output] FAILED: " << parser.GetError() << "\n";
+        return 1;
+    }
+
+    const auto &groups = parser.GetGroups();
+    std::cout << "[ani2output] OK — " << groups.size() << " groups\n";
+    size_t totalFrames = 0;
+    for (const auto &g : groups) {
+        totalFrames += g.frames.size();
+        std::cout << "  组 " << g.index << ": " << g.frames.size() << " 帧"
+                  << (g.tail.script.empty() ? "" : " + Tail")
+                  << (g.tail.scriptText.empty() ? "" : " (脚本)") << "\n";
+    }
+    std::cout << "[ani2output] 总帧数: " << totalFrames << "\n";
+
+    if (!parser.WriteOutput(outDir)) {
+        std::cerr << "[ani2output] FAILED: 输出目录写入失败\n";
+        return 1;
+    }
+    std::cout << "[ani2output] DONE → " << outDir << "\n";
+    return 0;
+}
+
+// ==========================================================================
+// 命令：ani2anim — 解析 Script.ani 动画源文件，各组帧数据 → 动画 FBX
+//   每个动画组（Tail 标记划分）→ aiAnimation，含全部骨骼 aiNodeAnim 通道
+// ==========================================================================
+
+static int CommandANI2Anim(const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        std::cerr << "Usage: AssetTool ani2anim <Script.ani> <output_dir> [stem]\n";
+        return 1;
+    }
+
+    std::string aniPath = args[0];
+    std::string outDir = args[1];
+    std::string stem = (args.size() >= 3) ? args[2] : "Robo";
+
+    std::cout << "[ani2anim] " << aniPath << " → " << outDir << " (stem=" << stem << ")\n";
+
+    auto result = AssetTool::RobotMerger::ExportAnimationsFBX(aniPath, outDir, stem);
+    if (!result.success) {
+        std::cerr << "[ani2anim] FAILED: " << result.error << "\n";
+        return 1;
+    }
+    std::cout << "[ani2anim] OK — " << result.partCount << " 骨骼通道 → " << result.outputFiles.front() << "\n";
+    return 0;
+}
+
+// ==========================================================================
+// 命令：ani2frames — 每帧导出嵌套 x（调试/观察：从 x 逐个看 ANI 动作姿势）
+// ==========================================================================
+
+static int CommandANI2Frames(const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        std::cerr << "Usage: AssetTool ani2frames <Script.ani> <output_dir> [stem]\n";
+        return 1;
+    }
+
+    std::string aniPath = args[0];
+    std::string outDir = args[1];
+    std::string stem = (args.size() >= 3) ? args[2] : "Robo";
+
+    std::cout << "[ani2frames] " << aniPath << " → " << outDir << " (stem=" << stem << ")\n";
+
+    auto result = AssetTool::RobotMerger::ExportAnimationFramesX(aniPath, outDir, stem);
+    if (!result.success) {
+        std::cerr << "[ani2frames] FAILED: " << result.error << "\n";
+        return 1;
+    }
+    std::cout << "[ani2frames] OK — " << result.partCount << " 帧 → " << outDir << "\n";
+    return 0;
+}
+
+// ==========================================================================
+// CommandANI2IK — B 方案：FABRIK 离线验证（脚贴地 / 手瞄准）
+// 从 ANI 首帧 HOD（= 母版骨架，含部件名/A/B/矩阵）识别 arm/leg 链，
+// 用母版驱动链定义（兼容 KD-06 大写 Arm1/Arm2/Arm3 变体），对每条链
+// 施加演示目标（leg → 末端 Y 压地；arm → 末端前移），FABRIK 求解后
+// 输出报告：求解前后末端位置、误差、迭代数、每骨骼局部矩阵。
+// 参考：Docs/targets/UKW_PowerUpKit/02_RobotAndAnimation.md §8.5
+// ==========================================================================
+static int CommandANI2IK(const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        std::cerr << "Usage: AssetTool ani2ik <Script.ani> <output_dir> [stem]\n";
+        return 1;
+    }
+
+    std::string aniPath = args[0];
+    std::string outDir = args[1];
+    std::string stem = (args.size() >= 3) ? args[2] : "Robo";
+
+    std::cout << "[ani2ik] " << aniPath << " → " << outDir << " (stem=" << stem << ")\n";
+
+    // 1. 解析 ANI，取首帧 HOD 数据（母版骨架：部件名 + A/B + 矩阵）
+    AssetTool::ANIParser parser;
+    if (!parser.ParseFile(aniPath)) {
+        std::cerr << "[ani2ik] FAILED: " << parser.GetError() << "\n";
+        return 1;
+    }
+    const auto &groups = parser.GetGroups();
+    if (groups.empty() || groups[0].frames.empty()) {
+        std::cerr << "[ani2ik] FAILED: 无动画帧数据\n";
+        return 1;
+    }
+    const auto &frameData = groups[0].frames[0].data;
+
+    // 2. HOD 解析 → 骨架树
+    AssetTool::HODParser hodParser;
+    if (!hodParser.Parse(frameData.data(), frameData.size())) {
+        std::cerr << "[ani2ik] FAILED: HOD 解析失败: " << hodParser.GetError() << "\n";
+        return 1;
+    }
+    const auto &hod = hodParser.GetResult();
+    std::cout << "[ani2ik] 骨架 " << hod.BoneCount() << " 骨骼\n";
+
+    // 3. 母版驱动链识别（arm/leg，兼容大小写）
+    auto chains = AssetTool::IKSolver::FindChains(hod);
+    if (chains.empty()) {
+        std::cerr << "[ani2ik] FAILED: 未识别到 arm/leg 链\n";
+        return 1;
+    }
+    std::cout << "[ani2ik] 识别 " << chains.size() << " 条链\n";
+
+    // 4. 逐链求解 + 报告
+    std::string reportPath = (fs::path(outDir) / (stem + "_ik_report.txt")).string();
+    std::ofstream ofs(reportPath);
+    if (!ofs) {
+        std::cerr << "[ani2ik] FAILED: 无法写入报告 " << reportPath << "\n";
+        return 1;
+    }
+    ofs << "# " << stem << " IK 离线验证报告（FABRIK 多轴无约束）\n";
+    ofs << "# 源: " << aniPath << "\n";
+    ofs << "# 初始姿势: " << groups[0].frames[0].name << "\n\n";
+
+    int chainIdx = 0;
+    int okCount = 0;
+    for (auto &chain : chains) {
+        ++chainIdx;
+        const auto &last = chain.joints.back();
+
+        // 演示目标：leg → 末端 Y 压到 0（脚贴地）；arm → 末端沿 +X 前移 0.2
+        std::string lower;
+        for (char c : chain.name)
+            lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        float target[3] = {last.position[0], last.position[1], last.position[2]};
+        if (lower.find("leg") != std::string::npos)
+            target[1] = 0.0f;      // 脚贴地
+        else
+            target[0] += 0.2f;     // 手瞄准（前移）
+
+        // FABRIK 求解
+        auto res = AssetTool::IKSolver::SolveFABRIK(chain.joints, target);
+        AssetTool::IKSolver::ApplyPositionsToLocal(chain, hod);
+
+        ofs << "== 链 " << chainIdx << ": " << chain.name
+            << " (" << chain.joints.size() << " 关节) ==";
+        ofs << (res.success ? " [收敛]" : " [未收敛]") << "\n";
+        ofs << "  关节: ";
+        for (const auto &j : chain.joints)
+            ofs << j.name << " ";
+        ofs << "\n";
+        ofs << "  目标: (" << target[0] << ", " << target[1] << ", " << target[2] << ")\n";
+        for (size_t i = 0; i < chain.joints.size(); ++i) {
+            const auto &j = chain.joints[i];
+            ofs << "    位置[" << i << "] " << j.name << " = ("
+                << j.position[0] << ", " << j.position[1] << ", " << j.position[2] << ")\n";
+        }
+        ofs << "    误差: " << res.error << "  迭代: " << res.iterations << "\n";
+        for (size_t i = 0; i < chain.solvedLocalMats.size(); ++i) {
+            const auto &m = chain.solvedLocalMats[i];
+            ofs << "    局部矩阵[" << i << "] " << chain.joints[i].name << ":";
+            for (int k = 0; k < 16; ++k)
+                ofs << " " << m.m[k];
+            ofs << "\n";
+        }
+        ofs << "\n";
+
+        std::cout << "  [链 " << chainIdx << "] " << chain.name
+                  << (res.success ? " OK" : " 未收敛")
+                  << " 误差=" << res.error << "\n";
+        if (res.success)
+            ++okCount;
+    }
+
+    ofs.close();
+    std::cout << "[ani2ik] DONE — " << okCount << "/" << chains.size()
+              << " 链收敛 → " << reportPath << "\n";
+    return 0;
+}
+
 static int CommandImportRobot(const std::vector<std::string> &args) {
     if (args.size() < 2) {
         std::cerr << "Usage: AssetTool importrobot <Robo.hod> <output_dir>\n";
@@ -1359,10 +1570,19 @@ static void PrintUsage(const char *progName) {
     std::cout << "  " << progName << " batch <input_dir> <output_dir>\n";
     std::cout << "      Batch convert all assets in a directory\n\n";
     std::cout << "  " << progName << " importrobot <Robo.hod> <output_dir> [--no-lrswap] [--export-x] [--export-fbx]\n";
-    std::cout << "      Import robot: merge .x parts + skeleton → .dxmesh + hod.json + scene.json\n";
+    std::cout << "      Import robot: merge .x parts + skeleton → .dxmesh + .bone + hod.json + scene.json\n";
     std::cout << "        --no-lrswap  disable LR bone swap\n";
     std::cout << "        --export-x   export .x with bone hierarchy (DE verification)\n";
     std::cout << "        --export-fbx export FBX with skeleton + skinning\n\n";
+    std::cout << "  " << progName << " ani2output <Script.ani> <output_dir>\n";
+    std::cout << "      Parse animation source: split by Tail marker into groups, each with HOD frames + Tail\n";
+    std::cout << "  " << progName << " ani2anim <Script.ani> <output_dir> [stem]\n";
+    std::cout << "      Export animation FBX: each group (Tail-marked) → aiAnimation with bone channels\n";
+    std::cout << "  " << progName << " ani2frames <Script.ani> <output_dir> [stem]\n";
+    std::cout << "      Export each frame as nested .x (debug): observe ANI poses per frame\n";
+    std::cout << "  " << progName << " ani2ik <Script.ani> <output_dir> [stem]\n";
+    std::cout << "      FABRIK offline validation (B plan): identify arm/leg chains from master skeleton,\n";
+    std::cout << "      solve foot-ground / hand-aim demo targets, write {stem}_ik_report.txt\n\n";
     std::cout << "  " << progName << " map <input_map_dir> <output_dir>\n";
     std::cout << "      Map pipeline: scan all .x + parse MPD/SPT → complete scene.json\n\n";
     std::cout << "  " << progName << " x2mapanalysis <combined.map.x> <tiles_dir> [output.txt]\n";
@@ -1408,6 +1628,14 @@ int main(int argc, char *argv[]) {
         return CommandBatch(args);
     } else if (command == "importrobot") {
         return CommandImportRobot(args);
+    } else if (command == "ani2output") {
+        return CommandANI2Output(args);
+    } else if (command == "ani2anim") {
+        return CommandANI2Anim(args);
+    } else if (command == "ani2frames") {
+        return CommandANI2Frames(args);
+    } else if (command == "ani2ik") {
+        return CommandANI2IK(args);
     } else if (command == "map") {
         return CommandMap(args);
     } else if (command == "x2mapanalysis") {

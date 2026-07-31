@@ -54,11 +54,28 @@ public:
                                                const RobotMergeOptions &options,
                                                ProgressCallback callback = nullptr);
 
-private:
-    // 筛选可渲染部件
-    static bool IsRenderBone(const std::string &name);
+    /// 从 ANI 母版驱动合并：解析 Script.ani 母版骨架（部件名 + A/B 层级），
+    /// 绑定矩阵暂用同目录 Robo.hod（HODParser），合并 .x 部件输出 x/fbx/bone
+    /// 母版骨架用于校验（部件数/部件名与 HOD 一致性），矩阵与合并流程复用 HOD
+    static RobotMergeResult MergeFromANI(const std::string &aniPath,
+                                         const std::string &outputDir,
+                                         const RobotMergeOptions &options = {});
 
-    // 4×4 行主序矩阵
+    /// 导出动画 FBX（B2.5）：解析 Script.ani 各动画组帧数据（标准 HOD 9847B，
+    /// HODParser 直解），每帧每骨骼 TRS → aiNodeAnim 关键帧 → aiAnimation
+    /// 输出 {outputDir}/{stem}_anim.fbx（独立动画文件，含骨骼节点树 + 动画通道）
+    static RobotMergeResult ExportAnimationsFBX(const std::string &aniPath,
+                                                const std::string &outputDir,
+                                                const std::string &stem);
+
+    /// 导出每帧 .x（调试/观察用）：解析 Script.ani 各组帧数据，每帧用帧世界矩阵
+    /// 组装嵌套 x（含网格），输出 {outputDir}/{组号}/{序号}_{帧名}.x
+    /// 便于从 x 文件角度逐个观察 ANI 中的动作姿势
+    static RobotMergeResult ExportAnimationFramesX(const std::string &aniPath,
+                                                   const std::string &outputDir,
+                                                   const std::string &stem);
+
+    /// 4×4 行主序矩阵（动画帧解析/层级累乘用）
     struct Mat4x4 {
         float m[16];
         static Mat4x4 Identity();
@@ -68,6 +85,10 @@ private:
         void TransformDirection(float &x, float &y, float &z) const;
         void TransformPointRaw(float &x, float &y, float &z) const;
     };
+
+private:
+    // 筛选可渲染部件
+    static bool IsRenderBone(const std::string &name);
 
     struct PartData {
         std::string name;

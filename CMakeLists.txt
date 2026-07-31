@@ -64,7 +64,37 @@ macro(filter_fx SOURCES_LIST)
 endmacro()
 
 # ========================================================================
-# 3.1 DX12Core — 稳定基础层（Common/Core/Event/Math/ECS/Platform）
+# 3.1a DX12ECS — ECS 核心层（分离为 DLL，减少 ECS 改动牵连）
+# ========================================================================
+file(GLOB_RECURSE ECS_SOURCES
+    "${ENGINE_DIR}/ECS/*.cpp"
+    "${ENGINE_DIR}/ECS/*.h"
+)
+
+add_library(DX12ECS SHARED ${ECS_SOURCES})
+
+target_include_directories(DX12ECS PUBLIC
+    ${ENGINE_DIR}
+)
+
+target_compile_definitions(DX12ECS PRIVATE DX12ECS_BUILD)
+
+target_compile_options(DX12ECS PRIVATE /MP)
+
+target_link_libraries(DX12ECS PUBLIC
+    EnTT::EnTT
+    spdlog::spdlog
+)
+
+set_target_properties(DX12ECS PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Bin/x64/Debug/Editor"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Bin/x64/Release/Editor"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/Bin/x64/RelWithDebInfo/Editor"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZELER "${CMAKE_BINARY_DIR}/Bin/x64/MinSizeRel/Editor"
+)
+
+# ========================================================================
+# 3.1 DX12Core — 稳定基础层（Common/Core/Event/Math/Platform/Scene）
 # ========================================================================
 file(GLOB_RECURSE CORE_SOURCES
     "${ENGINE_DIR}/Common/*.cpp"    "${ENGINE_DIR}/Common/*.h"
@@ -74,7 +104,6 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ENGINE_DIR}/Framework/*.cpp" "${ENGINE_DIR}/Framework/*.h"
     "${ENGINE_DIR}/Logger/*.cpp"    "${ENGINE_DIR}/Logger/*.h"
     "${ENGINE_DIR}/Math/*.cpp"      "${ENGINE_DIR}/Math/*.h"
-    "${ENGINE_DIR}/ECS/*.cpp"       "${ENGINE_DIR}/ECS/*.h"
     "${ENGINE_DIR}/Platform/*.cpp"  "${ENGINE_DIR}/Platform/*.h"
     "${ENGINE_DIR}/Scene/*.cpp"     "${ENGINE_DIR}/Scene/*.h"
     "${ENGINE_DIR}/Scheduler/*.cpp" "${ENGINE_DIR}/Scheduler/*.h"
@@ -98,9 +127,9 @@ target_compile_options(DX12Core PRIVATE /MP)
 target_precompile_headers(DX12Core PRIVATE "${ENGINE_DIR}/Common/Common.h")
 
 target_link_libraries(DX12Core PUBLIC
+    DX12ECS
     nlohmann_json::nlohmann_json
     concurrentqueue::concurrentqueue
-    EnTT::EnTT
     spdlog::spdlog
     Jolt::Jolt
     mimalloc-static
@@ -554,34 +583,49 @@ target_include_directories(NetworkP2PTest PRIVATE
 # ========================================================================
 # 8. 构建 AssetTool — UKW PowerUp Kit 离线资产转换工具
 #
-# 两个目标：
-#   AssetTool     — CLI 控制台版本（6 个子命令）
-#   AssetToolGUI  — Win32 图形界面版本（目录选择+批量转换）
+# 目录结构：
+#   Core/   — 共享解析器 + RobotMerger 合并核心
+#   CLI/    — 控制台版本入口
+#   GUI/    — Win32 图形界面版本
 # ========================================================================
 
 set(ASSET_TOOL_SHARED_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/XORCipher.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/XORCipher.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/XFileParser.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/XFileParser.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/HODParser.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/HODParser.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/MPDParser.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/MPDParser.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/ScriptSPTParser.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/ScriptSPTParser.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/TextureConverter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/TextureConverter.h"
+    # Core: 解析器
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/XORCipher.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/XORCipher.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/XFileParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/XFileParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/XFileDirectReader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/XFileDirectReader.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/ObjParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/ObjParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/HODParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/HODParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/ANIParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/ANIParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/MPDParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/MPDParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/ScriptSPTParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/ScriptSPTParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/TextureConverter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/TextureConverter.h"
+    # Core: 合并核心
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/RobotMerger.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/RobotMerger.h"
+    # Core: IK（B 方案：FABRIK 离线验证）
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/IKSolver.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/IKSolver.h"
 )
 
 # ── AssetTool (CLI) ──
 add_executable(AssetTool
     ${ASSET_TOOL_SHARED_SOURCES}
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/CLI/main.cpp"
 )
 
-target_include_directories(AssetTool PRIVATE ${CMAKE_SOURCE_DIR}/Engine ${Stb_INCLUDE_DIR})
-target_link_libraries(AssetTool PRIVATE DX12Core nlohmann_json::nlohmann_json assimp::assimp)
+target_include_directories(AssetTool PRIVATE ${CMAKE_SOURCE_DIR}/Engine ${Stb_INCLUDE_DIR}
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool")
+target_link_libraries(AssetTool PRIVATE DX12Resource DX12Core nlohmann_json::nlohmann_json assimp::assimp)
 target_compile_options(AssetTool PRIVATE /MP)
 target_compile_definitions(AssetTool PRIVATE UNICODE _UNICODE)
 
@@ -593,12 +637,13 @@ set_target_properties(AssetTool PROPERTIES
 # ── AssetToolGUI (Win32) ──
 add_executable(AssetToolGUI WIN32
     ${ASSET_TOOL_SHARED_SOURCES}
-    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/AssetToolGUI.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/GUI/AssetToolGUI.cpp"
 )
 
-target_include_directories(AssetToolGUI PRIVATE ${CMAKE_SOURCE_DIR}/Engine ${Stb_INCLUDE_DIR})
+target_include_directories(AssetToolGUI PRIVATE ${CMAKE_SOURCE_DIR}/Engine ${Stb_INCLUDE_DIR}
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool")
 target_link_libraries(AssetToolGUI PRIVATE
-    DX12Core nlohmann_json::nlohmann_json assimp::assimp
+    DX12Resource DX12Core nlohmann_json::nlohmann_json assimp::assimp
     comctl32.lib ole32.lib shlwapi.lib
 )
 target_compile_options(AssetToolGUI PRIVATE /MP)

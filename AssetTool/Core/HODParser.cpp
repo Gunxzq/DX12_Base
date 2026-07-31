@@ -288,11 +288,11 @@ void HODData::BuildHierarchy() {
 void HODBone::DecomposeTRS() {
     using namespace DirectX;
 
+    // GetMatrix() 返回行主序矩阵（XMMatrixSet 按行主序填充 transform[0..15]）。
+    // XMMatrixDecompose 按 DirectXMath 行主序约定从第 4 行（r[3]）提取平移，
+    // 因此【不能转置】——转置会把平移移到第 4 列，导致 position 恒为 0
+    // （历史 bug：hod.json 的 position 全 0 的根因）。
     XMMATRIX mat = GetMatrix();
-
-    // XMMatrixDecompose 需要列主序矩阵，
-    // GetMatrix() 返回行主序，需要转置
-    mat = XMMatrixTranspose(mat);
 
     XMVECTOR scaleVec, rotVec, transVec;
     if (XMMatrixDecompose(&scaleVec, &rotVec, &transVec, mat)) {
