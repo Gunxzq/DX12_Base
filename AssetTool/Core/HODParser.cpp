@@ -239,41 +239,45 @@ bool HODParser::ParseFile(const std::string &filepath, uint32_t decryptKey) {
 void HODData::BuildHierarchy() {
     if (bones.empty()) return;
 
-    // A/B 前移编码：
-    //   bone[i] 的父节点信息和子节点数由 bone[i-1].rawA / bone[i-1].rawB 决定
-    //   bone[0] (root) 使用隐式值 A=0 (无父), B=1 (1个子节点)
-    // 
-    // 解码规则：
-    //   A = 父节点索引（1-based, 0=无父节点 → root）
-    //   B = 子节点数量
+    // A/B 含义（来自社区文档）：
+    //   A = 部件等级（数字越小等级越高），B = 子部件数量
+    // 文件按深度优先顺序存储，每个 entry 末尾的 A/B 属于下一个 entry
+    // bone[0] (root) 使用隐式值 A=0 (根节点等级), B 忽略
     //
-    // 子节点在 bones 数组中连续排列
+    // 构建算法：用栈维护当前层级路径
+    //   - 对于 bone[i] (i>=1)：其等级 = bone[i-1].rawA
+    //   - 在栈上回溯寻找等级 == 当前等级-1 的父节点
 
-    bones[0].parentIndex = -1;
-    int nextChildIdx = 1; // root 的第一个子节点索引
+    // 清空原有层级
+    for (auto &bone : bones) {
+        bone.parentIndex = -1;
+        bone.children.clear();
+    }
 
-    for (size_t i = 0; i < bones.size(); ++i) {
-        // 获取此节点的 A/B（前移：来自前一个 entry）
-        uint32_t childCount;
-        if (i == 0) {
-            childCount = 1; // root 隐式有 1 个子节点
-        } else {
-            // 前一个 entry 的 rawA = 此节点的父索引, rawB = 此节点的子节点数
-            int parentIdx = static_cast<int>(bones[i - 1].rawA) - 1; // 1-based → 0-based
-            if (parentIdx >= 0 && parentIdx < static_cast<int>(i)) {
-                bones[i].parentIndex = parentIdx;
-                bones[parentIdx].children.push_back(static_cast<uint32_t>(i));
-            } else {
-                // 回退：父节点为根
-                bones[0].children.push_back(static_cast<uint32_t>(i));
-            }
-            childCount = bones[i - 1].rawB;
+    bones[0].parentIndex = -1; // root 无父
+
+    // 栈：(bone_index, level)
+    std::vector<std::pair<uint32_t, uint32_t>> levelStack;
+    levelStack.push_back({0, 0}); // root 等级 0
+
+    for (size_t i = 1; i < bones.size(); ++i) {
+        uint32_t currentLevel = bones[i - 1].rawA; // 前移：前一 entry 的 rawA = 此 entry 的等级
+
+        // 回溯栈顶，找到等级 == currentLevel - 1 的父节点
+        while (!levelStack.empty() && levelStack.back().second >= currentLevel) {
+            levelStack.pop_back();
         }
-        // 为此节点分配子节点（后续 childCount 个连续索引）
-        // 子节点将在后续循环中被分配到正确的父节点，这里只需确保 nextChildIdx 同步
-        // 为避免 `unused variable` 警告，但我们需要 childCount 来推进子节点索引，
-        // 不过 forward-shift 机制下子节点索引自动由循环 i 确定。
-        (void)childCount;
+
+        if (!levelStack.empty() && levelStack.back().second == currentLevel - 1) {
+            uint32_t parentIdx = levelStack.back().first;
+            bones[i].parentIndex = static_cast<int>(parentIdx);
+            bones[parentIdx].children.push_back(static_cast<uint32_t>(i));
+        } else {
+            // 未找到匹配父节点，回退到根
+            bones[0].children.push_back(static_cast<uint32_t>(i));
+        }
+
+        levelStack.push_back({static_cast<uint32_t>(i), currentLevel});
     }
 }
 

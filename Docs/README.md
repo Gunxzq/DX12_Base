@@ -47,7 +47,8 @@
 | **EventSystemAndDataLayer** | 事件系统四层架构 + 数据层（ECS / SharedDataStore）关系 | ✅ |
 | **ResourceManager** | 资源管理器架构、AssetManager 设计 | ✅ 活跃 |
 | **RelationshipModel** | **实体关系模型：扁平 JSON + ID 引用，关系类型（parent/socket/group/follow），引擎 CORE 只存不处理，submesh 与实体边界** | 📋 新设计 |
-| **AssetSpecification** | **资产规范：原子资产（Mesh/Material/Texture 三元组）、复合资产（Scene/Terrain/ParticleSystem）、加载器注册表、文件格式规范** | 📋 新设计 |
+| **AssetSpecification** | **资产规范：原子资产（Mesh/Material/Texture/Skeleton/Animation 五元组）、复合资产（Character/Scene/Terrain/ParticleSystem）、加载器注册表、文件格式规范** | 📋 新设计 |
+| **CharacterAsset** | **角色复合资产（`.character`）：骨架 `.bone` + 网格 + 材质槽 + 动画剪辑 `.anim` 打包，可跨场景复用；场景只放实例引用。含动画播放/调帧能力设计** | 📋 新设计 |
 | **AssetArchitecture** | 资产体系架构设计思路、与几何系统子类型的关系、迁移步骤 | 📋 新设计 |
 | **AssetTypeDefinition** | **资产类型定义（AssetType）——新增类型时需同步修改的部分清单** | 📋 新设计 |
 

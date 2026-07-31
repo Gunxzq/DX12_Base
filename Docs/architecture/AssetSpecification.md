@@ -11,8 +11,19 @@
 | **Mesh** | `.dxmesh` | `GeometryResourceManager` | 顶点数据、索引数据、骨骼影响 |
 | **Material** | `.material` | `MaterialManager` | 着色器参数、纹理引用、PSO 状态 |
 | **Texture** | `.dds` / `.png` / `.jpg` | `TextureManager` + `GpuResourceManager` | 像素数据（2D、Cube、Array） |
+| **Skeleton** | `.bone` | `SkeletonManager` | 骨骼树 + rest pose（HOD 解析导出） |
+| **Animation** | `.anim` | `AnimationManager` | 骨骼动画剪辑（播放/调帧/循环） |
 
-**原则**：原子资产不引用其他资产（Material 引用 Texture 的路径，但运行时通过 Handle 解耦）。
+**原则**：原子资产不引用其他资产（Material 引用 Texture 的路径，但运行时通过 Handle 解耦；`.anim` 的通道骨骼名与 `.dxmesh` 的 `boneIndices` 一样只是命名/序号约定，不是资产引用）。
+
+**三者的边界**：
+
+```
+.dxmesh  → "顶点受哪些骨骼影响"（boneIndices 序号约定）
+.bone    → "骨骼树长什么样"（命名 + 层级 + rest pose）
+.anim    → "骨骼怎么动"（通道名命名约定）
+三者零引用，只共享命名/序号约定。详见 Docs/architecture/CharacterAsset.md
+```
 
 ### 复合资产
 
@@ -20,11 +31,11 @@
 
 | 复合资产 | 文件格式 | 运行时系统 | 描述 |
 |----------|---------|-----------|------|
+| **Character** | `.character` | `SceneConstructor` + 动画 System | 角色复合资产：骨架 + 网格 + 材质槽 + 动画剪辑打包（详见 `CharacterAsset.md`） |
 | **Scene** | `.scene` | `SceneConstructor` + ECS | 实体层级、组件、资产引用 |
 | **Terrain** | `.terrain` | `TerrainManager` | 高度图 → 程序化网格 + 材质层 |
 | **ParticleSystem** | `.particle` | `ParticleManager` | 粒子发射器配置、引用纹理/材质 |
 | **Prefab** | `.prefab` | `SceneConstructor` | 实体模板（实例化用） |
-| **Animation** | `.anim` | `AnimationManager` | 骨骼动画数据 |
 
 ### 复合资产加载时序
 
@@ -81,11 +92,24 @@
 │ .jpg    │                  │  ├─ TextureHandle      │
 └─────────┘                  │  └─ SRV 描述符         │
                               └──────────────────────┘
+┌─────────┐   SkeletonLoader  ┌──────────────────────┐
+│ .bone   ├──────────────────► │ SkeletonManager      │
+│ Skeleton│                   │  └─ SkeletonHandle    │
+└─────────┘                   └──────────────────────┘
+┌─────────┐   AnimLoader      ┌──────────────────────┐
+│ .anim   ├──────────────────► │ AnimationManager     │
+│ Animation│                  │  └─ ClipHandle        │
+└─────────┘                   └──────────────────────┘
 
 ┌─────────┐   SceneLoader     ┌──────────────────────┐
 │ .scene  ├──────────────────► │ SceneConstructor     │
 │ (JSON)  │                   │  └─ ECS World        │
 └─────────┘                   └──────────────────────┘
+┌─────────┐  CharacterLoader  ┌──────────────────────┐
+│ .character├─────────────────►│ SceneConstructor +   │
+│ (JSON)  │                   │  动画 System          │
+└─────────┘                   │  └─ Character Handle  │
+                              └──────────────────────┘
 ```
 
 ## 三、文件格式规范
@@ -204,6 +228,9 @@ public:
 | `.dds` | `DDSLoader` | `TextureHandle` | Texture |
 | `.png` / `.jpg` | `ImageLoader` → `DDSLoader` | `TextureHandle` | Texture |
 | `.material` | `MaterialLoader` | `MaterialHandle` | Material |
+| `.bone` | `SkeletonLoader` | `SkeletonHandle` | Skeleton |
+| `.anim` | `AnimLoader` | `ClipHandle` | Animation |
+| `.character` | `CharacterLoader` | `CharacterHandle` | Character |
 | `.scene` | `SceneLoader` | ECS World | Scene |
 | `.terrain` | `TerrainLoader` | `TerrainHandle` | Terrain |
 | `.particle` | `ParticleLoader` | `ParticleSystemHandle` | ParticleSystem |
@@ -220,14 +247,17 @@ enum class AssetType : uint8_t {
     Mesh,           // .dxmesh, .obj
     Texture,        // .dds, .png, .jpg
     Material,       // .material
+    Skeleton,       // .bone     — 骨骼树 + rest pose（HOD 解析导出）
+    Animation,      // .anim     — 骨骼动画剪辑（播放/调帧/循环）
 
     // 复合资产
     Terrain,        // .terrain — JSON 描述，引用 Mesh + Texture + Material
     Scene,          // .scene   — JSON 描述，实体 + 组件 + 资产引用
+    Character,      // .character — 骨架 + 网格 + 材质槽 + 动画剪辑打包
 
     // 预留
+    Prefab,         // .prefab  — 实体模板（实例化用）
     ParticleSystem, // .particle — JSON 描述，粒子发射器配置
-    Animation,      // .anim     — 骨骼动画数据
     Audio           // .wav / .ogg — 音频数据
 };
 ```

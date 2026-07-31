@@ -41,4 +41,15 @@ inline uint64_t NextPersistentId() {
     return s_nextId.fetch_add(1, std::memory_order_relaxed);
 }
 
+/// 确保下次 NextPersistentId 返回大于等于 min 的值
+/// 用于加载 JSON 后，避免新 ID 与已恢复的 ID 碰撞
+inline void SeedPersistentId(uint64_t min) {
+    static std::atomic<uint64_t> s_nextId{1};
+    uint64_t cur = s_nextId.load(std::memory_order_relaxed);
+    while (cur < min) {
+        if (s_nextId.compare_exchange_weak(cur, min, std::memory_order_relaxed))
+            break;
+    }
+}
+
 } // namespace DX12Engine::ECS

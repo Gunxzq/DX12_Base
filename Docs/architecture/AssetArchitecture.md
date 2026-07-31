@@ -5,16 +5,19 @@
 资产分为两层：**原子资产**（Atomic Asset）和 **复合资产**（Composite Asset）。
 
 ```
-原子资产（三元组）
-  ├── Mesh     — 几何数据（顶点、索引、骨骼）
-  ├── Material — 着色参数、纹理引用、渲染状态
-  └── Texture  — 像素数据（2D、Cube、Array）
+原子资产（五元组）
+  ├── Mesh      — 几何数据（顶点、索引、骨骼）
+  ├── Material  — 着色参数、纹理引用、渲染状态
+  ├── Texture   — 像素数据（2D、Cube、Array）
+  ├── Skeleton  — 骨骼树 + rest pose（HOD 解析导出为 .bone）
+  └── Animation — 骨骼动画剪辑（.anim，通道名 = 骨骼命名约定）
 
 复合资产（JSON 构建）
-  ├── Scene    — 场景描述（实体 + 组件 + 资产引用）
-  ├── Terrain  — 地形（分块网格 + 高度图 + 材质层）
-  ├── Prefab   — 预制体（实体模板）
-  └── ...      — 后续扩展
+  ├── Character — 角色（骨架 + 网格 + 材质槽 + 动画剪辑打包）
+  ├── Scene     — 场景描述（实体 + 组件 + 资产引用）
+  ├── Terrain   — 地形（分块网格 + 高度图 + 材质层）
+  ├── Prefab    — 预制体（实体模板）
+  └── ...       — 后续扩展
 ```
 
 ## 当前代码中的枚举现状
@@ -59,7 +62,31 @@ PatchMesh     // 曲面细分面片（控制点）
 
 **输出**：`TextureHandle`（通过 `TextureManager` 管理）
 
+### Skeleton
+
+骨骼树数据（骨骼名、父子层级、rest pose 矩阵），由 AssetTool 从 HOD 解析导出为 `.bone`。**不引用任何资产**，符合原子资产判据。可复用于多个角色（换皮/变体）与多个动画剪辑。
+
+**加载器**：`SkeletonLoader`
+
+**输出**：`SkeletonHandle`（通过 `SkeletonManager` 管理）
+
+### Animation
+
+骨骼动画剪辑（时长、通道曲线、循环标志），格式 `.anim`。通道骨骼名只是命名约定，不是资产引用（与 `.dxmesh` 的 `boneIndices` 同类）。
+
+**加载器**：`AnimLoader`
+
+**输出**：`ClipHandle`（通过 `AnimationManager` 管理）
+
 ## 复合资产
+
+### Character
+
+角色复合资产（`.character`）：引用 `.dxmesh` + `.bone` + `.material[]` + `.anim` 剪辑表，场景只放实例引用（`character: { asset, startClip }`）。详见 `Docs/architecture/CharacterAsset.md`。
+
+**加载器**：`CharacterLoader`
+
+**输出**：`CharacterHandle`
 
 ### Scene
 

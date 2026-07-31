@@ -210,18 +210,195 @@ WEAPONPOINT(编号, 作为发射口的零件名称, 发射口性质);
 
 ---
 
-## 六、DX12 管线映射建议
+## 六、DX12 管线映射（2026-07-30 更新）
+
+### 6.1 资产管线
 
 ```
-HOD → BoneTree (ECS 组件, 存储父子关系 + 绑定姿态逆矩阵)
+HOD → hod.json (骨架树 + 绑定姿势矩阵 = 动画帧 0)
          ↓
 Script.spt → ActorDefinition (HP/AI/武器插槽/配色)
          ↓
-.ani → AnimationClip (StorageBuffer: 每骨骼 keyframe)
+.ani → AnimationClip (StorageBuffer: 每骨骼 keyframe, 暂缓)
          ↓
 COLORSET → MaterialOverride (每材质颜色常数 PushConstant)
          ↓
-.x Body/arm/leg → DxMeshFormat (VBO/IBO, 含蒙皮权重)
+.x Body/arm/leg → 合并为单一 .dxmesh
+                        ├─ DxMeshSkinnedVertex (每顶点 boneIndex + weight)
+                        └─ SubMesh 表 (每个 .x 部件 = 一个 SubMesh)
 ```
 
+### 6.2 骨骼变换统一公式
+
+HOD 绑定姿势与 ANI 动画关键帧共用同一套骨骼变换公式：
+
+```
+输入: 每骨骼局部矩阵 (HOD 原始矩阵 或 ANI 插值矩阵)
+  ↓
+[1] Body_d 偏移修正: if (name == "Body_d.x") local.m[13] -= 1.30f
+  ↓
+[2] 层级累乘: boneWorld[bi] = local × boneWorld[parent]  (行向量)
+  ↓
+[3] Ry(180°) 翻转: bw.row0 = -bw.row0;  bw.row2 = -bw.row2
+  ↓
+输出: boneWorld 矩阵 (Y-up 世界空间)
+```
+
+| 数据源 | 说明 | 状态 |
+|:-------|:------|:------|
+| **HOD** (绑定姿势) | 每个 entry 的 4×4 矩阵经上述公式 → 绑定姿势 boneWorld | ✅ HODParser 已实现 |
+| **ANI** (动作帧) | 每骨骼 pos+rot 关键帧插值 → 局部矩阵 → 同上公式 → 动画 boneWorld | ❌ 暂缓解析 |
+
 > 骨骼蒙皮的细节见 `Basic.txt` 着色器中的 `vs_2_0 SkinVS` — 使用 `D3DCOLORtoUBYTE4` 解码 `BLENDINDICES`，支持最多 4 个骨骼权重，最多 26 个骨骼矩阵。
+
+### 6.3 .x 嵌套层级导出（2026-07-31 更新）
+
+导出包含完整骨骼树和正确局部矩阵的 `.x` 文件，采用两阶段处理：
+
+**第一阶段：世界矩阵计算**（`boneWorld`）
+
+```
+HOD 原始矩阵 → Body_d 偏移 → 层级累乘 → Ry180° → boneWorld (Y-up 世界空间)
+```
+
+**第二阶段：嵌套层级 + 局部矩阵推导**
+
+```
+每骨骼的局部矩阵:
+  根骨骼: localMat = boneWorld[根]
+  子骨骼: localMat = boneWorld[子] × inverse(boneWorld[父])  (行主序 post-multiply)
+```
+
+**LR 交换**：交换 `_r` 后缀部件的 name 和 mesh 数据（不交换 boneIndex/矩阵），使右部件的网格和名字出现在正确位置：
+
+```
+swapLR("arm1", "arm1_r"); swapLR("leg1", "leg1_r");
+swapLR("arm2", "arm2_r"); swapLR("leg2", "leg2_r");
+swapLR("Hand", "Hand_r"); swapLR("leg3", "leg3_r");
+```
+
+**输出文件**：
+- `Robo_nested.x`：29 骨骼嵌套层级，局部矩阵，正确网格
+
+### 6.4 顶点格式：DxMeshSkinnedVertex 刚性绑定
+
+合并网格时，顶点**不解烘焙到世界空间**，保持局部坐标，改为 `DxMeshSkinnedVertex` 格式：
+
+```
+结构: float3 position
+      float3 tangentU
+      float3 normal
+      float2 texC
+      float4 boneWeights   ← {1.0f, 0, 0, 0}
+      uint8_t boneIndices[4] ← {subMeshBoneIndex, 0, 0, 0}
+      total = 64 bytes
+```
+
+- 每个部件的所有顶点属于同一骨骼（刚性绑定），`boneWeights[0]=1.0`
+- 运行时由 `boneWorld[boneIndex]` 驱动顶点变换
+- SubMesh 与骨骼解耦：SubMesh 服务于材质槽，不隐含骨骼映射
+
+---
+
+## 七、骨架数据对接（2026-07-30 更新）
+
+### 7.1 hod.json → SkeletonManager
+
+HODParser 输出的 JSON 骨架文件（.hod.json）需要被引擎 `SkeletonManager` 加载。JSON 结构如下：
+
+```json
+{
+    "filepath": "Robo/KD-03/Robo.hod",
+    "bones": [
+        {
+            "name": "Body_d.x",
+            "parentIndex": -1,
+            "children": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+            "position": [0, 1.362, 0],
+            "rotation": [0, 0, 0, 1],
+            "scale": [1, 1, 1]
+        },
+        {
+            "name": "Body.x",
+            "parentIndex": 0,
+            "children": [],
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0, 1],
+            "scale": [1, 1, 1]
+        },
+        {
+            "name": "Head.x",
+            "parentIndex": 0,
+            "children": [],
+            "position": [0, 2.5, 0],
+            "rotation": [0, 0, 0, 1],
+            "scale": [1, 1, 1]
+        }
+    ]
+}
+```
+
+### 7.2 HOD 作为动画帧 0
+
+HOD 的每个 entry 定义了一个部件（骨骼）及其 4×4 变换矩阵。这个矩阵经 Body_d 修正 → 层级累乘 → Ry(180°) 翻转后，得到**绑定姿势的 boneWorld**。在动画系统中，HOD 相当于第 0 帧：
+
+```
+HOD entries (名称 + 矩阵 + A/B)
+  → BuildHierarchy() 通过 A/B 栈算法构建父子关系
+  → 每骨骼 local 矩阵 = entry.transform (原始 Z-up)
+  → 应用修正公式 (Body_d offset + 层级累乘 + Ry(180°))
+  → 输出 boneWorld[0..N] = 绑定姿势 (Y-up，动画帧 0)
+```
+
+ANI 的 `HD2` 骨骼通道名与 HOD 部件名一一对应，插值后应用**同一套公式**得到动画帧的 boneWorld。
+
+### 7.3 骨架与网格的关联
+
+```
+合并时 SubMesh 顺序 = .hod 中部件顺序（筛选后）
+即 parts[0] = Body.x → SubMesh[0], parts[1] = Head.x → SubMesh[1], ...
+```
+
+SubMesh 与骨骼**无结构化绑定**。SubMesh 服务于材质槽，骨骼服务于顶点变换，两者是正交关系。合并输出的 .dxmesh 使用 `DxMeshSkinnedVertex`，每顶点记录其所属的 boneIndex：
+
+```
+parts[i] 的所有顶点:
+  boneIndices = {boneIndexOf(parts[i]), 0, 0, 0}
+  boneWeights = {1.0f, 0, 0, 0}
+```
+
+运行时 `SkinnedRenderer` 通过 GPU 骨骼缓冲区驱动全部顶点，不关心 SubMesh 边界。
+
+### 7.4 SkinnedComponent 的构建
+
+场景加载时，从 `scene.json` 的 `"skinned"` 块获取骨架引用：
+
+```cpp
+// SceneConstructor 中
+if (eDesc.skinned) {
+    auto skeletonHandle = skeletonMgr->LoadFromJSON(eDesc.skinned->skeleton);
+    registry->AddComponent<ECS::SkinnedComponent>(entity, skeletonHandle);
+}
+```
+
+`SkinnedComponent` 目前已存在（`ECS/Core/Components/Animation.h`），含 `skeletonHandle` 字段。蒙皮渲染路径（`SkinnedRenderItemBuilder` + `SkinnedRenderer`）已在引擎中实现。
+
+### 7.5 当前状态与缺口
+
+| 环节 | 状态 | 说明 |
+|:-----|:------|:------|
+| HOD → hod.json | ✅ HODParser 完整 | 已有 TRS 分解 + JSON 输出 |
+| hod.json → SkeletonHandle | ❌ 引擎侧未实现 | `SkeletonManager` 缺少 `LoadFromJSON` 接口 |
+| SkinnedComponent 创建 | ⚠️ 框架已有 | `SceneConstructor` 中需要补充 skinned 分支 |
+| 网格合并 + SubMesh | ✅ `DxMeshSkinnedVertex` 刚性绑定 | AssetTool 输出 skinned 格式，不解烘焙 |
+| ANI 动画解析 | ❌ 暂缓 | 不阻塞当前工作 |
+
+> **网格合并变更**（2026-07-30）：合并管线改为保留局部坐标，输出 `DxMeshSkinnedVertex` 每顶点含 `boneIndex`+`boneWeight`，不解烘焙到世界空间。旧版烘焙式输出仅用于 DE 验证（`.x` 层级导出）。
+
+### 7.6 骨架与部件的关联
+
+HOD 部件名与 `.x` 文件名（去掉扩展名）一一对应。合并输出时：
+
+- `parts[]` 顺序 = HOD 骨骼顺序（筛选后）
+- 每个 part 的顶点统一挂接到其 `boneIndex`（刚性绑定）
+- `Body_d.x` 保留在骨架中用于后期受损特效，但不参与网格合并

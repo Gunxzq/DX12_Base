@@ -76,3 +76,52 @@ FrameScratchAllocator: 帧 N Allocate → 帧 N+1 Reset     (例外，仅用于�
 | `BufferAllocator` | 如果两者合并为一个统一分配器（暂不采用） |
 
 当前阶段无需改动，记录备查。
+
+## 预计算管线的边界（CPU 提前 N 帧计算）
+
+### 动机
+
+在场景实体数极大（>10000）或单帧 CPU 逻辑（AI/物理/剔除）成为瓶颈时，让 CPU 提前计算 N 帧的结果、缓存到 RingBuffer 中，使 GPU 可以直接消费预计算好的数据，是一种有效的性能手段。
+
+### 关键约束
+
+```
+预计算管线 ≠ 事件缓冲
+  ├─ 事件系统（MessageDispatcher）是同一帧内生产→消费，不跨帧
+  └─ 预计算管线是跨帧的：CPU 帧 N 算出的结果，GPU 帧 N+K 才消费
+```
+
+### 与 FrameResourceManager 的关系
+
+预计算结果需要写入 RingBuffer，且不能覆盖 GPU 尚未消费的槽位：
+
+```
+CPU 帧 N: 预计算下一帧的剔除/变换结果 → Allocate(ringBuf, size) → 写入
+CPU 帧 N+1: GPU 帧 N 尚未完成 → RingBuffer N+1 的槽位不能回收
+CPU 帧 N+2: GPU 帧 N 完成 → 槽位可回收复用
+```
+
+这完全复用了现有的 fence 保护机制——`BeginFrame(completedFence, nextFence)` 已经做了这件事：
+
+| 帧 | CPU 写入 | GPU 读取 | fence 值 | 回收 |
+|:---|:---------|:---------|:---------|:-----|
+| N | Alloc → 写入 | — | submit=5 | — |
+| N+1 | Alloc → 写入 | — | submit=6 | — |
+| N+2 | Alloc → 写入 | 读取帧 N | completed=5 | 帧 N 槽位可回收 |
+| N+3 | Alloc → 写入 | 读取帧 N+1 | completed=6 | 帧 N+1 槽位可回收 |
+
+### 与动静分批/八叉树的区别
+
+| | 动静分批 + 八叉树 | 预计算管线 |
+|:--|:------------------|:-----------|
+| **目标** | 减少**每帧**的 CPU 剔除量 | 让 CPU 跑在 GPU 前面 N 帧 |
+| **瓶颈** | CPU 视锥剔除耗时 | CPU→GPU 数据依赖（上传、fence） |
+| **前提** | 静态物体缓存 BVH，增量更新 | ECS 快照、确定性逻辑 |
+| **与帧资源的关系** | 无关 | 强相关——预计算结果需写入 RingBuffer，fence 保护 |
+| **可动态开关** | 可开关 | **必须可开关**——不能假定 CPU 比 GPU 快 |
+
+### 当前阶段结论
+
+**不实现预计算管线。** 当前场景实体数极少，FrameResource 的 3 帧 RingBuffer + Immediate 回调已足够保证 CPU/GPU 流水线并行。当实体数 > 10000 或单帧 CPU 时间超过 GPU 时间时再考虑。
+
+详见 `Docs/todos/remaining_issues.md` #33（动静分批/八叉树）。

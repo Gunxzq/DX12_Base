@@ -89,6 +89,10 @@
     "component_camera_far": "远裁剪面",
     "component_camera_is_main": "主相机",
 
+    "component_name": "名称",
+    "component_name_label": "实体名称",
+    "component_name_id": "持久化 ID",
+
     "preview_light": "光照",
     "preview_light_strength": "强度",
     "preview_light_x": "X",

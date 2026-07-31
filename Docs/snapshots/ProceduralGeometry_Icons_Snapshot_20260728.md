@@ -112,3 +112,31 @@ Content/Scenes/test_scene.json               ← 天空盒改为 procedural cube
 
 Content/Fonts/iconfont.*                     ← iconfont 图标字体
 ```
+
+---
+
+## 2026-07-28 补充：序列化四端一致性修复
+
+### 问题
+
+属性卡编辑的 LightComponent 参数（falloffStart/falloffEnd/spotPower/shadowBias）保存后丢失，重新加载变成默认值。
+
+### 根因
+
+Desc 结构体 → 序列化 → 导出 → 加载 → ECS 四个环节缺失字段同步：
+
+| 端 | 文件 | 初始状态 | 修复 |
+|:---|:-----|:---------|:------|
+| **Desc 结构体** | `SceneDescription.h` `LightDesc` | 缺 4 个字段 | 全部补为 `std::optional<float>` |
+| **Desc 序列化** | `SceneDescription.h` `from_json/to_json` | 缺 4 个字段 | 全部补全 |
+| **JSON 加载** | `SceneLoader.cpp` `ParseLight` | **缺 4 个字段（独立函数，不共用 from_json）** | 全部补全 |
+| **ECS 导出** | `EditorSceneManager.cpp` `ExportToDescription` | 缺 4 个字段 | 全部补全 |
+| **ECS 加载** | `SceneConstructor.cpp` `ConstructEntity` | 缺 4 个字段 | 全部补全，`value_or()` 保留默认值 |
+| **快照捕获** | `EditorSceneManager.cpp` `OnSceneConstructReady` | 缺 4 个字段 | 全部补全 |
+| **快照恢复** | `EditorSceneManager.cpp` `ApplyTabState` | 缺 4 个字段 | 全部补全 |
+
+### 关键教训
+
+`SceneLoader::ParseLight` 是独立的手工解析函数，与 `from_json` 重复相同逻辑但不共用。新增 Desc 字段时必须同步更新 **四端**（Desc 结构体 + `from_json`/`to_json` → `SceneLoader::Parse*` → `ExportToDescription` → `SceneConstructor::ConstructEntity`）。
+
+详见 `Docs/bugs/BugFix_LightDesc_MissingFalloffFields.md`。

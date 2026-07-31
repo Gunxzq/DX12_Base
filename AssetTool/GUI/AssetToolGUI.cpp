@@ -14,7 +14,7 @@
 #define NOMINMAX
 #define _WIN32_WINNT 0x0601
 
-#include <windows.h>    // 必须在其他 Windows 头之前
+#include <windows.h> // 必须在其他 Windows 头之前
 
 #include <algorithm>
 #include <atomic>
@@ -35,12 +35,20 @@
 
 // 引擎头文件（DxMeshFormat 等）
 #include "Asset/Definitions/Mesh/DxMeshFormat.h"
-#include "HODParser.h"
-#include "MPDParser.h"
-#include "ScriptSPTParser.h"
-#include "XFileParser.h"
-#include "XORCipher.h"
-#include "TextureConverter.h"
+#include "Asset/IO/Writer/DxMeshWriter.h"
+#include "Core/HODParser.h"
+#include "Core/MPDParser.h"
+#include "Core/RobotMerger.h"
+#include "Core/ScriptSPTParser.h"
+#include "Core/TextureConverter.h"
+#include "Core/XFileDirectReader.h"
+#include "Core/XFileParser.h"
+#include "Core/XORCipher.h"
+
+#include <assimp/Exporter.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
+#include <functional>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "ole32.lib")
@@ -71,6 +79,10 @@ namespace fs = std::filesystem;
 #define IDC_MAIN_BTN_CONVERT_HOD 1017
 #define IDC_MAIN_BTN_MAP_BUILD 1018
 #define IDC_MAIN_BTN_CONVERT_PNG 1019
+#define IDC_MAIN_BTN_IMPORT_ROBOT 1020
+#define IDC_MAIN_CHK_EXPORT_X 1021
+#define IDC_MAIN_CHK_LR_SWAP 1022
+#define IDC_MAIN_CHK_EXPORT_FBX 1023
 
 // ==========================================================================
 // 全局状态
@@ -87,9 +99,10 @@ static HWND g_hBtnConvertMesh = nullptr;
 static HWND g_hBtnConvertHOD = nullptr;
 static HWND g_hBtnMapBuild = nullptr;
 static HWND g_hBtnConvertPNG = nullptr;
+static HWND g_hBtnImportRobot = nullptr;
 
-static std::vector<fs::path> g_xFiles;        // 找到的 .x 完整路径
-static std::vector<std::string> g_xRelPaths;  // 对应的相对路径
+static std::vector<fs::path> g_xFiles;         // 找到的 .x 完整路径
+static std::vector<std::string> g_xRelPaths;   // 对应的相对路径
 static std::vector<fs::path> g_hodFiles;       // 找到的 .hod 完整路径
 static std::vector<std::string> g_hodRelPaths; // 对应的相对路径
 static std::vector<fs::path> g_mpdFiles;       // 找到的 .mpd 完整路径
@@ -149,7 +162,7 @@ static void SetStatusFmt(HWND hStatus, const wchar_t *fmt, ...) {
 /// 处理纹理文件：优先 XOR 解密 .dds，否则从 .png/.bmp 转换。
 /// @return 输出文件名，空字符串表示无输出
 static std::wstring CopyOrConvertTexture(const fs::path &srcDir, const std::string &texFilename,
-                                          const fs::path &dstDir) {
+                                         const fs::path &dstDir) {
     std::string ext = fs::path(texFilename).extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
@@ -169,14 +182,16 @@ static std::wstring CopyOrConvertTexture(const fs::path &srcDir, const std::stri
         if (fs::exists(pngPath)) {
             fs::path ddsPath = dstDir / (pngPath.stem().string() + ".dds");
             auto r = AssetTool::ConvertPNGToDDS(pngPath.string(), ddsPath.string());
-            if (r.success) return ddsPath.filename().wstring();
+            if (r.success)
+                return ddsPath.filename().wstring();
         }
         // 也试试 .bmp
         fs::path bmpPath = srcDir / (fs::path(texFilename).stem().string() + ".bmp");
         if (fs::exists(bmpPath)) {
             fs::path ddsPath = dstDir / (bmpPath.stem().string() + ".dds");
             auto r = AssetTool::ConvertPNGToDDS(bmpPath.string(), ddsPath.string());
-            if (r.success) return ddsPath.filename().wstring();
+            if (r.success)
+                return ddsPath.filename().wstring();
         }
         return L""; // 无可用源
     }
@@ -187,7 +202,8 @@ static std::wstring CopyOrConvertTexture(const fs::path &srcDir, const std::stri
         if (fs::exists(pngPath)) {
             fs::path ddsPath = dstDir / (pngPath.stem().string() + ".dds");
             auto r = AssetTool::ConvertPNGToDDS(pngPath.string(), ddsPath.string());
-            if (r.success) return ddsPath.filename().wstring();
+            if (r.success)
+                return ddsPath.filename().wstring();
         }
         return L"";
     }
@@ -453,7 +469,7 @@ static void ConvertAllMPD(const std::wstring &inputDir, const std::wstring &outp
             SetStatusFmt(g_hStatus, L"❌ 解析失败: %s — %s", UTF8ToWide(relPath).c_str(), UTF8ToWide(errMsg).c_str());
             g_convertErrors++;
         } else {
-            auto mpd = parser.GetResult();  // 改为非 const 以便过滤
+            auto mpd = parser.GetResult(); // 改为非 const 以便过滤
 
             // 自动扫描 MPD 所在目录的 .x 文件，过滤名字表
             fs::path mpdDir = fs::path(inputPath).parent_path();
@@ -524,7 +540,8 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
     SendMessageW(g_hProgress, PBM_SETPOS, 0, 0);
 
     for (size_t i = 0; i < g_sptFiles.size(); ++i) {
-        if (!g_converting) break;
+        if (!g_converting)
+            break;
 
         std::string sptPath = WideToUTF8(g_sptFiles[i].wstring());
         std::string relPath = g_sptRelPaths[i];
@@ -556,8 +573,7 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
                 xFiles.push_back(xStr);
         }
 
-        SetStatusFmt(g_hStatus, L"⏳ %s: %zu .x, SPT+MPD 已校验",
-                     UTF8ToWide(relPath).c_str(), xFiles.size());
+        SetStatusFmt(g_hStatus, L"⏳ %s: %zu .x, SPT+MPD 已校验", UTF8ToWide(relPath).c_str(), xFiles.size());
 
         // 1. 解析 SPT
         AssetTool::ScriptSPTParser sptParser;
@@ -575,7 +591,7 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
             g_convertErrors++;
             continue;
         }
-        auto mpdData = mpdParser.GetResult();  // copy，用于过滤
+        auto mpdData = mpdParser.GetResult(); // copy，用于过滤
 
         // 用实际 .x 文件过滤 MPD 名字表
         if (!xFiles.empty())
@@ -592,7 +608,10 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
         fs::create_directories(texDir);
 
         // 4. 转换所有 .x → .dxmesh + 材质
-        struct MeshRef { std::string stem; std::string matKey; };
+        struct MeshRef {
+            std::string stem;
+            std::string matKey;
+        };
         std::map<std::string, std::vector<MeshRef>> xMeshMap;
         nlohmann::json allMaterials = nlohmann::json::object();
         nlohmann::json allMeshDeps = nlohmann::json::object();
@@ -600,25 +619,30 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
         int matCount = 0;
 
         auto processTexture = [&](const std::string &texFile, const fs::path &xDir) -> std::string {
-            if (texFile.empty()) return {};
+            if (texFile.empty())
+                return {};
             fs::path texPath = xDir / texFile;
             if (!fs::exists(texPath)) {
                 texPath = mapDir / fs::path(texFile).filename();
-                if (!fs::exists(texPath)) return {};
+                if (!fs::exists(texPath))
+                    return {};
             }
             std::string texExt = texPath.extension().string();
             std::transform(texExt.begin(), texExt.end(), texExt.begin(), ::tolower);
             std::string stem = texPath.stem().string();
             std::string ddsName = stem + ".dds";
             fs::path ddsOut = texDir / ddsName;
-            if (fs::exists(ddsOut)) return stem;
+            if (fs::exists(ddsOut))
+                return stem;
 
             if (texExt == ".dds") {
                 auto r = AssetTool::DecryptOrCopyDDS(texPath.string(), ddsOut.string());
-                if (r.success) return stem;
+                if (r.success)
+                    return stem;
             } else if (texExt == ".png" || texExt == ".bmp") {
                 auto r = AssetTool::ConvertPNGToDDS(texPath.string(), ddsOut.string());
-                if (r.success) return stem;
+                if (r.success)
+                    return stem;
             }
             return {};
         };
@@ -640,7 +664,8 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
             for (size_t mi = 0; mi < meshes.size(); ++mi) {
                 const auto &mesh = meshes[mi];
                 std::string ms = stem;
-                if (meshes.size() > 1) ms += "_" + std::to_string(mi);
+                if (meshes.size() > 1)
+                    ms += "_" + std::to_string(mi);
 
                 mesh.WriteDxMesh((meshesDir / (ms + ".dxmesh")).string());
 
@@ -661,7 +686,8 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
                 }
 
                 std::ofstream matFile((matsDir / (mk + ".mat")).string());
-                if (matFile) matFile << jm.dump(2);
+                if (matFile)
+                    matFile << jm.dump(2);
 
                 allMaterials[mk] = jm;
                 allMeshDeps[ms] = "Meshes/" + ms + ".dxmesh";
@@ -678,23 +704,20 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
         scene["metadata"]["description"] = "Converted from " + relPath;
         scene["baseURL"] = "Content/" + mapName;
 
-        scene["environment"]["ambientLight"] = {
-            sceneData.lightR / 255.0f * 0.4f,
-            sceneData.lightG / 255.0f * 0.4f,
-            sceneData.lightB / 255.0f * 0.4f,
-            1.0f
-        };
+        scene["environment"]["ambientLight"] = {sceneData.lightR / 255.0f * 0.4f, sceneData.lightG / 255.0f * 0.4f,
+                                                sceneData.lightB / 255.0f * 0.4f, 1.0f};
 
-        if (!allMeshDeps.empty()) scene["dependencies"]["meshes"] = allMeshDeps;
-        if (!texDeps.empty()) scene["dependencies"]["textures"] = texDeps;
+        if (!allMeshDeps.empty())
+            scene["dependencies"]["meshes"] = allMeshDeps;
+        if (!texDeps.empty())
+            scene["dependencies"]["textures"] = texDeps;
         scene["materials"] = allMaterials;
 
         auto &entities = scene["entities"] = nlohmann::json::array();
         int entityIdx = 0;
 
-        auto addEntity = [&](const std::string &name, float px, float py, float pz,
-                             const std::string &meshKey, const std::string &matKey,
-                             bool isTransparent, bool isSkybox) {
+        auto addEntity = [&](const std::string &name, float px, float py, float pz, const std::string &meshKey,
+                             const std::string &matKey, bool isTransparent, bool isSkybox) {
             nlohmann::json e;
             e["name"] = name;
             auto &c = e["components"];
@@ -717,15 +740,18 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
 
         auto findRef = [&](const std::string &xfilename) -> MeshRef {
             auto it = xMeshMap.find(xfilename);
-            if (it != xMeshMap.end() && !it->second.empty()) return it->second[0];
+            if (it != xMeshMap.end() && !it->second.empty())
+                return it->second[0];
             std::string stem = fs::path(xfilename).stem().string();
             for (const auto &[xf, refs] : xMeshMap) {
-                if (fs::path(xf).stem().string() == stem && !refs.empty()) return refs[0];
+                if (fs::path(xf).stem().string() == stem && !refs.empty())
+                    return refs[0];
             }
             // 前缀匹配：MPD tile stem 是 mesh key 前缀（如 "map00" 匹配 "map00_0"）
             for (const auto &[xf, refs] : xMeshMap) {
                 std::string xstem = fs::path(xf).stem().string();
-                if (xstem.size() > stem.size() && xstem.substr(0, stem.size()) == stem && xstem[stem.size()] == '_' && !refs.empty())
+                if (xstem.size() > stem.size() && xstem.substr(0, stem.size()) == stem && xstem[stem.size()] == '_' &&
+                    !refs.empty())
                     return refs[0];
             }
             return {};
@@ -736,16 +762,19 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
             size_t tileCount = mpdData.tiles.size();
             for (size_t ti = 0; ti < tileCount; ++ti) {
                 const auto &t = mpdData.tiles[ti];
-                if (t.name.empty()) continue;
+                if (t.name.empty())
+                    continue;
                 std::string xfn = t.name;
-                if (!xfn.ends_with(".x")) xfn += ".x";
+                if (!xfn.ends_with(".x"))
+                    xfn += ".x";
                 auto ref = findRef(xfn);
                 // 如果 name 是数字索引，用 name table 还原文件名
                 if (ref.stem.empty() && t.tileIndex < mpdData.tileNames.size()) {
                     std::string altName = mpdData.tileNames[t.tileIndex];
                     ref = findRef(altName);
                 }
-                if (ref.stem.empty()) continue;
+                if (ref.stem.empty())
+                    continue;
                 addEntity(t.name, t.posX, 0, t.posZ, ref.stem, ref.matKey, false, false);
             }
         } else {
@@ -757,13 +786,13 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
                 for (size_t ti = 0; ti < tileCount; ++ti) {
                     const auto &t = sceneData.mapTiles[ti];
                     auto ref = findRef(t.modelFile);
-                    if (ref.stem.empty()) continue;
+                    if (ref.stem.empty())
+                        continue;
                     int row = static_cast<int>(ti) / gridCols;
                     int col = static_cast<int>(ti) % gridCols;
                     float px = col * tileSize + tileSize * 0.5f;
                     float pz = row * tileSize + tileSize * 0.5f;
-                    addEntity(fs::path(t.modelFile).stem().string(), px, 0, pz,
-                              ref.stem, ref.matKey, false, false);
+                    addEntity(fs::path(t.modelFile).stem().string(), px, 0, pz, ref.stem, ref.matKey, false, false);
                 }
             }
         }
@@ -773,11 +802,13 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
             std::string mf;
             if (b.buildNo >= 0 && (size_t)b.buildNo < sceneData.buildingFiles.size())
                 mf = sceneData.buildingFiles[b.buildNo];
-            if (mf.empty()) continue;
+            if (mf.empty())
+                continue;
             auto ref = findRef(mf);
-            if (ref.stem.empty()) continue;
-            addEntity(fs::path(mf).stem().string() + "_" + std::to_string(entityIdx),
-                      b.posX, b.posY, b.posZ, ref.stem, ref.matKey, false, false);
+            if (ref.stem.empty())
+                continue;
+            addEntity(fs::path(mf).stem().string() + "_" + std::to_string(entityIdx), b.posX, b.posY, b.posZ, ref.stem,
+                      ref.matKey, false, false);
         }
 
         // C) 水面
@@ -801,7 +832,8 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
         // 写 scene.json
         std::string scenePath = (mapOutDir / (mapName + ".scene.json")).string();
         std::ofstream sf(scenePath);
-        if (sf) sf << scene.dump(2);
+        if (sf)
+            sf << scene.dump(2);
 
         // 输出 MPD 解析结果用于比对
         std::string mpdTxtPath = (mapOutDir / (mapName + ".mpd.txt")).string();
@@ -847,7 +879,8 @@ static void ConvertXMeshes(const std::wstring &inputDir, const std::wstring &out
     SendMessageW(g_hProgress, PBM_SETPOS, 0, 0);
 
     for (size_t i = 0; i < g_xFiles.size(); ++i) {
-        if (!g_converting) break;
+        if (!g_converting)
+            break;
 
         std::string inputPath = WideToUTF8(g_xFiles[i].wstring());
         std::string relPath = g_xRelPaths[i];
@@ -863,8 +896,7 @@ static void ConvertXMeshes(const std::wstring &inputDir, const std::wstring &out
 
         AssetTool::XFileParser parser;
         if (!parser.ParseFile(inputPath)) {
-            SetStatusFmt(g_hStatus, L"❌ %s — %s", UTF8ToWide(relPath).c_str(),
-                         UTF8ToWide(parser.GetError()).c_str());
+            SetStatusFmt(g_hStatus, L"❌ %s — %s", UTF8ToWide(relPath).c_str(), UTF8ToWide(parser.GetError()).c_str());
             g_convertErrors++;
             g_convertProgress = (int)(i + 1);
             SendMessageW(g_hProgress, PBM_SETPOS, g_convertProgress, 0);
@@ -878,7 +910,8 @@ static void ConvertXMeshes(const std::wstring &inputDir, const std::wstring &out
         for (size_t mi = 0; mi < meshes.size(); ++mi) {
             const auto &mesh = meshes[mi];
             std::string ms = stem;
-            if (meshes.size() > 1) ms += "_" + std::to_string(mi);
+            if (meshes.size() > 1)
+                ms += "_" + std::to_string(mi);
 
             // 输出 .dxmesh
             mesh.WriteDxMesh((outMeshesDir / (ms + ".dxmesh")).string());
@@ -908,7 +941,8 @@ static void ConvertXMeshes(const std::wstring &inputDir, const std::wstring &out
                 }
 
                 std::ofstream mf((outMatsDir / (mk + ".mat")).string());
-                if (mf) mf << jm.dump(2);
+                if (mf)
+                    mf << jm.dump(2);
             }
             meshSuccess++;
         }
@@ -925,8 +959,7 @@ static void ConvertXMeshes(const std::wstring &inputDir, const std::wstring &out
     }
 
     g_converting = false;
-    SetStatusFmt(g_hStatus, L"✅ 网格转换完成: %d 成功, %d 失败",
-                 g_convertSuccess.load(), g_convertErrors.load());
+    SetStatusFmt(g_hStatus, L"✅ 网格转换完成: %d 成功, %d 失败", g_convertSuccess.load(), g_convertErrors.load());
     PostMessageW(hWnd, WM_USER + 3, 0, 0);
 }
 
@@ -945,7 +978,8 @@ static void ConvertAllPNG(const std::wstring &inputDir, const std::wstring &outp
     SendMessageW(g_hProgress, PBM_SETPOS, 0, 0);
 
     for (size_t i = 0; i < g_pngFiles.size(); ++i) {
-        if (!g_converting) break;
+        if (!g_converting)
+            break;
 
         std::string inputPath = WideToUTF8(g_pngFiles[i].wstring());
         std::string relPath = g_pngRelPaths[i];
@@ -960,8 +994,7 @@ static void ConvertAllPNG(const std::wstring &inputDir, const std::wstring &outp
         if (result.success) {
             g_convertSuccess++;
         } else {
-            SetStatusFmt(g_hStatus, L"❌ %s — %s", UTF8ToWide(relPath).c_str(),
-                         UTF8ToWide(result.error).c_str());
+            SetStatusFmt(g_hStatus, L"❌ %s — %s", UTF8ToWide(relPath).c_str(), UTF8ToWide(result.error).c_str());
             g_convertErrors++;
         }
 
@@ -970,8 +1003,7 @@ static void ConvertAllPNG(const std::wstring &inputDir, const std::wstring &outp
     }
 
     g_converting = false;
-    SetStatusFmt(g_hStatus, L"✅ 纹理转换完成: %d 成功, %d 失败",
-                 g_convertSuccess.load(), g_convertErrors.load());
+    SetStatusFmt(g_hStatus, L"✅ 纹理转换完成: %d 成功, %d 失败", g_convertSuccess.load(), g_convertErrors.load());
     PostMessageW(hWnd, WM_USER + 3, 0, 0);
 }
 
@@ -1235,8 +1267,9 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         y += 36;
 
         // ── 操作按钮 ──
-        g_hBtnScan = CreateWindowExW(0, L"BUTTON", L"🔍 扫描（.x/.hod/.spt/.png）", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                     margin, y, 180, 32, hWnd, (HMENU)IDC_MAIN_BTN_SCAN, g_hInst, nullptr);
+        g_hBtnScan =
+            CreateWindowExW(0, L"BUTTON", L"🔍 扫描（.x/.hod/.spt/.png）", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                            margin, y, 180, 32, hWnd, (HMENU)IDC_MAIN_BTN_SCAN, g_hInst, nullptr);
         if (hFont)
             SendMessageW(g_hBtnScan, WM_SETFONT, (WPARAM)hFont, TRUE);
 
@@ -1250,21 +1283,53 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         g_hBtnConvertMesh =
             CreateWindowExW(0, L"BUTTON", L"Mesh → .dxmesh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
-                            margin + 190 + convertBtnW + 6, y, convertBtnW, 32, hWnd, (HMENU)IDC_MAIN_BTN_CONVERT_MESH, g_hInst, nullptr);
+                            margin + 190 + convertBtnW + 6, y, convertBtnW, 32, hWnd, (HMENU)IDC_MAIN_BTN_CONVERT_MESH,
+                            g_hInst, nullptr);
         if (hFont)
             SendMessageW(g_hBtnConvertMesh, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         g_hBtnMapBuild =
             CreateWindowExW(0, L"BUTTON", L"Map Build", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
-                            margin + 190 + (convertBtnW + 6) * 2, y, convertBtnW, 32, hWnd, (HMENU)IDC_MAIN_BTN_MAP_BUILD, g_hInst, nullptr);
+                            margin + 190 + (convertBtnW + 6) * 2, y, convertBtnW, 32, hWnd,
+                            (HMENU)IDC_MAIN_BTN_MAP_BUILD, g_hInst, nullptr);
         if (hFont)
             SendMessageW(g_hBtnMapBuild, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         g_hBtnConvertPNG =
             CreateWindowExW(0, L"BUTTON", L"PNG → DDS", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
-                            margin + 190 + (convertBtnW + 6) * 3, y, convertBtnW, 32, hWnd, (HMENU)IDC_MAIN_BTN_CONVERT_PNG, g_hInst, nullptr);
+                            margin + 190 + (convertBtnW + 6) * 3, y, convertBtnW, 32, hWnd,
+                            (HMENU)IDC_MAIN_BTN_CONVERT_PNG, g_hInst, nullptr);
         if (hFont)
             SendMessageW(g_hBtnConvertPNG, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // "导入机体"按钮（独立一行）
+        y += 38;
+        g_hBtnImportRobot = CreateWindowExW(0, L"BUTTON", L"🤖 导入机体（合并部件）",
+                                            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED, margin, y, 260, 32,
+                                            hWnd, (HMENU)IDC_MAIN_BTN_IMPORT_ROBOT, g_hInst, nullptr);
+        if (hFont)
+            SendMessageW(g_hBtnImportRobot, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        // 导出格式选项
+        CreateWindowExW(0, L"BUTTON", L"导出 .x（带骨骼层级供 DE 验证）", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                        margin + 270, y, 280, 32, hWnd, (HMENU)IDC_MAIN_CHK_EXPORT_X, g_hInst, nullptr);
+        HWND hChk = GetDlgItem(hWnd, IDC_MAIN_CHK_EXPORT_X);
+        if (hChk && hFont)
+            SendMessageW(hChk, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        CreateWindowExW(0, L"BUTTON", L"导出 FBX（含骨骼层级+蒙皮）", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                        margin + 270 + 285, y, 260, 32, hWnd, (HMENU)IDC_MAIN_CHK_EXPORT_FBX, g_hInst, nullptr);
+        HWND hFbx = GetDlgItem(hWnd, IDC_MAIN_CHK_EXPORT_FBX);
+        if (hFbx && hFont)
+            SendMessageW(hFbx, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        CreateWindowExW(0, L"BUTTON", L"交换 LR 骨骼（_r 与左互换）", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                        margin + 270 + 285 + 265, y, 220, 32, hWnd, (HMENU)IDC_MAIN_CHK_LR_SWAP, g_hInst, nullptr);
+        HWND hLr = GetDlgItem(hWnd, IDC_MAIN_CHK_LR_SWAP);
+        if (hLr && hFont)
+            SendMessageW(hLr, WM_SETFONT, (WPARAM)hFont, TRUE);
+        // 默认勾选
+        SendMessageW(hLr, BM_SETCHECK, BST_CHECKED, 0);
 
         y += 42;
 
@@ -1339,7 +1404,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         // 只调整列表和进度条、状态栏的宽度
         const int margin = 12;
-        int listY = 42 + 36 + 42; // labels + buttons
+        int listY = 42 + 36 + 42 + 38; // labels + btn row 1 + btn row 2
         int listH = rc.bottom - listY - 80;
 
         if (g_hList) {
@@ -1405,7 +1470,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         // ── 类型独立转换按钮 ──
         // Mesh (.x → .dxmesh)
         if (id == IDC_MAIN_BTN_CONVERT_MESH) {
-            if (g_converting || g_xFiles.empty()) return 0;
+            if (g_converting || g_xFiles.empty())
+                return 0;
             wchar_t inputDir[MAX_PATH] = {}, outputDir[MAX_PATH] = {};
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_INPUT, inputDir, MAX_PATH);
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_OUTPUT, outputDir, MAX_PATH);
@@ -1427,7 +1493,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         // HOD (.hod → JSON/TXT)
         if (id == IDC_MAIN_BTN_CONVERT_HOD) {
-            if (g_converting || g_hodFiles.empty()) return 0;
+            if (g_converting || g_hodFiles.empty())
+                return 0;
             wchar_t inputDir[MAX_PATH] = {}, outputDir[MAX_PATH] = {};
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_INPUT, inputDir, MAX_PATH);
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_OUTPUT, outputDir, MAX_PATH);
@@ -1449,7 +1516,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         // Map Build（SPT + MPD + 全部 .x → scene.json）
         if (id == IDC_MAIN_BTN_MAP_BUILD) {
-            if (g_converting || g_sptFiles.empty()) return 0;
+            if (g_converting || g_sptFiles.empty())
+                return 0;
             wchar_t inputDir[MAX_PATH] = {}, outputDir[MAX_PATH] = {};
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_INPUT, inputDir, MAX_PATH);
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_OUTPUT, outputDir, MAX_PATH);
@@ -1471,7 +1539,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         // PNG → DDS
         if (id == IDC_MAIN_BTN_CONVERT_PNG) {
-            if (g_converting || g_pngFiles.empty()) return 0;
+            if (g_converting || g_pngFiles.empty())
+                return 0;
             wchar_t inputDir[MAX_PATH] = {}, outputDir[MAX_PATH] = {};
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_INPUT, inputDir, MAX_PATH);
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_OUTPUT, outputDir, MAX_PATH);
@@ -1487,6 +1556,83 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
             EnableWindow(g_hBtnConvertPNG, FALSE);
             std::wstring inDir = inputDir, outDir = outputDir;
             std::thread t([inDir, outDir, hWnd]() { ConvertAllPNG(inDir, outDir, hWnd); });
+            t.detach();
+            return 0;
+        }
+
+        // 导入机体（.hod + .x 合并）
+        if (id == IDC_MAIN_BTN_IMPORT_ROBOT) {
+            if (g_converting || g_hodFiles.empty())
+                return 0;
+            wchar_t outputDir[MAX_PATH] = {};
+            GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_OUTPUT, outputDir, MAX_PATH);
+            if (outputDir[0] == 0) {
+                SetStatusText(g_hStatus, L"请先选择输出目录。");
+                MessageBoxW(hWnd, L"请先选择输出目录。", L"提示", MB_OK | MB_ICONINFORMATION);
+                return 0;
+            }
+
+            // 禁用所有按钮
+            EnableWindow(g_hBtnScan, FALSE);
+            EnableWindow(g_hBtnConvertMesh, FALSE);
+            EnableWindow(g_hBtnConvertHOD, FALSE);
+            EnableWindow(g_hBtnMapBuild, FALSE);
+            EnableWindow(g_hBtnConvertPNG, FALSE);
+            EnableWindow(g_hBtnImportRobot, FALSE);
+
+            // 读取输入目录（用于计算相对路径）
+            wchar_t inputDir[MAX_PATH] = {};
+            GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_INPUT, inputDir, MAX_PATH);
+
+            // 对每个 .hod 文件执行 importrobot 命令
+            std::wstring outDir = outputDir;
+            std::wstring inDir = inputDir;
+            bool exportX = (IsDlgButtonChecked(hWnd, IDC_MAIN_CHK_EXPORT_X) == BST_CHECKED);
+            bool lrSwap = (IsDlgButtonChecked(hWnd, IDC_MAIN_CHK_LR_SWAP) == BST_CHECKED);
+            bool exportFBX = (IsDlgButtonChecked(hWnd, IDC_MAIN_CHK_EXPORT_FBX) == BST_CHECKED);
+            std::vector<fs::path> hodCopy = g_hodFiles;
+            std::thread t([hodCopy, inDir, outDir, hWnd, exportX, lrSwap, exportFBX]() {
+                g_converting = true;
+                g_convertTotal = static_cast<int>(hodCopy.size());
+                g_convertProgress = 0;
+                g_convertSuccess = 0;
+                g_convertErrors = 0;
+                int idx = 0;
+                for (const auto &hodPath : hodCopy) {
+                    if (!g_converting)
+                        break;
+                    idx++;
+                    g_convertProgress = idx;
+                    std::string hodA = WideToUTF8(hodPath.wstring());
+                    std::string outA = WideToUTF8(outDir);
+                    std::string inA = WideToUTF8(inDir);
+                    fs::path relPath = fs::relative(hodPath, inA);
+                    std::string robotOutDir = outA + "/" + relPath.parent_path().string();
+                    fs::create_directories(robotOutDir);
+                    SetStatusFmt(g_hStatus, L"[%d/%d] 导入: %s", idx, (int)hodCopy.size(), hodPath.filename().c_str());
+                    AssetTool::RobotMergeOptions opts;
+                    opts.lrSwap = lrSwap;
+                    opts.exportX = exportX;
+                    opts.exportFBX = exportFBX;
+                    try {
+                        auto result = AssetTool::RobotMerger::Merge(hodA, robotOutDir, opts);
+                        if (result.success)
+                            g_convertSuccess++;
+                        else {
+                            g_convertErrors++;
+                            SetStatusFmt(g_hStatus, L"❌ 失败: %s", UTF8ToWide(result.error).c_str());
+                        }
+                    } catch (const std::exception &e) {
+                        g_convertErrors++;
+                        SetStatusFmt(g_hStatus, L"❌ 异常: %s", UTF8ToWide(e.what()).c_str());
+                    }
+                }
+                g_converting = false;
+                PostMessageW(hWnd, WM_USER + 3, 0, 0);
+                SetStatusFmt(g_hStatus, L"导入完成: %d 成功, %d 失败 (%d 机体)", (int)g_convertSuccess,
+                             (int)g_convertErrors, (int)hodCopy.size());
+                // (旧内联代码 Loop 2 已移除，改用 RobotMerger::MergeWithCallback)
+            });
             t.detach();
             return 0;
         }
@@ -1524,8 +1670,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         int sptCount = (int)g_sptFiles.size();
         int pngCount = (int)g_pngFiles.size();
         if (count > 0)
-            SetStatusFmt(g_hStatus, L"找到 %d 个文件（.x=%d, .hod=%d, .mpd=%d, .spt=%d, .png=%d）。",
-                         count, xCount, hodCount, mpdCount, sptCount, pngCount);
+            SetStatusFmt(g_hStatus, L"找到 %d 个文件（.x=%d, .hod=%d, .mpd=%d, .spt=%d, .png=%d）。", count, xCount,
+                         hodCount, mpdCount, sptCount, pngCount);
         else
             SetStatusText(g_hStatus, L"未找到资产文件。请确认目录正确。");
         EnableWindow(g_hBtnScan, TRUE);
@@ -1533,6 +1679,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         EnableWindow(g_hBtnConvertHOD, hodCount > 0 ? TRUE : FALSE);
         EnableWindow(g_hBtnMapBuild, sptCount > 0 && mpdCount > 0 ? TRUE : FALSE);
         EnableWindow(g_hBtnConvertPNG, pngCount > 0 ? TRUE : FALSE);
+        EnableWindow(g_hBtnImportRobot, hodCount > 0 ? TRUE : FALSE);
         break;
     }
 
@@ -1543,6 +1690,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         EnableWindow(g_hBtnConvertHOD, !g_hodFiles.empty());
         EnableWindow(g_hBtnMapBuild, !g_sptFiles.empty());
         EnableWindow(g_hBtnConvertPNG, !g_pngFiles.empty());
+        EnableWindow(g_hBtnImportRobot, !g_hodFiles.empty());
         break;
     }
 

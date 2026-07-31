@@ -89,6 +89,10 @@
     "component_camera_far": "Far Plane",
     "component_camera_is_main": "Main Camera",
 
+    "component_name": "Name",
+    "component_name_label": "Entity Name",
+    "component_name_id": "Persistent ID",
+
     "preview_light": "Light",
     "preview_light_strength": "Strength",
     "preview_light_x": "X",

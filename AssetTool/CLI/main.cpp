@@ -13,13 +13,19 @@
 //   AssetTool batch <input_dir> <output_dir>            — 批量处理目录
 // ========================================================================
 
-#include "HODParser.h"
-#include "MPDParser.h"
-#include "ScriptSPTParser.h"
-#include "TextureConverter.h"
-#include "XFileParser.h"
-#include "XORCipher.h"
+#include "Core/RobotMerger.h"
+#include "Core/HODParser.h"
+#include "Core/MPDParser.h"
+#include "Core/ScriptSPTParser.h"
+#include "Core/TextureConverter.h"
+#include "Core/XFileParser.h"
+#include "Core/XORCipher.h"
 #include "Asset/Definitions/Mesh/DxMeshFormat.h"
+#include "Asset/IO/Writer/DxMeshWriter.h"
+
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
 
 #include <filesystem>
 #include <fstream>
@@ -1104,12 +1110,12 @@ static int CommandMapAnalysis(const std::vector<std::string> &args) {
         std::cerr << "[x2mapanalysis] Error: " << combinedParser.GetError() << "\n";
         return 1;
     }
-    const auto &cMeshes = combinedParser.GetMeshes();
+    auto cMeshes = combinedParser.GetMeshes();
     if (cMeshes.empty()) { std::cerr << "[x2mapanalysis] No meshes\n"; return 1; }
     size_t mainIdx = 0;
     for (size_t i = 0; i < cMeshes.size(); ++i)
         if (cMeshes[i].VertexCount() > cMeshes[mainIdx].VertexCount()) mainIdx = i;
-    const auto &cm = cMeshes[mainIdx];
+    auto &cm = cMeshes[mainIdx];
     cm.ComputeBounds();
     std::cout << "[x2mapanalysis] Combined: " << cm.VertexCount() << " verts, bounds: "
               << cm.boundsMin[0] << "," << cm.boundsMin[2] << " ~ "
@@ -1133,7 +1139,7 @@ static int CommandMapAnalysis(const std::vector<std::string> &args) {
     for (const auto &tf : tileFiles) {
         AssetTool::XFileParser p;
         if (!p.ParseFile(tf)) continue;
-        const auto &ms = p.GetMeshes();
+        auto ms = p.GetMeshes();
         if (ms.empty()) continue;
         size_t bi = 0;
         for (size_t i = 0; i < ms.size(); ++i)
@@ -1225,6 +1231,106 @@ static int CommandMap(const std::vector<std::string> &args) {
 }
 
 // ==========================================================================
+// 命令：importrobot — 导入机体（合并 .x 部件 + 骨架）
+//
+// 使用 RobotMerger 核心逻辑（含 Body_d 修正、Ry(180°)、LR 交换）
+// ==========================================================================
+
+static int CommandImportRobot(const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        std::cerr << "Usage: AssetTool importrobot <Robo.hod> <output_dir>\n";
+        return 1;
+    }
+
+    std::string hodPath = args[0];
+    std::string outDir = args[1];
+    bool lrSwap = true;
+    bool exportX = false;
+    bool exportFBX = false;
+
+    // 解析可选参数
+    for (size_t i = 2; i < args.size(); ++i) {
+        if (args[i] == "--no-lrswap") lrSwap = false;
+        if (args[i] == "--export-x") exportX = true;
+        if (args[i] == "--export-fbx") exportFBX = true;
+    }
+
+    std::cout << "[importrobot] " << hodPath << " → " << outDir << "\n";
+
+    AssetTool::RobotMergeOptions opts;
+    opts.lrSwap = lrSwap;
+    opts.exportX = exportX;
+    opts.exportFBX = exportFBX;
+
+    auto result = AssetTool::RobotMerger::Merge(hodPath, outDir, opts);
+    if (!result.success) {
+        std::cerr << "[importrobot] FAILED: " << result.error << "\n";
+        return 1;
+    }
+
+    std::cout << "[importrobot] DONE: " << result.partCount << " parts, "
+              << result.vertexCount << " verts, " << result.indexCount << " indices\n";
+    for (const auto &f : result.outputFiles)
+        std::cout << "  → " << f << "\n";
+    return 0;
+}
+
+// ==========================================================================
+// 命令：verifyfbx — 验证 FBX 文件（用 assimp 重新导入并打印结构）
+// ==========================================================================
+
+static void DumpAINode(const aiNode *node, int depth) {
+    for (int i = 0; i < depth; ++i) std::cout << "  ";
+    std::cout << "Node: " << (node->mName.length ? node->mName.C_Str() : "(unnamed)");
+    if (node->mNumMeshes > 0) std::cout << " [meshes: " << node->mNumMeshes << "]";
+    std::cout << "\n";
+    for (unsigned int i = 0; i < node->mNumChildren; ++i)
+        DumpAINode(node->mChildren[i], depth + 1);
+}
+
+static int CommandVerifyFBX(const std::vector<std::string> &args) {
+    if (args.empty()) {
+        std::cerr << "Usage: AssetTool verifyfbx <file.fbx>\n";
+        return 1;
+    }
+    std::string path = args[0];
+    std::cout << "[verifyfbx] Opening: " << path << "\n";
+
+    Assimp::Importer importer;
+    const aiScene *scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_GenNormals);
+    if (!scene) {
+        std::cerr << "[verifyfbx] FAILED: " << importer.GetErrorString() << "\n";
+        return 1;
+    }
+
+    std::cout << "[verifyfbx] OK — " << scene->mNumMeshes << " meshes, "
+              << scene->mNumMaterials << " materials, "
+              << scene->mNumAnimations << " animations\n";
+
+    unsigned int totalVerts = 0, totalFaces = 0;
+    for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi) {
+        const aiMesh *m = scene->mMeshes[mi];
+        std::cout << "  Mesh[" << mi << "] \"" << (m->mName.length ? m->mName.C_Str() : "?") << "\": "
+                  << m->mNumVertices << " verts, " << m->mNumFaces << " faces"
+                  << (m->HasNormals() ? ", normals" : "")
+                  << (m->HasTextureCoords(0) ? ", UV" : "")
+                  << (m->mNumBones > 0 ? (", " + std::to_string(m->mNumBones) + " bones") : "")
+                  << "\n";
+        totalVerts += m->mNumVertices;
+        totalFaces += m->mNumFaces;
+        for (unsigned int bi = 0; bi < m->mNumBones; ++bi) {
+            const aiBone *b = m->mBones[bi];
+            std::cout << "    Bone[" << bi << "] \"" << b->mName.C_Str() << "\": "
+                      << b->mNumWeights << " weights\n";
+        }
+    }
+    std::cout << "[verifyfbx] Total: " << totalVerts << " verts, " << totalFaces << " faces\n";
+    std::cout << "[verifyfbx] Node hierarchy:\n";
+    if (scene->mRootNode) DumpAINode(scene->mRootNode, 0);
+    return 0;
+}
+
+// ==========================================================================
 // 主入口
 // ==========================================================================
 
@@ -1252,10 +1358,17 @@ static void PrintUsage(const char *progName) {
     std::cout << "      XOR decrypt DDS texture (default key: 0x0B7E7759)\n\n";
     std::cout << "  " << progName << " batch <input_dir> <output_dir>\n";
     std::cout << "      Batch convert all assets in a directory\n\n";
+    std::cout << "  " << progName << " importrobot <Robo.hod> <output_dir> [--no-lrswap] [--export-x] [--export-fbx]\n";
+    std::cout << "      Import robot: merge .x parts + skeleton → .dxmesh + hod.json + scene.json\n";
+    std::cout << "        --no-lrswap  disable LR bone swap\n";
+    std::cout << "        --export-x   export .x with bone hierarchy (DE verification)\n";
+    std::cout << "        --export-fbx export FBX with skeleton + skinning\n\n";
     std::cout << "  " << progName << " map <input_map_dir> <output_dir>\n";
     std::cout << "      Map pipeline: scan all .x + parse MPD/SPT → complete scene.json\n\n";
     std::cout << "  " << progName << " x2mapanalysis <combined.map.x> <tiles_dir> [output.txt]\n";
     std::cout << "      Analyze combined map.x against individual tiles to extract tile positions\n\n";
+    std::cout << "  " << progName << " verifyfbx <file.fbx>\n";
+    std::cout << "      Verify FBX file: re-import with assimp and print scene structure\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << progName << " x2mesh Body.x Body.dxmesh\n";
     std::cout << "  " << progName << " hod2json Robo.hod Robo_skeleton.json\n";
@@ -1293,10 +1406,14 @@ int main(int argc, char *argv[]) {
         return CommandDDSDecrypt(args);
     } else if (command == "batch") {
         return CommandBatch(args);
+    } else if (command == "importrobot") {
+        return CommandImportRobot(args);
     } else if (command == "map") {
         return CommandMap(args);
     } else if (command == "x2mapanalysis") {
         return CommandMapAnalysis(args);
+    } else if (command == "verifyfbx") {
+        return CommandVerifyFBX(args);
     } else {
         std::cerr << "Unknown command: " << command << "\n\n";
         PrintUsage(argv[0]);

@@ -30,7 +30,7 @@
             "icon_unicode": "e664",
             "components": {
                 "transform": { "position": [0, 40, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
-                "light": { "type": "directional", "color": [1, 1, 1, 1], "intensity": 1.0 }
+                "light": { "type": "directional", "color": [1, 1, 1, 1], "intensity": 100.0 }
             }
         },
         {
@@ -41,7 +41,7 @@
             "icon_unicode": "e65b",
             "components": {
                 "transform": { "position": [0, 5, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
-                "light": { "type": "point", "color": [1, 1, 1, 1], "intensity": 1.0, "range": 10.0 }
+                "light": { "type": "point", "color": [1, 1, 1, 1], "intensity": 100.0, "range": 10.0 }
             }
         },
         {
@@ -51,8 +51,8 @@
             "icon": "light",
             "icon_unicode": "e66c",
             "components": {
-                "transform": { "position": [0, 10, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
-                "light": { "type": "spot", "color": [1, 1, 1, 1], "intensity": 1.0, "range": 20.0 }
+                "transform": { "position": [0, 10, 0], "rotation": [-0.7071, 0, 0, 0.7071], "scale": [1, 1, 1] },
+                "light": { "type": "spot", "color": [1, 1, 1, 1], "intensity": 100.0, "range": 20.0 }
             }
         },
         {

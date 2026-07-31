@@ -1,4 +1,5 @@
 #pragma once
+#include "Common/DX12API.h"
 #include <entt/entt.hpp>
 
 namespace DX12Engine {

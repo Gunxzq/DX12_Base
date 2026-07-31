@@ -1,4 +1,5 @@
 #pragma once
+#include "Common/DX12API.h"
 #include "Entity.h"
 #include <entt/entt.hpp>
 #include <stdexcept>
@@ -25,7 +26,7 @@ namespace ECS {
  *
  * @note 此类是线程不安全的，多线程访问需要外部同步
  */
-class Registry {
+class DX12ECS_API Registry {
 public:
     Registry() = default;
     ~Registry() = default;

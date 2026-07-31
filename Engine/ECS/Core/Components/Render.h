@@ -21,13 +21,9 @@ namespace ECS {
 // 网格组件（所有可渲染几何体统一使用）
 struct MeshComponent {
     Resource::LODMeshHandle lodMeshHandle;
-    Resource::MaterialHandle materialHandle;
+    std::vector<Resource::MaterialHandle> materialSlots;  // [subMeshIndex] = MaterialHandle
 
     bool receivesShadow = true;
-
-    uint32_t indexCount = 0;
-    uint32_t startIndex = 0;
-    int32_t startVertex = 0;
 
     Math::BoundingVolumeVariant localBounds;
     bool IsValid() const { return lodMeshHandle.IsValid(); }

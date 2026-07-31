@@ -14,13 +14,9 @@
 namespace AssetTool {
 
 // ── 默认导入标志 ──
-// Triangulate：面相转为三角形（.x 文件可能有四边形）
-// GenNormals： 若文件无法线，自动生成
-// JoinIdenticalVertices：焊接重复顶点
-// ImproveCacheLocality：优化索引缓存
-// SortByPType：按图元类型排序（过滤非三角）
+// 注意：去掉 JoinIdenticalVertices 以匹配社区工具的顶点数（不焊接重复顶点）
+//       ImproveCacheLocality 也会移动顶点，一并去掉
 static constexpr unsigned int DEFAULT_FLAGS = aiProcess_Triangulate | aiProcess_GenNormals |
-                                              aiProcess_JoinIdenticalVertices | aiProcess_ImproveCacheLocality |
                                               aiProcess_SortByPType;
 
 // ==========================================================================

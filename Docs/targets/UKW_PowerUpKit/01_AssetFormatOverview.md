@@ -192,19 +192,34 @@ SetBuilding(0, 0, 1, 1500, 8.207660, 0.537087, 21.932104);
 
 #### 展示规则
 
-| Entry | 实际存储的 A/B | 展示用的 A/B | 说明 |
+| Entry | 实际存储的 A/B | 解码后的 A/B | 说明 |
 |:------|:--------------|:-------------|:------|
-| 0 (root.x) | 属于 entry 1 | A=0, B=1 | 隐式硬编码 |
-| 1 (Body_d.x) | 属于 entry 2 | A=1, B=3 | 取 entry 0 末尾 |
-| 2 (Body.x) | 属于 entry 3 | A=2, B=5 | 取 entry 1 末尾 |
+| 0 (root.x) | 属于 entry 1 | A=0, B=1 | 隐式硬编码（root 等级 0，1 个子节点） |
+| 1 (Body_d.x) | 属于 entry 2 | A=1, B=3 | 等级 1（取 entry 0 末尾），3 个子节点 |
+| 2 (Body.x) | 属于 entry 3 | A=2, B=5 | 等级 2（取 entry 1 末尾），5 个子节点 |
 | N (N≥1) | 属于 entry N+1 | 取 entry N-1 末尾 | — |
 
-#### 命名约定
+#### 命名约定（2026-07-29 修正版）
 
 ```
-A = 节点索引（显示 0-based，二进制 1-based）
-B = 父节点索引（1-based，指向父节点的 A 值）
-B=1 表示"无父节点"（仅根节点）
+A = 部件等级（数字越小等级越高，0=根节点）
+B = 子部件数量（0-10）
+```
+
+> ⚠️ **逆向修正**：早期文档将 A/B 误判为"父节点索引 A + 子节点数 B"或"节点索引 A + 父节点索引 B"。经社区文档确认，正确语义为 **A=等级, B=子节点数**。解析算法详见 `HODParser.cpp::BuildHierarchy()`。
+
+#### 层级构建算法说明
+
+文件按**深度优先**顺序存储，层级构建使用栈算法：
+
+```
+1. 根节点 (bone[0]) 隐式等级 0，入栈
+2. 对于 bone[i] (i≥1):
+   a. 其等级 = bone[i-1].rawA（前移机制：前一 entry 的 rawA 属于此 entry）
+   b. 弹出栈顶直至栈顶等级 < 当前等级
+   c. 若栈顶等级 == 当前等级-1 → 栈顶为父节点
+   d. 否则回退到根节点
+   e. 当前节点入栈
 ```
 
 #### 逆向过程的关键 hex 参考
@@ -495,5 +510,85 @@ WindomXP 有多个衍生 MOD，各自使用不同的 XOR key：
 │        不同 MOD 版本仅切换 XOR key 即可兼容             │
 │                                                        │
 └────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 九、实际管线映射（2026-07-29 定案）
+
+根据 SubMesh 材质槽系统（`Docs/architecture/SubMeshMaterialSlots.md`）与实际资产结构，管线映射如下：
+
+### 9.1 网格资产：部件合并
+
+```
+.hod 解析 → 部件列表          多个 .x 文件              合并后的 .dxmesh
+┌──────────┐                ┌─────────────┐           ┌────────────────────┐
+│ Robo.hod │                │ Body.x      │           │ KD-03.dxmesh       │
+│          │ → 部件名列表   │ Head.x      │ → 逐个   │ ├─ VB (全部顶点)    │
+│          │                │ arm1.x      │   XFile   │ ├─ IB (全部索引)    │
+│          │                │ leg1.x      │   Parser  │ ├─ SubMesh[0]=Body │
+│          │                │ ...         │           │ ├─ SubMesh[1]=Head │
+└──────────┘                └─────────────┘           │ ├─ SubMesh[2]=arm1 │
+                                                      │ └─ ...             │
+                                                      └────────────────────┘
+```
+
+每个部件 = 网格的一个 SubMesh，索引经过 rebase 对齐。详见 `06_SubMeshPipeline.md`。
+
+### 9.2 骨架资产
+
+```
+.hod 解析 → 骨架树 JSON          → 引擎 SkeletonManager
+  ├─ 部件名 (Body.x, Head.x, ...)    └─ 骨骼层级 + 绑定姿势矩阵
+  ├─ 父子关系索引
+  └─ TRS 变换矩阵
+```
+
+HODParser 已有完整输出，引擎侧需实现 JSON 加载接口。
+
+### 9.3 动画资产（暂缓）
+
+```
+.ani 文件 → 未来解析为 AnimationClip → 动画 System
+  ├─ AN2 魔术头 + HD2 骨骼通道
+  ├─ 每骨骼位置(float3) + 旋转(quaternion)
+  └─ 状态机定义（Script.spt 中）
+```
+
+当前不处理，仅存储骨架。
+
+### 9.4 场景资产
+
+```
+原方案: MPD → 自动生成场景（放弃）
+
+新方案: 编辑器手动布景 + hod/部件合并生成的 scene.json 片段
+  ├─ 合并网格 + 骨架 → 作为单实体导入
+  └─ 材质从 .x Material 块提取 → 映射到 PBR 参数
+```
+
+### 9.5 整体管线示意图
+
+```
+AssetTool (命令行/GUI)
+  │
+  ├── Robo/*/*.hod + .x  →  "导入机体" 按钮
+  │       ↓
+  │   Content/Models/<机体名>/
+  │     ├── <机体名>.dxmesh      ← 合并网格，含 SubMesh 表
+  │     ├── <机体名>.hod.json    ← 骨架数据
+  │     └── <机体名>.scene.json  ← 场景片段
+  │
+  ├── map/*.mpd + .x  →  已放弃自动解析（改为编辑器布景）
+  │
+  └── data/*.txt      →  着色器参考（人工分析后映射到引擎材质系统）
+
+引擎 (运行时)
+  │
+  ├── GeometryResourceManager  ← .dxmesh SubMesh 展开
+  ├── MaterialManager          ← .x Material → PBR 参数
+  ├── SkeletonManager          ← hod.json 骨架加载
+  ├── OpaqueRenderItemBuilder  ← SubMesh × materialSlots 展开
+  └── OpaqueRenderer           ← 渲染
 ```
 

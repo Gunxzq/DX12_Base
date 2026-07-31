@@ -13,45 +13,6 @@
 
 ---
 
-## 一、当前已验证可工作
-
-| 系统 | 状态 | 说明 |
-|:-----|:------|:------|
-| 异步管线（AssetManager + BackgroundExecutor） | ✅ | Mesh/Texture/Material 异步加载 |
-| SceneConstructor（JSON → ECS） | ✅ | skybox/ground/opaque/water 实体 |
-| SkyboxManager | ✅ | Cubemap SRV + UPLOAD CB，独立于 FrameDriver |
-| WaterManager | ✅ | RingBuffer 自管上传 + 波浪参数 |
-| Opaque 渲染 (JSON 实体) | ✅ | 标准 ECS → Builder → Renderer，支持 SceneTagComponent 过滤 |
-| Water 渲染 (JSON 实体) | ✅ | WaterRenderItemBuilder → WaterRenderSystem |
-| 地形渲染 | ✅ | 保留 |
-| 阴影/SSAO/反射探针 | ✅ | 保留不受影响 |
-| **SchedulerContext 移除** | ✅ | 结构体+全局函数已删除，FrameDriver 由 Bootstrap 直接管理 |
-| **CameraManager 移出 Bootstrap** | ✅ | 各端自行初始化，Editor 通过 `SetupDefaultCamera()` 设置大远平面 |
-| **AmbientOcclusionManager 移出 Bootstrap** | ✅ | 各端自行初始化，Editor WindowResizeSystem 补上 OnResize |
-| **默认场景加载修复** | ✅ | `LoadSceneDescription` 移到 `SetPreviewContext` 之后；`SceneConstructData` 增加 skybox/environment 字段 |
-| **EditorSkyboxRenderSystem 屏障Bug修复** | ✅ | 天空盒有效性检查提前到命令列表创建之前 |
-| **RenderScene 子模块** | ✅ | 引擎 CORE 聚合，`SceneManager::GetRenderScene()` 访问 |
-| **GameContext 清理** | ✅ | 移除 `ReflectionProbeMgr`/`AmbientOcclusionMgr` 字段 |
-| **EditorStateFile 接入** | ✅ | 持久化到 `Content/Cache/Editor/`，每个场景独立文件 |
-| **多 Tab UI** | ✅ | ImGui TabBar 渲染，Tab 切换/关闭 |
-| **异步加载竞态保护** | ✅ | `m_sceneSwitchId` 序列号检测过期回调 |
-| **SceneConstructor 生命周期** | ✅ | 改为 EditorAssetManager 值成员，编辑器生命周期 |
-| **标记组件方案** | ✅ | `SceneTagComponent` 标记实体所属场景，Builder 按 `sceneId` 过滤 |
-| **隐式默认 Tab 移除** | ✅ | 启动时无 Tab，Viewport 提示"打开场景文件" |
-| **Builder 通用过滤器** | ✅ | `OpaqueRenderItemBuilder::SetEntityFilter` 支持按场景过滤 |
-| **Game 端语义拆分** | ✅ | GameRenderPipeline 持有全部构建器/渲染器/队列 + 16 个系统注册，GameWorld 简化为子模块编排 |
-| **GameWorld_*.cpp 清理** | ✅ | 4 个旧文件已删除（Builder/RenderSystems/Assets/Scene），内容迁移到 GameRenderPipeline.cpp |
-| **TriggerBehavior 扩展** | ✅ | 从 4 种扩展到 9 种（新增 OnTapped/OnDoubleTap/OnHoldRelease/OnRepeat/Analog1D），WhileHeld 支持轴输入 |
-| **InputDeclaration 重复清理** | ✅ | 删除 InputDeclaration 内重复的 TriggerBehavior 枚举，改用 InputSystem::TriggerBehavior |
-| **SceneConstructor::OnSceneReady** | ✅ | 实现空壳方法，提取两处重复的"场景就绪"逻辑 |
-| **相机初始视角修复** | ✅ | 新增 `CameraManager::UpdateBasisFromRotation()`，Game 端相机 Rotation 正确同步到基向量 |
-| **EditorGizmoSystem 独立** | ✅ | ImGuizmo 从 EditorLayout 中抽离为独立 System，通过视口叠加回调绘制 |
-| **ImGuizmo 旋转回写** | ✅ | 四元数直接回写 TransformComponent，零转换 |
-| **Rotation 格式统一** | ✅ | TransformComponent::rotation → XMFLOAT4 四元数，GetMatrix 用 XMMatrixRotationQuaternion |
-| **场景序列化保存** | ✅ | 全部 *Desc 的 to_json + SceneLoader::SaveToFile + EditorSceneManager::SaveSceneAs 接入 |
-
----
-
 ## 二、待办
 
 ### 可恢复的功能
@@ -67,15 +28,13 @@
 | # | 任务 | 优先级 | 说明 |
 |:-:|:-----|:-------|:------|
 | 4 | `DxMeshLoader` 完整实现 | P1 | 当前 `MeshLoadTask` 已读 `.dxmesh`，但需完善骨骼数据路径 |
-| 5 | **ImGuizmo 集成（EditorGizmoSystem）** | P1 | 已从 EditorLayout 中抽离为独立 `EditorGizmoSystem`，通过视口叠加回调在 Viewport 中绘制 Gizmo。<br>• 操作模式从 EditorViewportToolbar 获取（Translate/Rotate）<br>• 选中实体通过回调获取<br>• View/Proj 矩阵来自 CameraManager<br>• 操作结果写回 TransformComponent<br>• 待完善：旋转欧拉角完整回写、W/E/R 快捷键独立处理、Undo 快照 |
-| 6 | **组件驱动属性卡** | P1 | 基于 `ComponentEditorRegistry` 注册制的属性卡系统，替代当前硬编码的 Properties 面板。<br>• ✅ `ComponentEditorRegistry` 注册器（模板 Register<T> + 回调存储）<br>• ✅ `EditorLayout::DrawProperties()` 已重构为遍历注册表 + 按组件类型折叠 + 添加/移除按钮<br>• ✅ `RegisterTransformEditor()` 已注册（Position/Rotation/Scale 数值输入 + 四元数↔欧拉角转换）<br>• ✅ `RegisterLightEditor()` 已注册（类型/颜色/强度/范围/阴影参数）<br>• ✅ "添加组件" 弹出菜单（只显示实体上不存在的组件）<br>• ✅ "移除组件" 按钮（Transform 等核心组件不可移除）<br>• ✅ 编辑器 UI 标签已接入 `EditorStrings::Get()`（TransformEditor/LightEditor 均已迁移）<br>• ✅ `CameraComponent` 已创建（ECS 结构体 + SceneConstructor 创建 + CameraEditor 注册 + ExportToDescription 导出）<br>• ⚠️ `CameraComponent` 属于 **Scene Entity Data** 层，非引擎 CORE。后续设计讨论：投影类型（Perspective/Orthographic）、PiP 预览、视锥 Gizmo |
+| 5 | **组件驱动属性卡** | P1 | 基于 `ComponentEditorRegistry` 注册制的属性卡系统，替代当前硬编码的 Properties 面板。<br>• ✅ `ComponentEditorRegistry` 注册器（模板 Register<T> + 回调存储）<br>• ✅ `EditorLayout::DrawProperties()` 已重构为遍历注册表 + 按组件类型折叠 + 添加/移除按钮<br>• ✅ `RegisterTransformEditor()` 已注册（Position/Rotation/Scale 数值输入 + 四元数↔欧拉角转换）<br>• ✅ `RegisterLightEditor()` 已注册（类型/颜色/强度/范围/阴影参数）<br>• ✅ "添加组件" 弹出菜单（只显示实体上不存在的组件）<br>• ✅ "移除组件" 按钮（Transform 等核心组件不可移除）<br>• ✅ 编辑器 UI 标签已接入 `EditorStrings::Get()`（TransformEditor/LightEditor 均已迁移）<br>• ✅ `CameraComponent` 已创建（ECS 结构体 + SceneConstructor 创建 + CameraEditor 注册 + ExportToDescription 导出）<br>• ⚠️ `CameraComponent` 属于 **Scene Entity Data** 层，非引擎 CORE。后续设计讨论：投影类型（Perspective/Orthographic）、PiP 预览、视锥 Gizmo |
 | 7 | 多堆域 SRV 隔离（SkyboxManager → LightManager 等） | P2 | SkyboxManager 已支持 `HeapTag` 参数，SRV 创建在指定堆域。LightManager、ReflectionProbeManager 等需同样扩展，使其在多堆（Editor）模式下不占用 Default 堆域空间 |
 | 8 | AssetManager 注册表模式 | P2 | 见 `AssetLoaderImprovement.md`，用文件后缀分发替代 `switch(type)` |
 | 9 | TerrainLoadTask 拆分为并行子 Task | P1 | 几何体 + 纹理各走独立 Task |
 | 10 | **渲染管线清除职责分离** | P2 | 当前清除散落在各渲染 System 内部，导致重复清除和职责混杂。重构方向：<br>• **Editor**: 注册独立 `EditorClearSystem`（`alwaysRun`，`RenderPhase::PrePass`），负责清除 EditorViewport 的离屏 RT + depth，设置视口。`EditorSkyboxRenderSystem` 和 `EditorGridRenderSystem` 只渲染、不清除。<br>• **Game**: GameWorld 的 PrePass（清 backbuffer+depth）、GBuffer（清 G-buffer）、Skybox（清 backbuffer+depth）存在多次重复清除，需统一到 PrePass 阶段的一个 ClearSystem。<br>• Game 和 Editor 是独立 exe，互不影响，各自按需实现。见 `BugFix_EditorViewport_ClearValueMismatch.md` 和相关讨论 |
 | 11 | **Bootstrap 职责分离：不初始化非 Default 堆域分区** | P2 | 当前 `Bootstrap::InitializeModules()` 在 `isEditor && Multi` 模式下为所有非 Default `HeapTag` 创建了 `Texture/Buffer/Shadow` 分区。但 Bootstrap 属于引擎核心层，不应感知编辑器特定的堆域布局。正确设计：<br>• Bootstrap 只负责选择 `HeapMode::Multi`（基于 `ProjectConfig::Type`）<br>• 非 Default 堆域的分区由各 Editor 模块（如 `EditorViewport`）在自身初始化时注册<br>• 当前为临时方案，后续需将 Bootstrap 中 `isEditor && Multi` 块内的 `AddPartition` 循环移出，交由 Editor 各模块自行管理 |
-| 12 | **SkyboxManager 自带几何体生成** | P2 | 当前 `SkyboxManager` 依赖 `SceneConstructor` 从外部加载立方体网格（`cube.dxmesh`）作为天空盒渲染几何体。改造方向：<br>• `SkyboxManager` 内部通过 `GeometryGenerator` 生成立方体（或球体）的 VB/IB，直接注册到 `GeometryResourceManager`<br>• 消除对 `cube.dxmesh` 外部文件的依赖 |
-| 13 | **编辑器布局重构** | P2 | 当前 `EditorLayout` 直接管理所有面板的创建和绘制，存在耦合。改造方向：<br>• 布局只作为大体分块框架：左列（Outliner/AssetBrowser）、中列（Viewport）、右列（Properties）<br>• 每列再分为上下两部分 |
+| 12 | **编辑器布局重构** | P2 | 当前 `EditorLayout` 直接管理所有面板的创建和绘制，存在耦合。改造方向：<br>• 布局只作为大体分块框架：左列（Outliner/AssetBrowser）、中列（Viewport）、右列（Properties）<br>• 每列再分为上下两部分 |
 | 14 | **网格比例尺控件** | P2 | 当前水平滑条不符合习惯，改为垂直刻度尺样式 |
 | 15 | **RenderScene::OnScenePreUnload 驱动** | P2 | 场景切换时调用 LightManager::Clear() 等，当前为骨架实现 |
 | 16 | **Undo/Redo 系统** | P2 | EditorSceneManager 的 EntityDesc 编辑历史（菜单项已注册，实现为空壳） |
@@ -84,9 +43,7 @@
 
 | # | 任务 | 优先级 | 说明 |
 |:-:|:-----|:-------|:------|
-| 17 | **CameraComponent 扩展 projectionType** | ✅ 完成 | `ProjectionType` 枚举、`orthoSize`、CameraEditor、schema、场景 JSON `test_scene.json` 已插入 MainCamera 实体用于测试 |
-| 18 | **关系系统实施** | ✅ 完成 | `RelationshipComponent` + `SocketAttachmentComponent`、`SceneConstructor` 加载、`ExportToDescription` 导出、schema 定义、`test_scene.json` 中空 `relationships:[]` 占位 |
-| 19 | **CameraManager 从场景 CameraComponent 初始化** | P2 | 场景加载后，从 `isMain=true` 的 CameraComponent 读取 FOV/近远面，替代当前硬编码配置。Game/Editor 端各自由 Gameplay 脚本决定相机位置 |
+| 17 | **CameraManager 从场景 CameraComponent 初始化** | P2 | 场景加载后，从 `isMain=true` 的 CameraComponent 读取 FOV/近远面，替代当前硬编码配置。Game/Editor 端各自由 Gameplay 脚本决定相机位置 |
 | 20 | **Editor 端多选联动** | P3 | 拖拽父实体时，临时查 `RelationshipComponent.kind==parent` 的子实体，同步位移。不在引擎 CORE 中实现 |
 | 21 | **Outliner 实体创建（实体模板）** | P2 | Outliner 右键弹出 Godot 风格创建菜单（分类+搜索）。ECS 组件组合由 `Editor/Config/entity_templates.json` 定义，JSON 驱动。模板如 Camera = Transform + CameraComponent，Empty = Transform 等。不暴露原子 ECS 组件给用户 |
 
@@ -100,25 +57,7 @@
 - 过渡路径：CameraComponent → LightManager → WaterManager 逐步迁移
 - 场景 JSON 统一由 SceneConstructor 写入 ECS 组件，Manager 不再接收直接注册调用
 
-#### Manager 收集模式实施状态（2026-07-28）
-
-| Manager | 方法 | 状态 | 说明 |
-|:--------|:-----|:-----|:------|
-| **CameraManager** | `UpdateMainCamera()` 从 `isMain` CameraComponent 读取 | ✅ 已有 | 场景加载时由 SceneConstructor 写入 CameraComponent |
-| **LightManager** | `CollectFromECS(registry)` 遍历 `LightComponent + TransformComponent` | ✅ 已实施 | 方向光 direction 从 TransformComponent.rotation 四元数推导；点/聚光灯 position 从 TransformComponent.position 获取 |
-| **WaterManager** | `CollectFromECS(registry)` 遍历 `WaterComponent`，从组件字段提取波浪参数 | ✅ 已实施 | WaterComponent 新增 amplitude/frequency/speed/direction 字段替代 `RegisterWaveParams` |
-
-**调用时序**（Editor/Game 的 Immediate 回调）：
-
-```
-BackgroundExecutor::Tick()
-  ↓
-CollectFromECS(registry)    ← 新增：LightManager + WaterManager 均从此入口收集
-  ├─ LightManager::CollectFromECS
-  └─ WaterManager::CollectFromECS
-  ↓
-UpdateAndUpload(fence, ...)  ← 不变：从内部向量打包上传 GPU
-```
+**Manager 收集模式实施状态**（CameraManager ✅ 已有、LightManager ✅ 已实施、WaterManager ✅ 已实施），详见 `Docs/architecture/EngineOverview.md §9`。
 
 **SceneConstructor 变更**：
 - `LightComponent` 创建从 TODO 占位变为完整实现，支持 directional/point/spot 三种类型
@@ -183,6 +122,23 @@ UpdateAndUpload(fence, ...)  ← 不变：从内部向量打包上传 GPU
 |:-:|:-----|:-------|:------|
 | 21 | **编辑器资源与游戏 Content 分离** | P3 | 编辑器资源 → `Editor/Content/`，游戏资源 → `Content/` |
 
+### 渲染架构演进（2026-07-28 讨论定案）
+
+| # | 任务 | 优先级 | 说明 |
+|:-:|:-----|:-------|:------|
+| 22 | **MeshComponent 材质槽数组化** | P2 | `materialHandle` 改为 `std::vector<MaterialHandle>`，支持 sub-mesh 级材质分配。参照 Cocos ModelComponent.materials[] 模式，submesh[i] → material[i]。向后兼容单材质场景。需同步更新：`MeshComponent` → `ExportToDescription`（JSON 支持 `materials[]`）→ `SceneConstructor` → `OpaqueRenderItemBuilder`（按 sub-mesh 拆分渲染项） |
+| 23 | **MeshEditor 属性卡** | P2 | 注册 MeshComponent 的 ECS 属性卡编辑方法。功能：<br>• 显示当前网格名称/SubMesh 数量（只读）<br>• 材质槽列表（可替换，从 AssetBrowser 拖拽材质）<br>• `receivesShadow` 开关<br>• 后续：运行时替换 `lodMeshHandle`（从 AssetBrowser 拖拽网格） |
+| 24 | **SubMesh 级材质替换** | P3 | 支持同一网格的不同 SubMesh 使用不同材质（如 NPR 角色身体 + PBR 衣物）。`MeshComponent.materialSlots.size()` 与 SubMesh 数量一致，`OpaqueRenderItemBuilder` 按 slot 拆分生成独立 RenderItem |
+
+> 材质槽数组化后，场景 JSON 格式变化示例：
+> ```json
+> "mesh": {
+>     "geometry": "character",
+>     "materials": ["mat_body", "mat_hair", "mat_eyes"]  // 数组，与 submesh 数量一致
+> }
+> ```
+> 向后兼容：旧格式 `"material": "mat_body"` 等效于 `"materials": ["mat_body"]`
+
 ### 低优先
 
 | # | 任务 | 优先级 | 说明 |
@@ -192,6 +148,37 @@ UpdateAndUpload(fence, ...)  ← 不变：从内部向量打包上传 GPU
 | 10 | 编辑器图标/资源 | P1 | `.rc` / `.ico` |
 | 11 | 场景 JSON schema 更新 | P1 | `.ddsmesh` → `.dxmesh` |
 | 12 | **PhysicsScene / AudioScene / NavMeshScene 子模块** | P3 | 按需添加，后续扩展 |
+| 25 | **交换链缓冲区格式检测** | P3 | 基于设备能力选择格式，当前功能检测模块未处理 |
+| 26 | **GPU 资源管理器完善** | P3 | 部分模块未使用 GpuResourceManager 管理内容 |
+| 27 | **输入系统 JSON 生成** | P3 | 输入配置缺少导出为 JSON 的能力 |
+| 28 | **网络安全（P2P）** | P3 | 玩家身份验证、连接频率限制、加密通信：PlayerId 不能仅依赖连接句柄绑定 |
+| 29 | **命令系统跨队列同步** | P3 | 当前设计不支持自动跨队列同步，需手动管理 |
+| 30 | **LOD 阈值动态切换** | P3 | 当前 LOD 阈值为固定值，需要运行时动态调整能力 |
+| 31 | **鼠标移出窗口限制** | P3 | 鼠标移动到窗口外时应避免影响相机旋转 |
+| 32 | **实体销毁释放持久化缓存** | P2 | 实体销毁时需要同时释放持久化缓存，构建器存在多线程安全性问题 |
+| 33 | **动静分批/八叉树/预计算遮挡** | P3 | 静态组件使用八叉树空间划分，预计算遮挡，动态组件单独处理 |
+| 34 | **事件系统枚举处理** | P3 | 事件系统使用枚举类型需统一处理 |
+| 35 | **命令列表提交前资源状态校验** | P3 | 提交命令列表前应有资源状态一致性校验 |
+| 36 | **硬编码配置集中化** | P2 | 各处硬编码的配置需收敛到配置管理器 |
+| 37 | **反射探针优先级可配置** | P3 | 反射探针的更新优先级从硬编码改为可配置 |
+| 38 | **单位系统统一** | P3 | 当前基于约定 1.0f = 1 米，后续需正式定义并统一 |
+| 39 | **镜面效果优化** | P3 | 展示的镜面效果需后续优化处理 |
+| 40 | **描述符堆场景切换** | P2 | 描述符堆需考虑场景切换时的分配与释放策略 |
+| 41 | **描述符槽环形缓冲区** | P3 | 描述符槽分配器增加 Ring Buffer 模式替代 FreeList |
+| 42 | **可见集射线检测对齐** | P2 | VisibleRaycaster 与 CullingSystem 的可见集需对齐，当前两者脱节导致拾取精度受影响 |
+| 43 | **阴影资源格式统一** | P3 | 方向光阴影 `DirShadowResources` 与点光源的 `DepthStencilHandle` 格式不一致，需统一 |
+| 44 | **材质系统纹理索引化** | P3 | 网格组件持有的 `textureHandle` 逐步剥离为 `gTextureMaps[]` 无界数组下标，资源生命周期由纹理池管理 |
+| 45 | **阴影剔除队列独立** | P2 | 阴影 Pass 应从光源视锥体做剔除，生成独立 `m_shadowCasterQueue`，避免相机看向空区域时阴影停滞 |
+| 46 | **阴影矩阵增量更新** | P3 | `ComputeDirShadowMatrix` 可优化为仅在相机视锥体变化时重建 |
+| 47 | **key/hash 编辑器应用** | P3 | key 与 hash 在编辑器下的应用场景定义 |
+
+### 基础设施改进（历史遗留）
+
+| # | 任务 | 优先级 | 说明 |
+|:-:|:-----|:-------|:------|
+| 48 | **配置管理器 JSON 合并** | P3 | 多配置文件未在内存中合并 |
+| 49 | **系统模块资源释放** | P3 | 确保所有系统模块可正常释放资源 |
+| 50 | **事件系统挂起唤醒机制** | P3 | 协程 Task 支持 + 等待队列管理 + 事件触发唤醒 + TaskFlow 集成 |
 
 ---
 

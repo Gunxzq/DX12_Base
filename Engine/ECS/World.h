@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Common/DX12API.h"
 #include "Core/Entity.h"
 #include "Core/Registry.h"
 #include <memory>
@@ -16,7 +17,7 @@ namespace ECS {
 ///   - 逻辑分区由 Manager 的"视角"提供（SceneManager、PreviewManager 等）
 ///   - 内部 System 通过 GetRegistry() 访问完整 ECS 能力（view/group/ctx）
 ///   - 外部消费者通过 World 的受控 API 操作实体
-class World {
+class DX12ECS_API World {
 public:
     World() = default;
     ~World();
