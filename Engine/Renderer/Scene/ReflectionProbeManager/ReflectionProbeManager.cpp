@@ -18,13 +18,15 @@ static constexpr uint32_t MAX_PROBES = 64; // 最大反射探针数量
  * @param textureManager 纹理管理器
  * @date 2026-06-23
  */
-void ReflectionProbeManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps) {
+void ReflectionProbeManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps,
+                                        Resource::HeapTag heapTag) {
     if (m_initialized) {
         Shutdown();
     }
 
     m_device = device;
     m_descriptorHeaps = descriptorHeaps;
+    m_heapTag = heapTag;
 
     if (!m_device || !m_descriptorHeaps) {
         return;
@@ -129,7 +131,7 @@ uint32_t ReflectionProbeManager::AddProbe(const DirectX::XMFLOAT3 &position, flo
         dsvDesc.Texture2DArray.FirstArraySlice = 0;
         dsvDesc.Texture2DArray.ArraySize = 6;
 
-        entry.depthHandle = DepthStencilPool::GetInstance().Allocate(depthDesc, &dsvDesc);
+        entry.depthHandle = DepthStencilPool::GetInstance().Allocate(depthDesc, m_heapTag, &dsvDesc);
     }
 
     uint32_t index = static_cast<uint32_t>(m_probeEntries.size());
@@ -344,7 +346,7 @@ ProbeRuntimeResources ReflectionProbeManager::AllocateCubemapResource(uint32_t r
     rtvDesc.Texture2DArray.FirstArraySlice = 0;
     rtvDesc.Texture2DArray.ArraySize = 6;
 
-    resources.rtHandle = rtPool.Allocate(rtDesc, &rtvDesc);
+    resources.rtHandle = rtPool.Allocate(rtDesc, m_heapTag, &rtvDesc);
     if (!resources.rtHandle.IsValid()) {
         return resources;
     }
@@ -423,6 +425,12 @@ uint32_t ReflectionProbeManager::GetProbeDepthSlot(uint32_t probeIndex) const {
         return UINT32_MAX;
 
     return m_probeEntries[probeIndex].depthHandle.dsvSlot;
+}
+
+ID3D12Resource *ReflectionProbeManager::GetProbeDepthResource(uint32_t probeIndex) const {
+    if (probeIndex >= m_probeEntries.size())
+        return nullptr;
+    return DepthStencilPool::GetInstance().GetResource(m_probeEntries[probeIndex].depthHandle);
 }
 
 /**

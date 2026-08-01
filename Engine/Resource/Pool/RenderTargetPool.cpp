@@ -298,8 +298,6 @@ void RenderTargetPool::EvictLRU() {
     }
     // 递增 generation，使任何持有旧 handle 的访问失效
     entry.generation = m_nextGeneration++;
-
-    auto *logger = Logger::Logger::GetInstance();
 }
 
 /**

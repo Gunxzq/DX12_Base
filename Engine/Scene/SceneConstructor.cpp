@@ -1,10 +1,17 @@
 #include "SceneConstructor.h"
+#include "Background/GeometryProceduralTask.h"
 #include "Boot/GameContext.h"
 #include "Common/d3dUtil.h"
 #include "Core/SharedDataStore/SharedDataStore.h"
+#include "ECS/Core/Components/Camera.h"
+#include "ECS/Core/Components/Light.h"
 #include "ECS/Core/Components/Name.h"
+#include "ECS/Core/Components/ReflectionProbe.h"
+#include "ECS/Core/Components/Relationship.h"
 #include "ECS/Core/Components/Render.h"
 #include "ECS/Core/Components/Tags.h"
+#include "ECS/Core/Components/Transform.h"
+#include "ECS/Core/Components/Water.h"
 #include "ECS/Core/Registry.h"
 #include "Event/EventRegistry.h"
 #include "Event/MessageDispatcher.h"
@@ -17,6 +24,7 @@
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Scene/SkyboxManager.h"
 #include "Renderer/Scene/WaterManager.h"
+#include "Renderer/Utils/GeometryGenerator.h"
 #include "Resource/AssetManager/AssetManager.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
@@ -38,6 +46,11 @@ void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext
     m_loading = true;
 
     auto *log = context ? context->Logging : nullptr;
+
+    // 保存原始依赖信息（用于编辑器重新导出，此时路径还是相对路径）
+    m_originalDependencies = desc.dependencies;
+    m_originalMaterials = desc.materials;
+    m_originalBaseURL = desc.baseURL;
 
     if (!context || !context->GeometryResourceManager) {
         auto *log = context ? context->Logging : nullptr;
@@ -220,8 +233,8 @@ void SceneConstructor::OnDependenciesLoaded() {
     // ================================================================
     // Step 5: 场景全局天空盒（通过 SkyboxManager 直接设置，不走 ECS）
     // ================================================================
-    if (m_desc.skybox) {
-        const auto &sb = *m_desc.skybox;
+    if (m_desc.sceneEnvironment.skybox) {
+        const auto &sb = *m_desc.sceneEnvironment.skybox;
         GpuResourceHandle texRes;
         auto texIt = texResourceMap.find(sb.texture);
         if (texIt != texResourceMap.end() && texIt->second.IsValid())
@@ -230,27 +243,52 @@ void SceneConstructor::OnDependenciesLoaded() {
             log->Error("[SceneConstructor] Skybox texture '{}' not found", sb.texture);
 
         GeometryHandle skyGeo;
-        if (!sb.geometry.empty()) {
-            auto geoIt = geoMap.find(sb.geometry);
-            if (geoIt != geoMap.end() && geoIt->second.IsValid()) {
-                skyGeo = geoIt->second;
-                m_context->GeometryResourceManager->Retain(skyGeo);
-            }
+        if (sb.procedural.type.empty()) {
+            log->Warn("[SceneConstructor] Skybox geometry type not specified, procedural default will be used");
+            // 降级使用程序化立方体
         }
 
-        if (texRes.IsValid() && skyGeo.IsValid()) {
-            Renderer::SkyboxManager::GetInstance().SetSkybox(texRes, skyGeo);
-            log->Info("[SceneConstructor] Skybox set via SkyboxManager: tex='{}' geo='{}'", sb.texture, sb.geometry);
+        // 程序化生成天空盒几何体：通过异步任务管线加载
+        auto procResult = std::make_shared<Async::GeometryProceduralOutput>();
+        auto task = Async::GeometryProceduralTask::Create(sb.procedural.type.empty() ? "cube" : sb.procedural.type,
+                                                          sb.procedural, m_context->DeviceContext->GetDevice(),
+                                                          &m_context->DeviceContext->GetCommandManager(),
+                                                          m_context->GeometryResourceManager, procResult);
 
-            // 将环境贴图注入 WaterManager（水体共享反射用）
-            auto cubeSRV = Renderer::SkyboxManager::GetInstance().GetCubeSRV();
-            if (cubeSRV.ptr != 0) {
-                Renderer::WaterManager::GetInstance().SetEnvironmentMap(cubeSRV);
-                log->Info("[SceneConstructor] Environment map injected into WaterManager");
+        // 注册完成回调：拿到 GeometryHandle 后设置天空盒
+        auto prevOnComplete = task.onComplete;
+        task.onComplete = [this, prevOnComplete, texRes, sb, log, procResult](bool success) {
+            if (prevOnComplete)
+                prevOnComplete(success);
+
+            if (success && procResult->success) {
+                GeometryHandle skyGeo = procResult->geometryHandle;
+                m_skyboxProceduralHandles.push_back(skyGeo);
+
+                if (texRes.IsValid() && skyGeo.IsValid()) {
+                    Renderer::SkyboxManager::GetInstance().SetSkybox(texRes, skyGeo);
+                    log->Info("[SceneConstructor] Skybox set via SkyboxManager: tex='{}' geo=procedural({})",
+                              sb.texture, sb.procedural.type.empty() ? "cube" : sb.procedural.type);
+
+                    auto cubeSRV = Renderer::SkyboxManager::GetInstance().GetCubeSRV();
+                    if (cubeSRV.ptr != 0) {
+                        Renderer::WaterManager::GetInstance().SetEnvironmentMap(cubeSRV);
+                        log->Info("[SceneConstructor] Environment map injected into WaterManager");
+                    }
+                } else {
+                    log->Warn("[SceneConstructor] Skybox incomplete: texValid={} geoValid={}", texRes.IsValid(),
+                              skyGeo.IsValid());
+                }
             }
+        };
+
+        // 提交到后台执行器（与现有异步加载管线一致）
+        if (m_context && m_context->BackgroundExecutor) {
+            m_context->BackgroundExecutor->SubmitLoadTask(std::move(task));
+            log->Info("[SceneConstructor] Submitted procedural geometry task for skybox: type='{}'",
+                      sb.procedural.type.empty() ? "cube" : sb.procedural.type);
         } else {
-            log->Warn("[SceneConstructor] Skybox incomplete: texValid={} geoValid={}", texRes.IsValid(),
-                      skyGeo.IsValid());
+            log->Warn("[SceneConstructor] No BackgroundExecutor available, procedural skybox deferred");
         }
     }
 
@@ -267,12 +305,17 @@ void SceneConstructor::OnDependenciesLoaded() {
     sceneData->matMap = std::move(matMap);
 
     // 携带场景环境数据（供 SceneConstructSystem 设置到 SceneManager）
-    sceneData->skybox = m_desc.skybox;
-    sceneData->environment = m_desc.environment;
+    sceneData->skybox = m_desc.sceneEnvironment.skybox;
+    sceneData->environment = m_desc.sceneEnvironment.ambient;
+
+    // 携带原始依赖/materials/baseURL（供编辑器重新导出用）
+    sceneData->originalDependencies = m_originalDependencies;
+    sceneData->originalMaterials = m_originalMaterials;
+    sceneData->baseURL = m_originalBaseURL;
 
     // 携带天空盒 GPU 句柄（Tab 切换时重建用）
-    if (m_desc.skybox) {
-        const auto &sb = *m_desc.skybox;
+    if (m_desc.sceneEnvironment.skybox) {
+        const auto &sb = *m_desc.sceneEnvironment.skybox;
         auto texIt = texResourceMap.find(sb.texture);
         if (texIt != texResourceMap.end() && texIt->second.IsValid())
             sceneData->skyboxTextureHandle = texIt->second;
@@ -280,6 +323,8 @@ void SceneConstructor::OnDependenciesLoaded() {
             auto geoIt = sceneData->geoMap.find(sb.geometry);
             if (geoIt != sceneData->geoMap.end() && geoIt->second.IsValid())
                 sceneData->skyboxGeometryHandle = geoIt->second;
+        } else if (!sb.procedural.type.empty() && !m_skyboxProceduralHandles.empty()) {
+            sceneData->skyboxGeometryHandle = m_skyboxProceduralHandles.back();
         }
     }
 
@@ -486,7 +531,13 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
     // 0. NameComponent — 名称与持久化 ID
     {
         ECS::NameComponent nameComp;
-        nameComp.persistentId = ECS::NextPersistentId();
+        // 优先从 JSON 恢复 persistentId（关系引用的 targetId 基于此匹配）
+        // 无 JSON ID 时（如编辑器新建实体），由 NextPersistentId 分配
+        if (!eDesc.persistentId.empty()) {
+            nameComp.persistentId = std::stoull(eDesc.persistentId, nullptr, 16);
+        } else {
+            nameComp.persistentId = ECS::NextPersistentId();
+        }
         nameComp.name = eDesc.name.empty() ? "Entity" : eDesc.name;
         registry->AddComponent<ECS::NameComponent>(entity, std::move(nameComp));
     }
@@ -495,7 +546,9 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
     if (eDesc.transform) {
         const auto &t = *eDesc.transform;
         DirectX::XMFLOAT3 pos(t.position[0], t.position[1], t.position[2]);
-        DirectX::XMFLOAT3 rot(t.rotation[0], t.rotation[1], t.rotation[2]);
+        DirectX::XMFLOAT4 rot(
+            t.rotation.size() >= 4 ? t.rotation[0] : 0.0f, t.rotation.size() >= 4 ? t.rotation[1] : 0.0f,
+            t.rotation.size() >= 4 ? t.rotation[2] : 0.0f, t.rotation.size() >= 4 ? t.rotation[3] : 1.0f);
         DirectX::XMFLOAT3 scl(t.scale[0], t.scale[1], t.scale[2]);
         registry->AddComponent<ECS::TransformComponent>(entity, pos, rot, scl);
     }
@@ -518,11 +571,17 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
                 meshComp.localBounds = *bounds;
             }
 
-            // 查找材质
-            if (!m.material.empty()) {
-                auto matIt = matMap.find(m.material);
-                if (matIt != matMap.end() && matIt->second.IsValid()) {
-                    meshComp.materialHandle = matIt->second;
+            // 查找材质（数组化，索引 = SubMesh 索引）
+            if (!m.materials.empty()) {
+                meshComp.materialSlots.reserve(m.materials.size());
+                for (const auto &matKey : m.materials) {
+                    auto matIt = matMap.find(matKey);
+                    if (matIt != matMap.end() && matIt->second.IsValid()) {
+                        meshComp.materialSlots.push_back(matIt->second);
+                    } else {
+                        log->Warn("[SceneConstructor] Material '{}' not found for entity '{}'", matKey, eDesc.name);
+                        meshComp.materialSlots.push_back(Resource::MaterialHandle::Invalid());
+                    }
                 }
             }
 
@@ -534,32 +593,96 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
 
     // 3. Light
     if (eDesc.light) {
-        // TODO: LightComponent
-        log->Info("[SceneConstructor] Light component skipped (TODO) for '{}'", eDesc.name);
+        const auto &ld = *eDesc.light;
+        ECS::LightComponent lightComp;
+        if (ld.type == "directional")
+            lightComp.type = 0.0f;
+        else if (ld.type == "point")
+            lightComp.type = 1.0f;
+        else if (ld.type == "spot")
+            lightComp.type = 2.0f;
+        if (ld.color.size() >= 4) {
+            lightComp.strength = {ld.color[0], ld.color[1], ld.color[2], ld.intensity};
+        } else if (ld.color.size() >= 3) {
+            lightComp.strength = {ld.color[0], ld.color[1], ld.color[2], ld.intensity};
+        }
+        lightComp.range = ld.range.value_or(lightComp.range);
+        if (ld.falloffStart.has_value())
+            lightComp.falloffStart = *ld.falloffStart;
+        if (ld.falloffEnd.has_value())
+            lightComp.falloffEnd = *ld.falloffEnd;
+        if (ld.spotPower.has_value())
+            lightComp.spotPower = *ld.spotPower;
+        lightComp.castShadow = ld.castsShadow;
+        if (ld.shadowBias.has_value())
+            lightComp.shadowBias = *ld.shadowBias;
+        registry->AddComponent<ECS::LightComponent>(entity, std::move(lightComp));
+        log->Info("[SceneConstructor] LightComponent added to '{}': type={} intensity={} range={} falloff={}-{} "
+                  "spotPower={} shadow={}",
+                  eDesc.name, ld.type, ld.intensity, ld.range.value_or(lightComp.range),
+                  ld.falloffStart.value_or(lightComp.falloffStart), ld.falloffEnd.value_or(lightComp.falloffEnd),
+                  ld.spotPower.value_or(lightComp.spotPower), ld.castsShadow);
     }
 
     // 4. Camera
     if (eDesc.camera) {
-        // TODO: CameraComponent
-        log->Info("[SceneConstructor] Camera component skipped (TODO) for '{}'", eDesc.name);
+        const auto &cd = *eDesc.camera;
+        ECS::CameraComponent cameraComp;
+        cameraComp.fov = cd.fov;
+        cameraComp.orthoSize = cd.orthoSize;
+        cameraComp.nearPlane = cd.nearPlane;
+        cameraComp.farPlane = cd.farPlane;
+        cameraComp.isMain = cd.isMain;
+        cameraComp.projection =
+            (cd.projection == "orthographic") ? ECS::ProjectionType::Orthographic : ECS::ProjectionType::Perspective;
+        registry->AddComponent<ECS::CameraComponent>(entity, std::move(cameraComp));
+        log->Info(
+            "[SceneConstructor] CameraComponent added to '{}': fov={} orthoSize={} near={} far={} proj={} isMain={}",
+            eDesc.name, cd.fov, cd.orthoSize, cd.nearPlane, cd.farPlane, cd.projection, cd.isMain);
     }
 
-    // 5. 水组件（WaterComponent）
+    // 4a. ReflectionProbe
+    if (eDesc.reflectionProbe) {
+        const auto &rd = *eDesc.reflectionProbe;
+        ECS::ReflectionProbeComponent probeComp;
+        probeComp.captureRange = rd.range;
+        probeComp.resolution = rd.resolution;
+        probeComp.updatePriority = rd.updatePriority;
+        registry->AddComponent<ECS::ReflectionProbeComponent>(entity, std::move(probeComp));
+        log->Info("[SceneConstructor] ReflectionProbeComponent added to '{}': range={} resolution={} priority={}",
+                  eDesc.name, rd.range, rd.resolution, rd.updatePriority);
+    }
+
+    // 4b. Relationships（实体关系）
+    for (const auto &rd : eDesc.relationships) {
+        ECS::RelationshipKind kind = ECS::RelationshipKind::Parent;
+        if (rd.kind == "socket")
+            kind = ECS::RelationshipKind::Socket;
+        else if (rd.kind == "group")
+            kind = ECS::RelationshipKind::Group;
+        else if (rd.kind == "follow")
+            kind = ECS::RelationshipKind::Follow;
+
+        ECS::RelationshipComponent relComp;
+        relComp.targetId = rd.targetId;
+        relComp.kind = kind;
+        registry->AddComponent<ECS::RelationshipComponent>(entity, std::move(relComp));
+
+        if (kind == ECS::RelationshipKind::Socket && !rd.socketName.empty()) {
+            ECS::SocketAttachmentComponent socketComp;
+            socketComp.socketName = rd.socketName;
+            registry->AddComponent<ECS::SocketAttachmentComponent>(entity, std::move(socketComp));
+        }
+    }
+
+    // 5. 水组件（WaterComponent）— 波浪参数直接写入 ECS，由 WaterManager::CollectFromECS 收集
     if (eDesc.water) {
         const auto &wd = *eDesc.water;
 
-        // 查找材质（MeshDesc 中有 material key，用其查找 matMap）
-        if (eDesc.mesh && !eDesc.mesh->material.empty()) {
-            auto matIt = matMap.find(eDesc.mesh->material);
+        // 查找材质（MeshDesc 中有 materials[]，用第一个 key 查找 matMap）
+        if (eDesc.mesh && !eDesc.mesh->materials.empty()) {
+            auto matIt = matMap.find(eDesc.mesh->materials[0]);
             if (matIt != matMap.end() && matIt->second.IsValid()) {
-                // 注册波浪参数到 WaterManager
-                Renderer::WaveParams waveParams;
-                waveParams.amplitude = wd.amplitude;
-                waveParams.frequency = wd.frequency;
-                waveParams.speed = wd.speed;
-                waveParams.direction = wd.direction;
-                uint32_t wpIdx = Renderer::WaterManager::GetInstance().RegisterWaveParams(waveParams);
-
                 // 分配持久 ObjectConstants CB（UPLOAD 堆，贯穿生命周期）
                 D3D12_GPU_VIRTUAL_ADDRESS cbAddr = 0;
                 if (context && context->DeviceContext) {
@@ -570,10 +693,6 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
                                             D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
                     if (cbBuf.IsValid()) {
                         ID3D12Resource *cbRes = gpuMgr.GetResource(cbBuf);
-                        // 不需要写入内容——世界矩阵在 Builder 中已经通过 PendingBatch 传递，
-                        // 但这里是持久分配的，所以填默认值（单位矩阵），实际 PerObject 由 Builder 覆盖
-                        // 实际上 Builder 不再分配，所以这里直接填正确的世界矩阵
-                        // 但现在 Builder 中我们直接使用这个持久地址，所以填入单位矩阵占位
                         void *mapped = nullptr;
                         cbRes->Map(0, nullptr, &mapped);
                         memset(mapped, 0, sizeof(Renderer::ObjectConstants));
@@ -584,11 +703,14 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
 
                 ECS::WaterComponent waterComp;
                 waterComp.materialHandle = matIt->second;
-                waterComp.waveParamIndex = wpIdx;
+                waterComp.amplitude = wd.amplitude;
+                waterComp.frequency = wd.frequency;
+                waterComp.speed = wd.speed;
+                waterComp.direction = wd.direction;
                 waterComp.objectCBAddress = cbAddr;
                 registry->AddComponent<ECS::WaterComponent>(entity, waterComp);
-                log->Info("[SceneConstructor] WaterComponent added to '{}': waveIdx={} cbAddr={:#x}", eDesc.name, wpIdx,
-                          cbAddr);
+                log->Info("[SceneConstructor] WaterComponent added to '{}': wave=({},{},{},{}) cbAddr={:#x}",
+                          eDesc.name, wd.amplitude, wd.frequency, wd.speed, wd.direction, cbAddr);
             }
         } else {
             log->Warn("[SceneConstructor] Water '{}' has no material, skipped", eDesc.name);

@@ -1,5 +1,6 @@
 #include "SceneLoader.h"
 #include "Common/Common.h"
+#include "Resource/Utils/HashUtils.h"
 #include <fstream>
 
 namespace DX12Engine::Resource {
@@ -22,6 +23,12 @@ SceneDescription SceneLoader::LoadFromFile(const std::filesystem::path &path) {
 SceneDescription SceneLoader::LoadFromJSON(const nlohmann::json &root) {
     SceneDescription desc;
 
+    // 基本校验：必需字段（对应 schema 的 "required": ["version", "entities"]）
+    if (!root.contains("version"))
+        ErrorReporter::Fatal("SceneLoader: missing required field 'version'");
+    if (!root.contains("entities") || !root["entities"].is_array())
+        ErrorReporter::Fatal("SceneLoader: missing required field 'entities' (must be an array)");
+
     // version
     if (root.contains("version"))
         desc.version = root["version"].get<uint32_t>();
@@ -34,14 +41,9 @@ SceneDescription SceneLoader::LoadFromJSON(const nlohmann::json &root) {
     if (root.contains("baseURL") && root["baseURL"].is_string())
         desc.baseURL = root["baseURL"].get<std::string>();
 
-    // environment
-    if (root.contains("environment"))
-        desc.environment = root["environment"].get<EnvironmentDesc>();
-
-    // skybox（顶层全局属性，非 ECS 实体）
-    if (root.contains("skybox") && root["skybox"].is_object()) {
-        desc.skybox = root["skybox"].get<SkyboxDesc>();
-    }
+    // sceneEnvironment（管理器全局数据：环境光、天空盒等，不进入 ECS Registry）
+    if (root.contains("sceneEnvironment"))
+        desc.sceneEnvironment = root["sceneEnvironment"].get<SceneEnvironment>();
 
     // dependencies（from_json 内置可选字段处理）
     if (root.contains("dependencies"))
@@ -59,7 +61,87 @@ SceneDescription SceneLoader::LoadFromJSON(const nlohmann::json &root) {
             desc.entities.push_back(ParseEntity(entityJson));
     }
 
+    // hash（场景内容 FNV-1a 校验，可选）
+    if (root.contains("hash") && root["hash"].is_string())
+        desc.hash = root["hash"].get<std::string>();
+
     return desc;
+}
+
+nlohmann::ordered_json SceneLoader::SaveToJSON(const SceneDescription &desc) {
+    // 使用 ordered_json 保持键顺序与 schema 一致
+    nlohmann::ordered_json j;
+
+    // 按 schema 字段顺序写入（$schema 惯例第一，hash 最后）
+    j["$schema"] = "https://raw.githubusercontent.com/Gunxzq/DX12_Base/Refactor/Schemas/scene.schema.json";
+    j["version"] = desc.version;
+
+    if (!desc.baseURL.empty())
+        j["baseURL"] = desc.baseURL;
+
+    if (!desc.metadata.name.empty() || !desc.metadata.description.empty()) {
+        nlohmann::json meta = desc.metadata;
+        j["metadata"] = std::move(meta);
+    }
+
+    {
+        nlohmann::json sceneEnv = desc.sceneEnvironment;
+        j["sceneEnvironment"] = std::move(sceneEnv);
+    }
+
+    if (!desc.dependencies.meshes.empty() || !desc.dependencies.textures.empty() ||
+        !desc.dependencies.terrains.empty()) {
+        nlohmann::json deps = desc.dependencies;
+        j["dependencies"] = std::move(deps);
+    }
+
+    if (!desc.materials.empty()) {
+        nlohmann::json mats = desc.materials;
+        j["materials"] = std::move(mats);
+    }
+
+    {
+        nlohmann::json ents = desc.entities;
+        j["entities"] = std::move(ents);
+    }
+
+    if (!desc.hash.empty())
+        j["hash"] = desc.hash;
+
+    return j;
+}
+
+bool SceneLoader::SaveToFile(const SceneDescription &desc, const std::filesystem::path &path) {
+    nlohmann::ordered_json j = SaveToJSON(desc);
+
+    // 自动计算 hash（排除 $schema 和 hash 自身字段）
+    if (!j.contains("hash") || j["hash"].empty() || j["hash"].get<std::string>().empty()) {
+        // 临时移除 $schema 和 hash（如果有）用于 hash 计算
+        bool hadSchema = j.contains("$schema");
+        std::string schemaVal;
+        if (hadSchema) {
+            schemaVal = j["$schema"].get<std::string>();
+            j.erase("$schema");
+        }
+        j.erase("hash");
+
+        std::string jsonStr = j.dump();
+        uint64_t hashVal = HashUtils::CalculateMemoryHash(jsonStr.data(), jsonStr.size());
+        char hashBuf[17];
+        snprintf(hashBuf, sizeof(hashBuf), "%016llx", hashVal);
+
+        // 恢复 $schema（如果有），再添加 hash
+        if (hadSchema)
+            j["$schema"] = schemaVal;
+        j["hash"] = std::string(hashBuf);
+    }
+
+    std::ofstream ofs(path);
+    if (!ofs.is_open())
+        return false;
+
+    ofs << j.dump(4); // 4 空格缩进，可读性好
+    return true;
 }
 
 EntityDesc SceneLoader::ParseEntity(const nlohmann::json &j) {
@@ -96,6 +178,12 @@ EntityDesc SceneLoader::ParseEntity(const nlohmann::json &j) {
     entity.opaque = c.contains("opaque");
     entity.transparent = c.contains("transparent");
 
+    // 关系（实体层级，不在 components 中）
+    if (j.contains("relationships") && j["relationships"].is_array()) {
+        for (const auto &relJson : j["relationships"])
+            entity.relationships.push_back(relJson.get<RelationshipDesc>());
+    }
+
     // 子实体
     if (j.contains("children") && j["children"].is_array()) {
         for (const auto &childJson : j["children"])
@@ -120,8 +208,12 @@ MeshDesc SceneLoader::ParseMesh(const nlohmann::json &j) {
     MeshDesc m;
     if (j.contains("geometry"))
         m.geometry = j["geometry"].get<std::string>();
-    if (j.contains("material"))
-        m.material = j["material"].get<std::string>();
+    if (j.contains("materials") && j["materials"].is_array()) {
+        m.materials = j["materials"].get<std::vector<std::string>>();
+    } else if (j.contains("material")) {
+        // 向后兼容
+        m.materials = {j["material"].get<std::string>()};
+    }
     if (j.contains("receivesShadow"))
         m.receivesShadow = j["receivesShadow"].get<bool>();
     return m;
@@ -165,10 +257,18 @@ LightDesc SceneLoader::ParseLight(const nlohmann::json &j) {
         l.intensity = j["intensity"].get<float>();
     if (j.contains("range"))
         l.range = j["range"].get<float>();
+    if (j.contains("falloffStart"))
+        l.falloffStart = j["falloffStart"].get<float>();
+    if (j.contains("falloffEnd"))
+        l.falloffEnd = j["falloffEnd"].get<float>();
+    if (j.contains("spotPower"))
+        l.spotPower = j["spotPower"].get<float>();
     if (j.contains("spotAngle"))
         l.spotAngle = j["spotAngle"].get<float>();
     if (j.contains("castsShadow"))
         l.castsShadow = j["castsShadow"].get<float>();
+    if (j.contains("shadowBias"))
+        l.shadowBias = j["shadowBias"].get<float>();
     return l;
 }
 

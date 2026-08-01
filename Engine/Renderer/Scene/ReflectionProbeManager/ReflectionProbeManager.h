@@ -1,8 +1,8 @@
 #pragma once
 
+#include "Resource/Core/GpuHandlePool.h"
 #include "Resource/Pool/DepthStencilPool.h"
 #include "Resource/Pool/RenderTargetPool.h"
-#include "Resource/Core/GpuHandlePool.h"
 #include <DirectXMath.h>
 #include <vector>
 
@@ -30,7 +30,8 @@ public:
     ReflectionProbeManager &operator=(const ReflectionProbeManager &) = delete;
 
     // ---- 生命周期 ----
-    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps);
+    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps,
+                    Resource::HeapTag heapTag = Resource::HeapTag::Default);
     void Shutdown();
 
     // ---- 探针管理 ----
@@ -54,6 +55,9 @@ public:
 
     /// 获取指定探针使用的深度缓冲区 DSV 槽位
     uint32_t GetProbeDepthSlot(uint32_t probeIndex) const;
+
+    /// 获取指定探针使用的深度缓冲资源指针
+    ID3D12Resource *GetProbeDepthResource(uint32_t probeIndex) const;
 
 private:
     // ---- 内部数据结构 ----
@@ -80,6 +84,7 @@ private:
 private:
     ID3D12Device *m_device = nullptr;
     Resource::DescriptorHeapCollection *m_descriptorHeaps = nullptr;
+    Resource::HeapTag m_heapTag = Resource::HeapTag::Default;
     bool m_initialized = false;
 
     // 探针数据

@@ -24,6 +24,16 @@ public:
      */
     static SceneDescription LoadFromJSON(const nlohmann::json &root);
 
+    /**
+     * @brief 将 SceneDescription 序列化为 ordered JSON（保持键顺序与 schema 一致）
+     */
+    static nlohmann::ordered_json SaveToJSON(const SceneDescription &desc);
+
+    /**
+     * @brief 将 SceneDescription 写入 JSON 文件
+     */
+    static bool SaveToFile(const SceneDescription &desc, const std::filesystem::path &path);
+
 private:
     static EntityDesc ParseEntity(const nlohmann::json &j);
     static TransformDesc ParseTransform(const nlohmann::json &j);

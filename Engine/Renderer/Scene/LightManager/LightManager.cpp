@@ -28,13 +28,15 @@ LightManager &LightManager::GetInstance() {
 // 生命周期
 // ============================================================================
 
-void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps) {
+void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *descriptorHeaps,
+                              Resource::HeapTag heapTag) {
     if (m_initialized) {
         Shutdown();
     }
 
     m_device = device;
     m_descriptorHeaps = descriptorHeaps;
+    m_heapTag = heapTag;
     Clear();
 
     // 校验描述符堆有效性
@@ -276,6 +278,15 @@ void LightManager::Clear() {
     m_spotShadowCBConstants.clear();
     m_pointShadowConstants.clear();
     m_lightDirty = true;
+    m_lightDirty = true;
+    m_shadowDirty = true;
+}
+
+void LightManager::ResetLightData() {
+    m_dirLights.clear();
+    m_pointLights.clear();
+    m_spotLights.clear();
+    memset(&m_lightConstants, 0, sizeof(LightConstants));
     m_lightDirty = true;
     m_shadowDirty = true;
 }
@@ -649,6 +660,10 @@ void LightManager::ComputeSpotShadowMatrix(const Light &light, ShadowParams &out
     XMVECTOR dir = XMLoadFloat4(&light.Direction);
     dir = XMVector3Normalize(dir);
 
+    // 方向为零向量时跳过（防止 LookAtLH/PerspectiveFovLH 断言）
+    if (XMVector3Equal(dir, XMVectorZero()))
+        return;
+
     XMVECTOR target = XMVectorAdd(pos, dir);
     XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
     if (fabsf(XMVectorGetY(dir)) > 0.99f) {
@@ -657,7 +672,10 @@ void LightManager::ComputeSpotShadowMatrix(const Light &light, ShadowParams &out
 
     XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
     float nearPlane = 0.1f;
-    float farPlane = light.Range > 0.0f ? light.Range : 50.0f;
+    float farPlane = light.Range > 0.1f ? light.Range : 50.0f;
+    // 确保 far > near，防止 XMMatrixPerspectiveFovLH 断言
+    if (farPlane <= nearPlane + 0.001f)
+        farPlane = nearPlane + 10.0f;
     float fov = XMConvertToRadians(45.0f); // 固定视场角 45°
     XMMATRIX proj = XMMatrixPerspectiveFovLH(fov, 1.0f, nearPlane, farPlane);
     XMMATRIX vp = XMMatrixMultiply(view, proj);
@@ -711,7 +729,7 @@ void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint3
     clearValue.DepthStencil.Depth = 1.0f;
     dsDesc.clearValue = clearValue;
 
-    m_dirShadow.handle = dsPool.Allocate(dsDesc);
+    m_dirShadow.handle = dsPool.Allocate(dsDesc, m_heapTag);
     if (!m_dirShadow.handle.IsValid()) {
         return;
     }
@@ -795,7 +813,7 @@ void LightManager::CreateShadowMapForSpotLight(uint32_t lightIndex, uint32_t res
     clearValue.DepthStencil.Depth = 1.0f;
     dsDesc.clearValue = clearValue;
 
-    shadow.handle = dsPool.Allocate(dsDesc);
+    shadow.handle = dsPool.Allocate(dsDesc, m_heapTag);
     if (!shadow.handle.IsValid())
         return;
 
@@ -890,7 +908,7 @@ void LightManager::CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t re
     arrayDsvDesc.Texture2DArray.FirstArraySlice = 0;
     arrayDsvDesc.Texture2DArray.ArraySize = 6;
 
-    shadow.arrayHandle = dsPool.Allocate(dsDesc, &arrayDsvDesc);
+    shadow.arrayHandle = dsPool.Allocate(dsDesc, m_heapTag, &arrayDsvDesc);
     if (!shadow.arrayHandle.IsValid()) {
         return;
     }

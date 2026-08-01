@@ -5,9 +5,9 @@
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
 #include "Renderer/Scene/Camera.h"
 #include "Renderer/Scene/Struct/Frustum.h"
+#include "Resource/Core/GpuHandlePool.h"
 #include "Resource/Pool/DepthStencilPool.h"
 #include "Resource/Pool/RenderTargetPool.h"
-#include "Resource/Core/GpuHandlePool.h"
 #include <d3d12.h>
 #include <vector>
 
@@ -63,12 +63,17 @@ public:
     LightManager() = default;
     ~LightManager() = default;
 
-    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps);
+    void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps,
+                    Resource::HeapTag heapTag = Resource::HeapTag::Default);
     void Shutdown();
 
     void UpdateAndUpload(uint64_t fence, const Camera &camera);
 
+    /// 完全清理（含阴影资源释放，适合场景切换时调用）
     void Clear();
+
+    /// 仅重置光源数据（清空灯列表和常量，不释放阴影资源，适合每帧同步 ECS 时调用）
+    void ResetLightData();
 
     void SetDirectionalLight(const Light &light, uint32_t index = 0);
     void SetAmbientLight(const DirectX::XMFLOAT4 &light);
@@ -158,6 +163,7 @@ private:
     // 设备
     ID3D12Device *m_device = nullptr;
     Resource::DescriptorHeapCollection *m_descriptorHeaps = nullptr;
+    Resource::HeapTag m_heapTag = Resource::HeapTag::Default;
     bool m_initialized = false;
 
     // 内部 RingBuffer

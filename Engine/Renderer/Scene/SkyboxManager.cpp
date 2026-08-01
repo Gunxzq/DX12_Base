@@ -99,9 +99,9 @@ void SkyboxManager::CreateCubeSRV() {
 
     D3D12_RESOURCE_DESC rDesc = texRes->GetDesc();
 
-    // 分配新的 SRV 槽位（释放旧的）
+    // 释放旧的 SRV 槽位
     if (m_cubeSrvIndex != UINT32_MAX) {
-        // 暂不回收，让槽位复用逻辑后续优化
+        m_descHeaps->Free(m_heapTag, PartitionType::Texture, m_cubeSrvIndex, UINT64_MAX);
     }
     uint32_t newSrvIdx = m_descHeaps->Allocate(m_heapTag, PartitionType::Texture);
     if (newSrvIdx == UINT32_MAX)

@@ -66,6 +66,15 @@ struct SceneConstructData {
     // 天空盒 GPU 资源句柄（Tab 切换时重建天空盒用）
     Resource::GpuResourceHandle skyboxTextureHandle;
     Resource::GeometryHandle skyboxGeometryHandle;
+
+    // 原始场景资产依赖（保留 key → 相对路径映射，用于编辑器重新导出时正确序列化）
+    Resource::SceneDependencies originalDependencies;
+
+    // 原始内联材质定义（用于编辑器重新导出时正确序列化）
+    std::unordered_map<std::string, Resource::MaterialDesc> originalMaterials;
+
+    // 原始 baseURL（用于编辑器重新导出）
+    std::string baseURL;
 };
 
 class SceneConstructor {
@@ -106,6 +115,14 @@ private:
     Resource::AssetBatchPtr m_batch; // 当前加载批次的指针，用于追加子任务
     Callback m_onComplete;
     bool m_loading = false;
+
+    // 原始场景数据快照（路径解析前的依赖/materials/baseURL，供编辑器导出用）
+    Resource::SceneDependencies m_originalDependencies;
+    std::unordered_map<std::string, Resource::MaterialDesc> m_originalMaterials;
+    std::string m_originalBaseURL;
+
+    // 程序化生成的天空盒几何体句柄（Tab 切换时保持存活）
+    std::vector<Resource::GeometryHandle> m_skyboxProceduralHandles;
 };
 
 } // namespace Scene
