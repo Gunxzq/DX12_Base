@@ -92,6 +92,7 @@ bool DxMeshLoader::LoadFromFile(const std::wstring &filePath, ID3D12Device *devi
     outMesh.vertexStride = header->vertexStride;
     outMesh.indexFormat = (header->indexSize == 2) ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
     outMesh.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    outMesh.flags = header->flags;
     outMesh.isGpuReady = true;
 
     // 设置包围盒
@@ -99,6 +100,19 @@ bool DxMeshLoader::LoadFromFile(const std::wstring &filePath, ID3D12Device *devi
     aabb.min = DirectX::XMFLOAT3(header->boundsMin[0], header->boundsMin[1], header->boundsMin[2]);
     aabb.max = DirectX::XMFLOAT3(header->boundsMax[0], header->boundsMax[1], header->boundsMax[2]);
     outMesh.localBounds = aabb;
+
+    // 读取 SubMesh 表
+    if (header->subMeshCount > 0) {
+        const auto *subTable = DxMesh_GetSubMeshTable(header);
+        outMesh.subMeshes.reserve(header->subMeshCount);
+        for (uint32_t i = 0; i < header->subMeshCount; ++i) {
+            SubMeshInfo info;
+            info.startIndex = subTable[i].indexOffset;
+            info.indexCount = subTable[i].indexCount;
+            info.startVertex = static_cast<int32_t>(subTable[i].vertexOffset);
+            outMesh.subMeshes.push_back(info);
+        }
+    }
 
     return true;
 }

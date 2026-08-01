@@ -7,7 +7,7 @@ namespace DX12Engine::Asset {
 
 bool DxMeshWriter::Write(const void *vertices, size_t vertexCount, size_t vertexStride, const void *indices,
                          size_t indexCount, uint32_t indexSize, const std::wstring &outputPath, const float *boundsMin,
-                         const float *boundsMax, bool skinned) {
+                         const float *boundsMax, bool skinned, const DxMeshSubMesh *subMeshes, uint32_t subMeshCount) {
     if (!vertices || vertexCount == 0 || !indices || indexCount == 0) {
         return false;
     }
@@ -46,7 +46,9 @@ bool DxMeshWriter::Write(const void *vertices, size_t vertexCount, size_t vertex
 
     uint32_t vertexDataSize = static_cast<uint32_t>(vertexCount * vertexStride);
     uint32_t indexDataSize = static_cast<uint32_t>(indexCount * indexSize);
+    uint32_t lodTableSize = sizeof(DxMeshLOD) * 1; // 当前固定单 LOD
     uint32_t lodTableOffset = static_cast<uint32_t>(sizeof(DxMeshHeader) + vertexDataSize + indexDataSize);
+    uint32_t subMeshTableOffset = lodTableOffset + lodTableSize;
 
     // 填充 Header
     DxMeshHeader header = {};
@@ -61,6 +63,8 @@ bool DxMeshWriter::Write(const void *vertices, size_t vertexCount, size_t vertex
     memcpy(header.boundsMax, maxBounds, sizeof(maxBounds));
     header.lodCount = 1;
     header.lodOffset = lodTableOffset;
+    header.subMeshOffset = subMeshTableOffset;
+    header.subMeshCount = (subMeshes != nullptr) ? subMeshCount : 1;
 
     // 写文件
     std::ofstream ofs(outPath, std::ios::binary);
@@ -85,6 +89,18 @@ bool DxMeshWriter::Write(const void *vertices, size_t vertexCount, size_t vertex
     lod.indexCount = header.indexCount;
     lod.errorMetric = 0.0f;
     ofs.write(reinterpret_cast<const char *>(&lod), sizeof(lod));
+
+    // 5. SubMesh 表
+    if (subMeshes != nullptr && subMeshCount > 0) {
+        ofs.write(reinterpret_cast<const char *>(subMeshes), sizeof(DxMeshSubMesh) * subMeshCount);
+    } else {
+        // 默认：整个网格为一个 SubMesh
+        DxMeshSubMesh defaultSub = {};
+        defaultSub.indexOffset = 0;
+        defaultSub.indexCount = header.indexCount;
+        defaultSub.vertexOffset = 0;
+        ofs.write(reinterpret_cast<const char *>(&defaultSub), sizeof(defaultSub));
+    }
 
     return true;
 }

@@ -22,6 +22,8 @@
 #include "Core/TextureConverter.h"
 #include "Core/XFileParser.h"
 #include "Core/XORCipher.h"
+#include "Core/FbxMeshConverter.h"
+#include "Core/AnimClipConverter.h"
 #include "Asset/Definitions/Mesh/DxMeshFormat.h"
 #include "Asset/IO/Writer/DxMeshWriter.h"
 
@@ -1456,6 +1458,71 @@ static int CommandImportRobot(const std::vector<std::string> &args) {
 }
 
 // ==========================================================================
+// 命令：fbxs2dxmesh — 最终 FBX（Blender 优化后）→ 引擎资产
+//
+// 路线定案（2026-08-01）：引擎资产唯一来源 = Blender 优化后的最终 FBX。
+// importrobot（.x 直接拼接）退役，本命令替代其产出。
+// 输出 .dxmesh + .bone + Materials/*.mat + Textures/* + scene.json
+// ==========================================================================
+static int CommandFbx2DxMesh(const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        std::cerr << "Usage: AssetTool fbxs2dxmesh <model.fbx> <output_dir>\n";
+        return 1;
+    }
+
+    std::string fbxPath = args[0];
+    std::string outDir = args[1];
+
+    std::cout << "[fbxs2dxmesh] " << fbxPath << " → " << outDir << "\n";
+
+    AssetTool::FbxConvertOptions opts;
+    auto result = AssetTool::FbxMeshConverter::Convert(fbxPath, outDir, opts);
+    if (!result.success) {
+        std::cerr << "[fbxs2dxmesh] FAILED: " << result.error << "\n";
+        return 1;
+    }
+
+    std::cout << "[fbxs2dxmesh] DONE: " << result.meshCount << " meshes, "
+              << result.vertexCount << " verts, " << result.indexCount << " indices, "
+              << result.boneCount << " bones, " << result.materialKeys.size() << " materials\n";
+    for (const auto &f : result.outputFiles)
+        std::cout << "  → " << f << "\n";
+    return 0;
+}
+
+static int CommandAnim2Clip(const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        std::cerr << "Usage: AssetTool anim2clip <model_anim.fbx> <output_dir> [--clip name] [--noloop]\n";
+        return 1;
+    }
+
+    std::string fbxPath = args[0];
+    std::string outDir = args[1];
+
+    AssetTool::AnimClipOptions opts;
+    for (size_t i = 2; i < args.size(); ++i) {
+        if (args[i] == "--clip" && i + 1 < args.size())
+            opts.clipFilter.push_back(args[++i]);
+        else if (args[i] == "--noloop")
+            opts.loop = false;
+    }
+
+    std::cout << "[anim2clip] " << fbxPath << " → " << outDir << "\n";
+
+    auto result = AssetTool::AnimClipConverter::Convert(fbxPath, outDir, opts);
+    if (!result.success) {
+        std::cerr << "[anim2clip] FAILED: " << result.error << "\n";
+        return 1;
+    }
+
+    std::cout << "[anim2clip] DONE: " << result.clipCount << " clips, "
+              << result.channelCount << " channels, " << result.totalKeyframes << " keyframes\n";
+    for (const auto &f : result.outputFiles)
+        std::cout << "  → " << f << "\n";
+    return 0;
+}
+
+// ==========================================================================
 // 命令：verifyfbx — 验证 FBX 文件（用 assimp 重新导入并打印结构）
 // ==========================================================================
 
@@ -1541,6 +1608,13 @@ static void PrintUsage(const char *progName) {
     std::cout << "  " << progName << " importrobot <Robo.hod> <output_dir> [--no-lrswap]\n";
     std::cout << "      Import robot: merge .x parts + skeleton → .dxmesh + .bone + hod.json + scene.json\n";
     std::cout << "        --no-lrswap  disable LR bone swap\n\n";
+    std::cout << "  " << progName << " fbxs2dxmesh <model.fbx> <output_dir>\n";
+    std::cout << "      Blender 优化后 FBX → 引擎资产（路线定案：FBX 唯一来源）\n";
+    std::cout << "      Output: .dxmesh + .bone + Materials/*.mat + Textures/* + scene.json\n\n";
+    std::cout << "  " << progName << " anim2clip <model_anim.fbx> <output_dir> [--clip name] [--noloop]\n";
+    std::cout << "      动画 FBX → .anim 剪辑（每个 AnimStack 一个剪辑，含通道键帧）\n";
+    std::cout << "      --clip name  只导出匹配的剪辑（可多次）；缺省全部\n";
+    std::cout << "      --noloop     剪辑默认 loop=true，此选项置 false\n\n";
     std::cout << "  " << progName << " ani2output <Script.ani> <output_dir>\n";
     std::cout << "      Parse animation source: split by Tail marker into groups, each with HOD frames + Tail\n";
     std::cout << "  " << progName << " ani2anim <Script.ani> <output_dir> [stem]\n";
@@ -1593,6 +1667,10 @@ int main(int argc, char *argv[]) {
         return CommandBatch(args);
     } else if (command == "importrobot") {
         return CommandImportRobot(args);
+    } else if (command == "fbxs2dxmesh") {
+        return CommandFbx2DxMesh(args);
+    } else if (command == "anim2clip") {
+        return CommandAnim2Clip(args);
     } else if (command == "ani2output") {
         return CommandANI2Output(args);
     } else if (command == "ani2anim") {

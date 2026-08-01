@@ -55,10 +55,9 @@ bool RobotMerger::IsRenderBone(const std::string &name) {
 // UKW 贴图本身很少（DX9 时代），后续可在 Blender 内补充。
 // ==========================================================================
 
-aiMaterial *AssetTool::CreatePartMaterial(const std::string &stem, const std::string &meshName,
-                                          const XFileMaterial &xf) {
+aiMaterial *AssetTool::CreatePartMaterial(const std::string &matName, const XFileMaterial &xf) {
     aiMaterial *mat = new aiMaterial();
-    aiString matNameStr(stem + "_" + meshName + "_mat");
+    aiString matNameStr(matName);
     mat->AddProperty(&matNameStr, AI_MATKEY_NAME);
     // faceColor 为 RGBA（AiColorToFloat4 写入 r,g,b,a），直接按序映射，勿再 ARGB 错位
     aiColor4D diffuse(xf.faceColor[0], xf.faceColor[1], xf.faceColor[2], xf.faceColor[3]);

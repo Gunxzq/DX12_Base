@@ -248,7 +248,10 @@ RobotMergeResult RobotMerger::ExportAnimationsFBX(const std::string &aniPath, co
     // ── 6. 构建 aiMesh（每个部件，蒙皮绑定）──
     scene->mNumMeshes = static_cast<unsigned int>(parts.size());
     scene->mMeshes = new aiMesh *[scene->mNumMeshes];
-    scene->mNumMaterials = static_cast<unsigned int>(parts.size());
+    // 材质去重（2026-08-01）：同参数材质共享同一 aiMaterial（SameMaterial 判据），
+    // 减少 FBX 材质槽数 → Blender 按材质合并子网格更干净（如 38 → ~5~6）
+    std::vector<XFileMaterial> usedMaterials; // 已用材质列表（查重基准，循环后决定 mNumMaterials）
+    scene->mNumMaterials = static_cast<unsigned int>(parts.size()); // 上限分配，循环后收缩
     scene->mMaterials = new aiMaterial *[scene->mNumMaterials];
     for (size_t pi = 0; pi < parts.size(); ++pi) {
         const auto &part = parts[pi];
@@ -334,12 +337,26 @@ RobotMergeResult RobotMerger::ExportAnimationsFBX(const std::string &aniPath, co
             mesh->mFaces[fi].mIndices[1] = ms.indices[fi * 3 + 1];
             mesh->mFaces[fi].mIndices[2] = ms.indices[fi * 3 + 2];
         }
-        mesh->mMaterialIndex = static_cast<unsigned int>(pi);
+        // 材质去重：查已有材质（SameMaterial），命中则共享索引，未命中新建
+        int matIdx = -1;
+        for (size_t ui = 0; ui < usedMaterials.size(); ++ui) {
+            if (SameMaterial(usedMaterials[ui], ms.material)) {
+                matIdx = static_cast<int>(ui);
+                break;
+            }
+        }
+        if (matIdx < 0) {
+            matIdx = static_cast<int>(usedMaterials.size());
+            usedMaterials.push_back(ms.material);
+            // 材质（颜色材质；纹理导出暂缓，见 CreatePartMaterial 注释）；名称 = Material + 去重序号
+            scene->mMaterials[matIdx] = CreatePartMaterial("Material" + std::to_string(matIdx), ms.material);
+        }
+        mesh->mMaterialIndex = static_cast<unsigned int>(matIdx);
         scene->mMeshes[pi] = mesh;
-
-        // 材质（颜色材质；纹理导出暂缓，见 CreatePartMaterial 注释）
-        scene->mMaterials[pi] = CreatePartMaterial(stem, part.mesh.name, ms.material);
     }
+    // 材质表收缩到实际唯一数量（去重后）
+    scene->mNumMaterials = static_cast<unsigned int>(usedMaterials.size());
+    std::cout << "[fbx] 材质去重: " << parts.size() << " 部件 → " << usedMaterials.size() << " 唯一材质\n";
 
     // ── 7. 每组 → aiAnimation（仅过滤后骨骼通道）──
     scene->mNumAnimations = static_cast<unsigned int>(groups.size());

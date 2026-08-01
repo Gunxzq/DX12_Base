@@ -45,8 +45,11 @@ struct DxMeshHeader {
     uint32_t lodCount;  // LOD 层级数（至少 1）
     uint32_t lodOffset; // LOD 表在文件中的字节偏移
 
-    uint64_t padding;     // 对齐填充（使 Header 固定 128 字节）
-    uint64_t reserved[7]; // 未来扩展
+    uint32_t subMeshCount;  // SubMesh 数量（0 表示整个网格为一个 SubMesh）
+    uint32_t subMeshOffset; // SubMesh 表在文件中的字节偏移
+
+    uint64_t padding;     // 对齐填充
+    uint64_t reserved[6]; // 未来扩展
 };
 static_assert(sizeof(DxMeshHeader) == 128, "DxMeshHeader must be 128 bytes");
 
@@ -84,6 +87,14 @@ struct DxMeshLOD {
 };
 static_assert(sizeof(DxMeshLOD) == 20, "DxMeshLOD must be 20 bytes");
 
+// ── SubMesh 层级 ──
+// 紧跟在 LOD 表之后，由 subMeshOffset 指定偏移
+struct DxMeshSubMesh {
+    uint32_t indexOffset;  // 索引偏移（相对索引数据起始，按索引数计）
+    uint32_t indexCount;   // 本 SubMesh 索引数
+    uint32_t vertexOffset; // 顶点偏移（相对顶点数据起始，按顶点数计）
+};
+
 // ── 文件内偏移计算辅助 ──
 inline const uint8_t *DxMesh_GetVertexData(const DxMeshHeader *header) {
     return reinterpret_cast<const uint8_t *>(header) + sizeof(DxMeshHeader);
@@ -93,6 +104,9 @@ inline const uint8_t *DxMesh_GetIndexData(const DxMeshHeader *header) {
 }
 inline const DxMeshLOD *DxMesh_GetLODTable(const DxMeshHeader *header) {
     return reinterpret_cast<const DxMeshLOD *>(reinterpret_cast<const uint8_t *>(header) + header->lodOffset);
+}
+inline const DxMeshSubMesh *DxMesh_GetSubMeshTable(const DxMeshHeader *header) {
+    return reinterpret_cast<const DxMeshSubMesh *>(reinterpret_cast<const uint8_t *>(header) + header->subMeshOffset);
 }
 
 #pragma pack(pop)

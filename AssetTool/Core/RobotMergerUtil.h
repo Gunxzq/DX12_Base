@@ -18,8 +18,8 @@ struct aiMaterial;
 
 namespace AssetTool {
 
-/// 创建部件 aiMaterial（颜色材质，无纹理）
-aiMaterial *CreatePartMaterial(const std::string &stem, const std::string &meshName, const XFileMaterial &xf);
+/// 创建部件 aiMaterial（颜色材质，无纹理；名称 = 传入的 matName）
+aiMaterial *CreatePartMaterial(const std::string &matName, const XFileMaterial &xf);
 
 /// 判断两个材质是否等效（faceColor/power/specular/emissive/textureFilename 全等）
 /// 用于部件合并：同骨骼 + 同材质才合并顶点，不同材质保留独立 PartData（材质不丢失）

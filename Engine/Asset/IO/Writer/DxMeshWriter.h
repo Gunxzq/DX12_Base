@@ -1,14 +1,11 @@
 #pragma once
+#include "Asset/Definitions/Mesh/DxMeshFormat.h"
 #include <cstdint>
 #include <string>
 #include <vector>
 
 // ============================================================================
 // DxMeshWriter — 将顶点+索引数据写入 .dxmesh 二进制文件
-//
-// 用于将程序化几何体（GeometryGenerator）导为标准 .dxmesh 格式，
-// 后续可由 DxMeshLoader 加载。GameWorld 在创建程序化 Mesh 时调用一次，
-// 后续运行直接从文件加载。
 //
 // 用法：
 //   DxMeshWriter::Write(vertices, vertexStride, indices, indexSize, path);
@@ -29,10 +26,13 @@ public:
     /// @param boundsMin    AABB 最小值（可选，nullptr 则从顶点计算）
     /// @param boundsMax    AABB 最大值（可选，nullptr 则从顶点计算）
     /// @param skinned      是否蒙皮顶点
+    /// @param subMeshes    SubMesh 表（可选，nullptr 则整个网格为一个 SubMesh）
+    /// @param subMeshCount SubMesh 数量
     /// @return true 成功，false 失败
     static bool Write(const void *vertices, size_t vertexCount, size_t vertexStride, const void *indices,
                       size_t indexCount, uint32_t indexSize, const std::wstring &outputPath,
-                      const float *boundsMin = nullptr, const float *boundsMax = nullptr, bool skinned = false);
+                      const float *boundsMin = nullptr, const float *boundsMax = nullptr, bool skinned = false,
+                      const DxMeshSubMesh *subMeshes = nullptr, uint32_t subMeshCount = 0);
 };
 
 } // namespace DX12Engine::Asset
