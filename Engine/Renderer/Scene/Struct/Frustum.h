@@ -13,10 +13,12 @@ public:
 
     void BuildFromCamera(const DirectX::XMFLOAT3 &position, const DirectX::XMFLOAT3 &forward,
                          const DirectX::XMFLOAT3 &up,
-                         float fovY,        // 垂直视野角（弧度）
-                         float aspectRatio, // 宽高比 = 宽度/高度
-                         float nearZ,       // 近平面距离（正值）
-                         float farZ         // 远平面距离（正值）
+                         float fovY,            // 垂直视野角（弧度，透视投影有效）
+                         float aspectRatio,     // 宽高比 = 宽度/高度
+                         float nearZ,           // 近平面距离（正值）
+                         float farZ,            // 远平面距离（正值）
+                         bool isOrtho = false,  // 正交投影（默认透视，保持现有调用兼容）
+                         float orthoSize = 0.0f // 正交投影的垂直尺寸（isOrtho=true 时有效）
     );
 
     void BuildFromMatrix(const DirectX::XMMATRIX &viewProj);
@@ -46,6 +48,8 @@ public:
         float aspectRatio;
         float nearZ;
         float farZ;
+        bool isOrtho;
+        float orthoSize;
         bool isValid;
     };
     Parameters GetParameters() const { return m_params; }

@@ -16,4 +16,10 @@ void RegisterTransformEditor();
 /// 注册 LightComponent 编辑方法
 void RegisterLightEditor();
 
+/// 注册 CameraComponent 编辑方法
+void RegisterCameraEditor();
+
+/// 注册 NameComponent 编辑方法
+void RegisterNameEditor();
+
 } // namespace DX12Engine::ECS

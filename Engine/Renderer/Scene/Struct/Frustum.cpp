@@ -23,7 +23,8 @@ constexpr int CORNER_FAR_TR = 7;  // 远平面右上
 } // namespace
 
 void Frustum::BuildFromCamera(const DirectX::XMFLOAT3 &position, const DirectX::XMFLOAT3 &forward,
-                              const DirectX::XMFLOAT3 &up, float fovY, float aspectRatio, float nearZ, float farZ) {
+                              const DirectX::XMFLOAT3 &up, float fovY, float aspectRatio, float nearZ, float farZ,
+                              bool isOrtho, float orthoSize) {
 #ifdef _DEBUG
     m_params.position = position;
     m_params.forward = forward;
@@ -32,24 +33,36 @@ void Frustum::BuildFromCamera(const DirectX::XMFLOAT3 &position, const DirectX::
     m_params.aspectRatio = aspectRatio;
     m_params.nearZ = nearZ;
     m_params.farZ = farZ;
+    m_params.isOrtho = isOrtho;
+    m_params.orthoSize = orthoSize;
     m_params.isValid = true;
 #endif
 
     // 计算相机坐标系轴
-    // 在左手系中，右向量 = up × forward（+Y × +Z = +X）
+    // 左手系：右向量 = up × forward（+Y × +Z = +X），用标准叉积计算
     DirectX::XMVECTOR pos = DirectX::XMLoadFloat3(&position);
     DirectX::XMVECTOR fwd = DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&forward));
     DirectX::XMVECTOR upVec = DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&up));
     DirectX::XMVECTOR right = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(upVec, fwd));
-    // 重新正交化 up：right × forward = up
-    upVec = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(right, fwd));
+    // 重新正交化 up：forward × right = up（标准叉积下 Z × X = +Y）
+    // 注意不能用 right × forward（X × Z = -Y，会导致角点 Y 翻转、滚转丢失）
+    upVec = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(fwd, right));
 
     // 计算视野参数
-    float tanHalfFov = tanf(fovY * 0.5f);
-    float nearH = tanHalfFov * nearZ;
-    float nearW = nearH * aspectRatio;
-    float farH = tanHalfFov * farZ;
-    float farW = farH * aspectRatio;
+    // 透视：近/远平面尺寸随距离发散；正交：近/远平面尺寸恒定 = orthoSize
+    float nearH, nearW, farH, farW;
+    if (isOrtho) {
+        nearH = orthoSize * 0.5f;
+        nearW = nearH * aspectRatio;
+        farH = nearH;
+        farW = nearW;
+    } else {
+        float tanHalfFov = tanf(fovY * 0.5f);
+        nearH = tanHalfFov * nearZ;
+        nearW = nearH * aspectRatio;
+        farH = tanHalfFov * farZ;
+        farW = farH * aspectRatio;
+    }
 
     // 近平面中心
     DirectX::XMVECTOR nearCenter = DirectX::XMVectorAdd(pos, DirectX::XMVectorScale(fwd, nearZ));
