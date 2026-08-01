@@ -142,4 +142,102 @@ RaycastResult VisibleRaycaster::RaycastAll(const FRay &ray) const {
     return result;
 }
 
+// ========================================================================
+// 可见集射线检测（推荐路径）
+// ========================================================================
+
+RaycastResult VisibleRaycaster::RaycastOnSet(const FRay &ray, const CulledSet &culledSet,
+                                              ECS::Registry *registry) const {
+    RaycastResult result;
+    if (!registry)
+        return result;
+
+    // 从可见集中提取实体列表
+    std::vector<ECS::Entity> entities;
+    entities.reserve(culledSet.Size());
+    for (const auto &entry : culledSet.entries) {
+        entities.push_back(entry.entity);
+    }
+
+    CollectHitsOnEntities(ray, entities, registry, result.hits);
+    return result;
+}
+
+void VisibleRaycaster::CollectHitsOnEntities(const FRay &ray, const std::vector<ECS::Entity> &entities,
+                                              ECS::Registry *registry,
+                                              std::vector<RaycastHit> &outHits) const {
+    for (auto entity : entities) {
+        if (!registry->IsValid(entity))
+            continue;
+
+        // 获取包围盒
+        const Math::BoundingVolumeVariant *bounds = nullptr;
+        auto *tc = registry->TryGetComponent<TransformComponent>(entity);
+
+        if (auto *mesh = registry->TryGetComponent<MeshComponent>(entity)) {
+            bounds = &mesh->localBounds;
+        } else if (auto *terrain = registry->TryGetComponent<TerrainComponent>(entity)) {
+            bounds = &terrain->localBounds;
+        }
+
+        if (!bounds || !tc)
+            continue;
+
+        XMMATRIX worldMatrix = tc->GetMatrix();
+        float t = 0.0f;
+        bool hit = std::visit(
+            [&](const auto &b) -> bool {
+                using T = std::decay_t<decltype(b)>;
+                if constexpr (std::is_same_v<T, Math::BoundingAABB>) {
+                    Math::BoundingAABB worldAABB = b;
+                    worldAABB.Transform(worldMatrix);
+                    return RayIntersectAABB(ray, worldAABB, t);
+                } else if constexpr (std::is_same_v<T, Math::BoundingOBB>) {
+                    Math::BoundingOBB worldOBB = b;
+                    worldOBB.Transform(worldMatrix);
+                    return RayIntersectOBB(ray, worldOBB, t);
+                } else if constexpr (std::is_same_v<T, Math::BoundingSphere>) {
+                    XMVECTOR localCenter = XMVectorSet(b.center.x, b.center.y, b.center.z, 0.0f);
+                    XMVECTOR worldCenter = XMVector3TransformCoord(localCenter, worldMatrix);
+                    float worldRadius = b.radius;
+                    FVector3D center(XMVectorGetX(worldCenter), XMVectorGetY(worldCenter), XMVectorGetZ(worldCenter));
+                    FVector3D toCenter = center - ray.Origin;
+                    float tProj = FVector3D::Dot(toCenter, ray.Direction);
+                    FVector3D closest = ray.Origin + ray.Direction * tProj;
+                    float distSq = (closest - center).LengthSquared();
+                    if (distSq <= worldRadius * worldRadius) {
+                        float dt = std::sqrt(worldRadius * worldRadius - distSq);
+                        t = (tProj - dt >= 0.0f) ? (tProj - dt) : (tProj + dt);
+                        return t >= 0.0f;
+                    }
+                    return false;
+                } else {
+                    Math::BoundingAABB aabb;
+                    if constexpr (std::is_same_v<T, Math::BoundingCapsule>) {
+                        aabb = b.ToAABB();
+                    } else if constexpr (std::is_same_v<T, Math::BoundingConvexHull>) {
+                        aabb = b.ToAABB();
+                    } else if constexpr (std::is_same_v<T, Math::BoundingCompound>) {
+                        aabb = b.ToAABB();
+                    }
+                    aabb.Transform(worldMatrix);
+                    return RayIntersectAABB(ray, aabb, t);
+                }
+            },
+            *bounds);
+
+        if (hit && t >= 0.0f) {
+            FVector3D hitPointWorld = ray.Origin + ray.Direction * t;
+            outHits.push_back(RaycastHit{
+                .entity = entity,
+                .distance = t,
+                .hitPoint = XMFLOAT3(hitPointWorld.X, hitPointWorld.Y, hitPointWorld.Z),
+            });
+        }
+    }
+
+    std::sort(outHits.begin(), outHits.end(),
+              [](const RaycastHit &a, const RaycastHit &b) { return a.distance < b.distance; });
+}
+
 } // namespace DX12Engine::Renderer
