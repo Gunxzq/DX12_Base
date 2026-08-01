@@ -11,53 +11,50 @@
 // 输出：JSON 格式的现代骨架树（骨骼名/父子关系/TRS 变换）
 // ========================================================================
 
+#include <DirectXMath.h>
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <DirectXMath.h>
 
 namespace AssetTool {
 
 /// HOD 中的一个部件（骨骼）节点 — 现代结构
 struct HODBone {
-    std::string name;                    // 部件名，如 "Body_d.x"
-    
+    std::string name; // 部件名，如 "Body_d.x"
+
     // 原始数据
-    double transform[16];                // 4×4 矩阵（行主序，double 精度）
-    uint32_t rawA = 0;                   // A 原始值（二进制 1-based）
-    uint32_t rawB = 0;                   // B 原始值（二进制 1-based）
+    double transform[16]; // 4×4 矩阵（行主序，double 精度）
+    uint32_t rawA = 0;    // A 原始值（二进制 1-based）
+    uint32_t rawB = 0;    // B 原始值（二进制 1-based）
 
     // 派生数据
-    int parentIndex = -1;                // 父骨骼索引（-1 = 根）
-    std::vector<uint32_t> children;      // 子骨骼索引列表
+    int parentIndex = -1;           // 父骨骼索引（-1 = 根）
+    std::vector<uint32_t> children; // 子骨骼索引列表
 
     // TRS 分解结果
-    float position[3]  = {0, 0, 0};
-    float rotation[4]  = {0, 0, 0, 1};  // 四元数 [x, y, z, w]
-    float scale[3]     = {1, 1, 1};
+    float position[3] = {0, 0, 0};
+    float rotation[4] = {0, 0, 0, 1}; // 四元数 [x, y, z, w]
+    float scale[3] = {1, 1, 1};
 
     /// 从 4×4 矩阵分解出 TRS
     void DecomposeTRS();
 
     DirectX::XMMATRIX GetMatrix() const {
         return DirectX::XMMatrixSet(
-            static_cast<float>(transform[0]), static_cast<float>(transform[1]),
-            static_cast<float>(transform[2]), static_cast<float>(transform[3]),
-            static_cast<float>(transform[4]), static_cast<float>(transform[5]),
-            static_cast<float>(transform[6]), static_cast<float>(transform[7]),
-            static_cast<float>(transform[8]), static_cast<float>(transform[9]),
-            static_cast<float>(transform[10]), static_cast<float>(transform[11]),
-            static_cast<float>(transform[12]), static_cast<float>(transform[13]),
-            static_cast<float>(transform[14]), static_cast<float>(transform[15])
-        );
+            static_cast<float>(transform[0]), static_cast<float>(transform[1]), static_cast<float>(transform[2]),
+            static_cast<float>(transform[3]), static_cast<float>(transform[4]), static_cast<float>(transform[5]),
+            static_cast<float>(transform[6]), static_cast<float>(transform[7]), static_cast<float>(transform[8]),
+            static_cast<float>(transform[9]), static_cast<float>(transform[10]), static_cast<float>(transform[11]),
+            static_cast<float>(transform[12]), static_cast<float>(transform[13]), static_cast<float>(transform[14]),
+            static_cast<float>(transform[15]));
     }
 };
 
 /// HOD 解析结果：完整骨架树
 struct HODData {
-    std::string filepath;                // 原始 .hod 文件路径
-    uint32_t flags = 0;                  // 原始标志位
-    std::vector<HODBone> bones;          // 所有部件（DFS 顺序，根在 index 0）
+    std::string filepath;       // 原始 .hod 文件路径
+    uint32_t flags = 0;         // 原始标志位
+    std::vector<HODBone> bones; // 所有部件（DFS 顺序，根在 index 0）
 
     uint32_t BoneCount() const { return static_cast<uint32_t>(bones.size()); }
 

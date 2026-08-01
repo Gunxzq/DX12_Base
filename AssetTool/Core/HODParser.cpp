@@ -38,36 +38,61 @@ static std::string SanitizeUTF8(const std::string &input) {
             i++;
         } else if (c < 0xE0) {
             // 2 字节 UTF-8
-            if (i + 1 >= input.size()) { result += '?'; i++; continue; }
+            if (i + 1 >= input.size()) {
+                result += '?';
+                i++;
+                continue;
+            }
             unsigned char c2 = static_cast<unsigned char>(input[i + 1]);
             if ((c2 & 0xC0) == 0x80) {
-                result += c; result += c2; i += 2;
+                result += c;
+                result += c2;
+                i += 2;
             } else {
-                result += '?'; i++;
+                result += '?';
+                i++;
             }
         } else if (c < 0xF0) {
             // 3 字节 UTF-8
-            if (i + 2 >= input.size()) { result += '?'; i++; continue; }
+            if (i + 2 >= input.size()) {
+                result += '?';
+                i++;
+                continue;
+            }
             unsigned char c2 = static_cast<unsigned char>(input[i + 1]);
             unsigned char c3 = static_cast<unsigned char>(input[i + 2]);
             if ((c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80) {
-                result += c; result += c2; result += c3; i += 3;
+                result += c;
+                result += c2;
+                result += c3;
+                i += 3;
             } else {
-                result += '?'; i++;
+                result += '?';
+                i++;
             }
         } else if (c < 0xF8) {
             // 4 字节 UTF-8
-            if (i + 3 >= input.size()) { result += '?'; i++; continue; }
+            if (i + 3 >= input.size()) {
+                result += '?';
+                i++;
+                continue;
+            }
             unsigned char c2 = static_cast<unsigned char>(input[i + 1]);
             unsigned char c3 = static_cast<unsigned char>(input[i + 2]);
             unsigned char c4 = static_cast<unsigned char>(input[i + 3]);
             if ((c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80 && (c4 & 0xC0) == 0x80) {
-                result += c; result += c2; result += c3; result += c4; i += 4;
+                result += c;
+                result += c2;
+                result += c3;
+                result += c4;
+                i += 4;
             } else {
-                result += '?'; i++;
+                result += '?';
+                i++;
             }
         } else {
-            result += '?'; i++;
+            result += '?';
+            i++;
         }
     }
     return result;
@@ -108,11 +133,11 @@ bool HODParser::Parse(const uint8_t *data, size_t size) {
     pos = data + 0x0F;
 
     // 所有 entry 统一大小：256B name + 64B matrix + 4B A + 4B B
-    constexpr size_t ENTRY_NAME    = 256;
-    constexpr size_t ENTRY_MATRIX  = 64; // 16 floats
-    constexpr size_t ENTRY_A       = 4;
-    constexpr size_t ENTRY_B       = 4;
-    constexpr size_t ENTRY_SIZE    = ENTRY_NAME + ENTRY_MATRIX + ENTRY_A + ENTRY_B; // = 328
+    constexpr size_t ENTRY_NAME = 256;
+    constexpr size_t ENTRY_MATRIX = 64; // 16 floats
+    constexpr size_t ENTRY_A = 4;
+    constexpr size_t ENTRY_B = 4;
+    constexpr size_t ENTRY_SIZE = ENTRY_NAME + ENTRY_MATRIX + ENTRY_A + ENTRY_B; // = 328
 
     while (pos + ENTRY_SIZE <= end) {
         HODBone bone;
@@ -129,7 +154,8 @@ bool HODParser::Parse(const uint8_t *data, size_t size) {
         {
             float matf[16];
             for (int i = 0; i < 16; ++i) {
-                if (pos + 4 > end) break;
+                if (pos + 4 > end)
+                    break;
                 std::memcpy(&matf[i], pos, 4);
                 pos += 4;
             }
@@ -138,7 +164,8 @@ bool HODParser::Parse(const uint8_t *data, size_t size) {
         }
 
         // A = 节点索引（二进制 1-based）
-        if (pos + ENTRY_A > end) break;
+        if (pos + ENTRY_A > end)
+            break;
         uint32_t rawA = 0;
         std::memcpy(&rawA, pos, ENTRY_A);
         pos += ENTRY_A;
@@ -147,7 +174,8 @@ bool HODParser::Parse(const uint8_t *data, size_t size) {
         // B 值
         {
             uint32_t rawB = 0;
-            if (pos + ENTRY_B > end) break;
+            if (pos + ENTRY_B > end)
+                break;
             std::memcpy(&rawB, pos, ENTRY_B);
             pos += ENTRY_B;
             bone.rawB = rawB;
@@ -204,7 +232,8 @@ bool HODParser::ParseFile(const std::string &filepath, uint32_t decryptKey) {
     {
         XORCipher cipher(decryptKey);
         cipher.DecryptBuffer(buffer.data(), buffer.size());
-        if (Parse(buffer.data(), buffer.size())) return true;
+        if (Parse(buffer.data(), buffer.size()))
+            return true;
     }
 
     // 仍失败，尝试其他已知 MOD key
@@ -218,7 +247,8 @@ bool HODParser::ParseFile(const std::string &filepath, uint32_t decryptKey) {
         0x33322166, // UN Evo
     };
     for (uint32_t altKey : altKeys) {
-        if (altKey == decryptKey) continue;
+        if (altKey == decryptKey)
+            continue;
         // 用原始数据（未改动的副本）尝试其他 key
         std::vector<uint8_t> altBuf = original;
         XORCipher altCipher(altKey);
@@ -237,7 +267,8 @@ bool HODParser::ParseFile(const std::string &filepath, uint32_t decryptKey) {
 // ==========================================================================
 
 void HODData::BuildHierarchy() {
-    if (bones.empty()) return;
+    if (bones.empty())
+        return;
 
     // A/B 含义（来自社区文档）：
     //   A = 部件等级（数字越小等级越高），B = 子部件数量
@@ -403,13 +434,10 @@ std::string HODData::ToText() const {
         oss << "Parent: " << bone.parentIndex << "\n";
 
         // TRS
-        oss << "Position: ("
-            << bone.position[0] << ", " << bone.position[1] << ", " << bone.position[2] << ")\n";
-        oss << "Rotation: ("
-            << bone.rotation[0] << ", " << bone.rotation[1] << ", "
-            << bone.rotation[2] << ", " << bone.rotation[3] << ")\n";
-        oss << "Scale: ("
-            << bone.scale[0] << ", " << bone.scale[1] << ", " << bone.scale[2] << ")\n";
+        oss << "Position: (" << bone.position[0] << ", " << bone.position[1] << ", " << bone.position[2] << ")\n";
+        oss << "Rotation: (" << bone.rotation[0] << ", " << bone.rotation[1] << ", " << bone.rotation[2] << ", "
+            << bone.rotation[3] << ")\n";
+        oss << "Scale: (" << bone.scale[0] << ", " << bone.scale[1] << ", " << bone.scale[2] << ")\n";
 
         // Matrix
         oss << "Matrix:\n";
@@ -419,7 +447,8 @@ std::string HODData::ToText() const {
                 char buf[32];
                 snprintf(buf, sizeof(buf), "%10.6f", bone.transform[r * 4 + c]);
                 oss << buf;
-                if (c < 3) oss << " ";
+                if (c < 3)
+                    oss << " ";
             }
             oss << "\n";
         }
@@ -433,7 +462,8 @@ std::string HODData::ToText() const {
                     oss << "[" << childIdx << "]" << SanitizeUTF8(bones[childIdx].name);
                 else
                     oss << "[" << childIdx << "]?";
-                if (ci + 1 < bone.children.size()) oss << ", ";
+                if (ci + 1 < bone.children.size())
+                    oss << ", ";
             }
             oss << "\n";
         }
@@ -446,14 +476,16 @@ std::string HODData::ToText() const {
 
 bool HODData::WriteJSON(const std::string &outputPath) const {
     std::ofstream ofs(outputPath);
-    if (!ofs) return false;
+    if (!ofs)
+        return false;
     ofs << ToJSON();
     return true;
 }
 
 bool HODData::WriteText(const std::string &outputPath) const {
     std::ofstream ofs(outputPath);
-    if (!ofs) return false;
+    if (!ofs)
+        return false;
     ofs << ToText();
     return true;
 }

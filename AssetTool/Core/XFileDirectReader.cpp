@@ -8,43 +8,33 @@
 namespace AssetTool {
 
 // ── 已知 GUID（小端序） ──
-static const uint8_t GUID_MESH[] = {
-    0x44, 0xab, 0x82, 0x3d, 0xda, 0x62, 0xcf, 0x11,
-    0xab, 0x39, 0x00, 0x20, 0xaf, 0x71, 0xe4, 0x33
-};
-static const uint8_t GUID_MESH_FACE[] = {
-    0x5f, 0xab, 0x82, 0x3d, 0xda, 0x62, 0xcf, 0x11,
-    0xab, 0x39, 0x00, 0x20, 0xaf, 0x71, 0xe4, 0x33
-};
-static const uint8_t GUID_MESH_NORMALS[] = {
-    0x43, 0xf4, 0xf6, 0xf6, 0xda, 0x47, 0xd2, 0x11,
-    0x8f, 0x52, 0x00, 0x40, 0x33, 0x94, 0xa3, 0x04
-};
-static const uint8_t GUID_MESH_TEXCOORDS[] = {
-    0x40, 0xf4, 0xf6, 0xf6, 0xda, 0x47, 0xd2, 0x11,
-    0x8f, 0x52, 0x00, 0x40, 0x33, 0x94, 0xa3, 0x04
-};
-static const uint8_t GUID_MATERIAL[] = {
-    0x4d, 0xab, 0x82, 0x3d, 0xda, 0x62, 0xcf, 0x11,
-    0xab, 0x39, 0x00, 0x20, 0xaf, 0x71, 0xe4, 0x33
-};
-static const uint8_t GUID_TEXTURE_FILENAME[] = {
-    0xe1, 0x90, 0x27, 0xa4, 0x10, 0x78, 0xcf, 0x11,
-    0x8f, 0x52, 0x00, 0x40, 0x33, 0x94, 0xa3, 0x04
-};
+static const uint8_t GUID_MESH[] = {0x44, 0xab, 0x82, 0x3d, 0xda, 0x62, 0xcf, 0x11,
+                                    0xab, 0x39, 0x00, 0x20, 0xaf, 0x71, 0xe4, 0x33};
+static const uint8_t GUID_MESH_FACE[] = {0x5f, 0xab, 0x82, 0x3d, 0xda, 0x62, 0xcf, 0x11,
+                                         0xab, 0x39, 0x00, 0x20, 0xaf, 0x71, 0xe4, 0x33};
+static const uint8_t GUID_MESH_NORMALS[] = {0x43, 0xf4, 0xf6, 0xf6, 0xda, 0x47, 0xd2, 0x11,
+                                            0x8f, 0x52, 0x00, 0x40, 0x33, 0x94, 0xa3, 0x04};
+static const uint8_t GUID_MESH_TEXCOORDS[] = {0x40, 0xf4, 0xf6, 0xf6, 0xda, 0x47, 0xd2, 0x11,
+                                              0x8f, 0x52, 0x00, 0x40, 0x33, 0x94, 0xa3, 0x04};
+static const uint8_t GUID_MATERIAL[] = {0x4d, 0xab, 0x82, 0x3d, 0xda, 0x62, 0xcf, 0x11,
+                                        0xab, 0x39, 0x00, 0x20, 0xaf, 0x71, 0xe4, 0x33};
+static const uint8_t GUID_TEXTURE_FILENAME[] = {0xe1, 0x90, 0x27, 0xa4, 0x10, 0x78, 0xcf, 0x11,
+                                                0x8f, 0x52, 0x00, 0x40, 0x33, 0x94, 0xa3, 0x04};
 
 // ── 简单的流式读取器 ──
 class BinaryReader {
     const uint8_t *m_data;
     size_t m_size;
     size_t m_pos;
+
 public:
     BinaryReader(const uint8_t *d, size_t s) : m_data(d), m_size(s), m_pos(0) {}
 
     bool AtEnd() const { return m_pos >= m_size; }
 
     uint32_t ReadDword() {
-        if (m_pos + 4 > m_size) return 0;
+        if (m_pos + 4 > m_size)
+            return 0;
         uint32_t v;
         memcpy(&v, m_data + m_pos, 4);
         m_pos += 4;
@@ -77,7 +67,8 @@ public:
 
 static bool FindGUID(const uint8_t *data, size_t size, size_t &pos, const uint8_t *guid) {
     while (pos + 16 <= size) {
-        if (memcmp(data + pos, guid, 16) == 0) return true;
+        if (memcmp(data + pos, guid, 16) == 0)
+            return true;
         pos += 4; // 4-byte search step
     }
     return false;
@@ -85,7 +76,10 @@ static bool FindGUID(const uint8_t *data, size_t size, size_t &pos, const uint8_
 
 bool XFileDirectReader::ParseFile(const std::string &filepath) {
     std::ifstream file(filepath, std::ios::binary | std::ios::ate);
-    if (!file) { m_error = "Cannot open: " + filepath; return false; }
+    if (!file) {
+        m_error = "Cannot open: " + filepath;
+        return false;
+    }
     size_t size = static_cast<size_t>(file.tellg());
     file.seekg(0, std::ios::beg);
     std::vector<uint8_t> buffer(size);
@@ -208,10 +202,13 @@ bool XFileDirectReader::ReadBinary(const uint8_t *data, size_t size) {
                     mr.Skip(ml + ((4 - (ml % 4)) % 4));
 
                     // faceColor (4 floats)
-                    for (int i = 0; i < 4; ++i) mesh.material.faceColor[i] = mr.ReadFloat();
+                    for (int i = 0; i < 4; ++i)
+                        mesh.material.faceColor[i] = mr.ReadFloat();
                     mesh.material.power = mr.ReadFloat();
-                    for (int i = 0; i < 3; ++i) mesh.material.specularColor[i] = mr.ReadFloat();
-                    for (int i = 0; i < 3; ++i) mesh.material.emissiveColor[i] = mr.ReadFloat();
+                    for (int i = 0; i < 3; ++i)
+                        mesh.material.specularColor[i] = mr.ReadFloat();
+                    for (int i = 0; i < 3; ++i)
+                        mesh.material.emissiveColor[i] = mr.ReadFloat();
 
                     // 搜索 TextureFilename
                     size_t texSearch = mr.Pos();
@@ -238,7 +235,10 @@ bool XFileDirectReader::ReadBinary(const uint8_t *data, size_t size) {
         searchPos += 4;
     }
 
-    if (!hasMesh) { m_error = "No Mesh found in .x file"; return false; }
+    if (!hasMesh) {
+        m_error = "No Mesh found in .x file";
+        return false;
+    }
     m_meshes.push_back(std::move(mesh));
     return true;
 }
@@ -249,7 +249,9 @@ bool XFileDirectReader::ReadText(const uint8_t *data, size_t size) {
     XFileMesh mesh;
     bool inMesh = false, inNormals = false, inTexCoords = false;
     // 仅做占位——社区工具用的是二进制格式
-    (void)inMesh; (void)inNormals; (void)inTexCoords;
+    (void)inMesh;
+    (void)inNormals;
+    (void)inTexCoords;
     m_error = "Text format .x not fully supported by DirectReader";
     return false;
 }

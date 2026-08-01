@@ -1,8 +1,8 @@
 #include "ObjParser.h"
-#include <fstream>
-#include <sstream>
 #include <algorithm>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 
 namespace AssetTool {
 
@@ -33,9 +33,11 @@ bool ObjParser::Parse(const std::string &content) {
         lineNum++;
         // 去掉行首空白
         auto trimStart = line.find_first_not_of(" \t\r");
-        if (trimStart == std::string::npos) continue;
+        if (trimStart == std::string::npos)
+            continue;
         line = line.substr(trimStart);
-        if (line.empty() || line[0] == '#') continue;
+        if (line.empty() || line[0] == '#')
+            continue;
 
         std::istringstream ls(line);
         std::string cmd;
@@ -101,19 +103,18 @@ bool ObjParser::Parse(const std::string &content) {
         // 每个面至少有 3 个顶点，三角剖分：0-1-2, 0-2-3, ...
         for (size_t vi = 1; vi + 1 < pi.size(); ++vi) {
             // 3 个垂直顶点索引
-            int idx[3] = { pi[0] - 1, pi[vi] - 1, pi[vi + 1] - 1 };
+            int idx[3] = {pi[0] - 1, pi[vi] - 1, pi[vi + 1] - 1};
             // 法线索引
-            int nIdx[3] = { (int)ni.size() > 0 ? ni[0] - 1 : -1,
-                            (int)ni.size() > vi ? ni[vi] - 1 : -1,
-                            (int)ni.size() > vi + 1 ? ni[vi + 1] - 1 : -1 };
+            int nIdx[3] = {(int)ni.size() > 0 ? ni[0] - 1 : -1, (int)ni.size() > vi ? ni[vi] - 1 : -1,
+                           (int)ni.size() > vi + 1 ? ni[vi + 1] - 1 : -1};
             // UV 索引
-            int tIdx[3] = { (int)ti.size() > 0 ? ti[0] - 1 : -1,
-                            (int)ti.size() > vi ? ti[vi] - 1 : -1,
-                            (int)ti.size() > vi + 1 ? ti[vi + 1] - 1 : -1 };
+            int tIdx[3] = {(int)ti.size() > 0 ? ti[0] - 1 : -1, (int)ti.size() > vi ? ti[vi] - 1 : -1,
+                           (int)ti.size() > vi + 1 ? ti[vi + 1] - 1 : -1};
 
             for (int j = 0; j < 3; ++j) {
                 int viIdx = idx[j];
-                if (viIdx < 0 || viIdx * 3 + 2 >= (int)rawPos.size()) continue;
+                if (viIdx < 0 || viIdx * 3 + 2 >= (int)rawPos.size())
+                    continue;
 
                 m_mesh.positions.push_back(rawPos[viIdx * 3]);
                 m_mesh.positions.push_back(rawPos[viIdx * 3 + 1]);

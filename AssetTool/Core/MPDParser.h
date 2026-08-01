@@ -12,53 +12,53 @@
 // ========================================================================
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
-#include <map>
 
 namespace AssetTool {
 
 /// MPD 中的一个瓦片定义
 struct MPDTile {
-    std::string name;              // 文件名，如 "m_z00_x00.x"
-    uint32_t tileIndex = 0;        // 板块编号（0-based）
-    float posX = 0.0f;             // X 坐标
-    float posZ = 0.0f;             // Z 坐标（原命名 posY 为历史遗留）
+    std::string name;       // 文件名，如 "m_z00_x00.x"
+    uint32_t tileIndex = 0; // 板块编号（0-based）
+    float posX = 0.0f;      // X 坐标
+    float posZ = 0.0f;      // Z 坐标（原命名 posY 为历史遗留）
     std::vector<uint8_t> rawData;
-    std::string renderText;        // 关联的渲染参数文本
+    std::string renderText; // 关联的渲染参数文本
 };
 
 /// MPD 中的一个 PopInfo 出生点
 struct MPDPopInfo {
-    int popIndex = 0;            // PopInfo 编号
-    float posX = 0.0f;           // 出生点 X 坐标
-    float posY = 0.0f;           // 出生点 Y 坐标（高度）
-    float posZ = 0.0f;           // 出生点 Z 坐标
-    int param1 = 0;              // 参数 1（uint16）
-    int param2 = 0;              // 参数 2（uint16）
-    std::string rawText;         // 原始文本行
+    int popIndex = 0;    // PopInfo 编号
+    float posX = 0.0f;   // 出生点 X 坐标
+    float posY = 0.0f;   // 出生点 Y 坐标（高度）
+    float posZ = 0.0f;   // 出生点 Z 坐标
+    int param1 = 0;      // 参数 1（uint16）
+    int param2 = 0;      // 参数 2（uint16）
+    std::string rawText; // 原始文本行
 };
 
 /// MPD 解析结果
 struct MPDData {
-    std::string filepath;          // 原始 .mpd 文件路径
-    std::vector<MPDTile> tiles;    // 所有瓦片
-    std::vector<std::string> tileNames;  // 文件名列表
-    std::vector<uint8_t> rawHex;   // 原始 hex 数据
+    std::string filepath;                  // 原始 .mpd 文件路径
+    std::vector<MPDTile> tiles;            // 所有瓦片
+    std::vector<std::string> tileNames;    // 文件名列表
+    std::vector<uint8_t> rawHex;           // 原始 hex 数据
     std::vector<std::string> textSections; // 明文标记段原始内容
 
     // ---- 文本配置段（从 MPD 明文指令中提取） ----
     int lightR = 255, lightG = 255, lightB = 255;
     int fogR = 0, fogG = 0, fogB = 0;
     float lightDirX = 0.3f, lightDirY = -0.7f, lightDirZ = 0.5f;
-    std::string bgmFile;           // BGM 文件名
-    std::vector<std::string> popInfo; // PopInfo 行原文
+    std::string bgmFile;                    // BGM 文件名
+    std::vector<std::string> popInfo;       // PopInfo 行原文
     std::vector<MPDPopInfo> popInfoEntries; // PopInfo 结构化条目
 
     // ---- 00 00 80 3F 文本标记（每条 tile 的渲染参数） ----
     std::vector<std::string> renderSettings; // Shift-JIS 解码后的文本
-    int renderWithAt = 0;      // 含 @ 标记的条目数
-    int renderWithoutAt = 0;   // 不含 @ 标记的条目数
+    int renderWithAt = 0;                    // 含 @ 标记的条目数
+    int renderWithoutAt = 0;                 // 不含 @ 标记的条目数
 
     uint32_t TileCount() const { return static_cast<uint32_t>(tiles.size()); }
 

@@ -31,17 +31,17 @@ struct IKMat4 {
 
 /// IK 链上的一个关节（骨骼）
 struct IKJoint {
-    std::string name;                  // 骨骼名（如 "arm1.x"）
-    int boneIndex = -1;                // HOD 骨骼索引
-    float position[3] = {0, 0, 0};     // 当前世界位置（FABRIK 求解中更新）
-    float segmentLength = 0.0f;        // 与下一关节的段长（末端的为 0）
+    std::string name;              // 骨骼名（如 "arm1.x"）
+    int boneIndex = -1;            // HOD 骨骼索引
+    float position[3] = {0, 0, 0}; // 当前世界位置（FABRIK 求解中更新）
+    float segmentLength = 0.0f;    // 与下一关节的段长（末端的为 0）
 };
 
 /// 一条 IK 链（根 → 末端）
 struct IKChain {
-    std::string name;                  // 链名（取根骨骼名，如 "arm1.x"）
-    std::vector<IKJoint> joints;       // joints[0] = 根（固定），最后一个 = 末端
-    std::vector<IKMat4> worldMats;     // 求解前每骨骼世界矩阵
+    std::string name;                    // 链名（取根骨骼名，如 "arm1.x"）
+    std::vector<IKJoint> joints;         // joints[0] = 根（固定），最后一个 = 末端
+    std::vector<IKMat4> worldMats;       // 求解前每骨骼世界矩阵
     std::vector<IKMat4> solvedLocalMats; // 求解后每骨骼局部矩阵（相对 HOD 父）
 };
 
@@ -49,7 +49,7 @@ struct IKChain {
 struct IKSolveResult {
     bool success = false;
     int iterations = 0;
-    float error = 0.0f;                // 末端最终误差（世界距离）
+    float error = 0.0f; // 末端最终误差（世界距离）
 };
 
 class IKSolver {
@@ -62,9 +62,7 @@ public:
 
     /// FABRIK 求解（纯位置）：根固定，末端移到 target，段长保持恒定
     /// joints 首元素为根；求解结果原地写回 joints[].position
-    static IKSolveResult SolveFABRIK(std::vector<IKJoint> &joints,
-                                     const float target[3],
-                                     int maxIterations = 32,
+    static IKSolveResult SolveFABRIK(std::vector<IKJoint> &joints, const float target[3], int maxIterations = 32,
                                      float tolerance = 1e-3f);
 
     /// 求解后的关节位置 → 每骨骼局部矩阵（保持原旋转，仅平移）

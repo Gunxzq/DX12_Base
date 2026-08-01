@@ -1,10 +1,10 @@
 #include "TextureConverter.h"
 #include "XORCipher.h"
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <stb_image.h>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -55,8 +55,7 @@ static_assert(sizeof(DDSHeader) == 128, "DDSHeader must be 128 bytes");
 // 实现
 // ========================================================================
 
-static bool WriteDDS(const std::string &outputPath, int width, int height,
-                     const std::vector<uint8_t> &pixels) {
+static bool WriteDDS(const std::string &outputPath, int width, int height, const std::vector<uint8_t> &pixels) {
     DDSHeader header;
     header.width = static_cast<uint32_t>(width);
     header.height = static_cast<uint32_t>(height);
@@ -104,11 +103,11 @@ TextureConvertResult ConvertPNGToDDS(const std::string &inputPath, const std::st
     return result;
 }
 
-int BatchConvertPNGToDDS(const std::string &inputDir, const std::string &outputDir,
-                          std::string *outError) {
+int BatchConvertPNGToDDS(const std::string &inputDir, const std::string &outputDir, std::string *outError) {
     fs::path inPath(inputDir);
     if (!fs::is_directory(inPath)) {
-        if (outError) *outError = "Input directory does not exist";
+        if (outError)
+            *outError = "Input directory does not exist";
         return 0;
     }
 
@@ -140,8 +139,7 @@ int BatchConvertPNGToDDS(const std::string &inputDir, const std::string &outputD
 // DDS XOR 解密
 // ========================================================================
 
-TextureConvertResult DecryptDDS(const std::string &filePath, const std::string &outputPath,
-                                 uint32_t xorKey) {
+TextureConvertResult DecryptDDS(const std::string &filePath, const std::string &outputPath, uint32_t xorKey) {
     TextureConvertResult result;
 
     // 读取文件
@@ -185,8 +183,7 @@ TextureConvertResult DecryptDDS(const std::string &filePath, const std::string &
     return result;
 }
 
-TextureConvertResult DecryptOrCopyDDS(const std::string &inputPath, const std::string &outputPath,
-                                       uint32_t xorKey) {
+TextureConvertResult DecryptOrCopyDDS(const std::string &inputPath, const std::string &outputPath, uint32_t xorKey) {
     TextureConvertResult result;
 
     // 先检查是否已经是标准的 DDS 文件

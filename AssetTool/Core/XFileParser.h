@@ -12,8 +12,8 @@
 //   - 法线生成（降级）
 // ========================================================================
 
-#include "Asset/Definitions/Mesh/DxMeshFormat.h"
 #include "Asset/Definitions/Material/MaterialDesc.h"
+#include "Asset/Definitions/Mesh/DxMeshFormat.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -40,10 +40,10 @@ struct XFileMaterial {
 struct XFileMesh {
     std::string name;
 
-    std::vector<float> positions;   // float3
-    std::vector<float> normals;     // float3
-    std::vector<float> texcoords;   // float2
-    std::vector<uint32_t> indices;  // 三角形索引
+    std::vector<float> positions;  // float3
+    std::vector<float> normals;    // float3
+    std::vector<float> texcoords;  // float2
+    std::vector<uint32_t> indices; // 三角形索引
 
     XFileMaterial material;
 
@@ -79,7 +79,7 @@ public:
     bool m_autoDecrypt = true;
 
     /// 当 autoDecrypt 启用时尝试的 XOR key 列表（默认仅 PowerUpKit key）
-    std::vector<uint32_t> m_decryptKeys = { 0x0B7E7759 };
+    std::vector<uint32_t> m_decryptKeys = {0x0B7E7759};
 
 private:
     /// 尝试一次导入（不重试）

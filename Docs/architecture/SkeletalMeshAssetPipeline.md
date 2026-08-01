@@ -2,7 +2,7 @@
 
 > 日期：2026-07-31
 > 状态：方向文档（设计定案）
-> 关联：`SubMeshMaterialSlots.md`、`RelationshipModel.md`、`CharacterAsset.md`、`AssetTool_ExportPipeline_Snapshot_20260731.md`、`UKW_PowerUpKit/06_SubMeshPipeline.md`
+> 关联：`SubMeshMaterialSlots.md`、`RelationshipModel.md`、`CharacterAsset.md`、`UKW_PowerUpKit/02_RobotAndAnimation.md`（AssetTool 导出结论已并入）、`UKW_PowerUpKit/06_SubMeshPipeline.md`
 
 ---
 
@@ -300,5 +300,5 @@ Muzzle       →  无子网格（纯挂点）     —    ← 开火特效附着
 - `Docs/architecture/SubMeshMaterialSlots.md` — 材质槽系统详细设计（Step 0→3）
 - `Docs/architecture/RelationshipModel.md` — 实体关系模型（含 socket 挂载）
 - `Docs/targets/UKW_PowerUpKit/06_SubMeshPipeline.md` — UKW 部件合并管线
-- `Docs/snapshots/AssetTool_ExportPipeline_Snapshot_20260731.md` — AssetTool 导出状态
+- `Docs/targets/UKW_PowerUpKit/02_RobotAndAnimation.md` — AssetTool 导出结论（快照已并入删除）
 - `Docs/architecture/SkinnedAnimation.md` — 蒙皮动画系统设计

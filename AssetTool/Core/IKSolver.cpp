@@ -5,8 +5,8 @@
 #include "IKSolver.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cctype>
+#include <cmath>
 #include <iostream>
 
 using namespace AssetTool;
@@ -99,25 +99,31 @@ std::string ToLower(const std::string &s) {
 
 /// 名字是否属于可 IK 的肢体链段（含 arm/leg/hand，排除武装/辅助）
 bool IsLimbName(const std::string &lower) {
-    if (lower.find("arm") == std::string::npos &&
-        lower.find("leg") == std::string::npos &&
+    if (lower.find("arm") == std::string::npos && lower.find("leg") == std::string::npos &&
         lower.find("hand") == std::string::npos)
         return false;
     // 排除武装/特效/辅助节点
-    if (lower.find("gun") != std::string::npos)      return false;
-    if (lower.find("sword") != std::string::npos)    return false;
-    if (lower.find("shield") != std::string::npos)   return false;
-    if (lower.find("weapon") != std::string::npos)   return false;
-    if (lower.find("missile") != std::string::npos)  return false;
-    if (lower.find("output") != std::string::npos)   return false;
-    if (lower.find("hit") != std::string::npos)      return false;
-    if (lower.find("root") != std::string::npos)     return false;
+    if (lower.find("gun") != std::string::npos)
+        return false;
+    if (lower.find("sword") != std::string::npos)
+        return false;
+    if (lower.find("shield") != std::string::npos)
+        return false;
+    if (lower.find("weapon") != std::string::npos)
+        return false;
+    if (lower.find("missile") != std::string::npos)
+        return false;
+    if (lower.find("output") != std::string::npos)
+        return false;
+    if (lower.find("hit") != std::string::npos)
+        return false;
+    if (lower.find("root") != std::string::npos)
+        return false;
     return true;
 }
 
 bool IsChainRootName(const std::string &lower) {
-    return lower.find("arm") != std::string::npos ||
-           lower.find("leg") != std::string::npos;
+    return lower.find("arm") != std::string::npos || lower.find("leg") != std::string::npos;
 }
 
 } // namespace
@@ -222,9 +228,7 @@ std::vector<IKChain> IKSolver::FindChains(const HODData &hod) {
 // SolveFABRIK — FABRIK 纯位置迭代
 // ==========================================================================
 
-IKSolveResult IKSolver::SolveFABRIK(std::vector<IKJoint> &joints,
-                                    const float target[3],
-                                    int maxIterations,
+IKSolveResult IKSolver::SolveFABRIK(std::vector<IKJoint> &joints, const float target[3], int maxIterations,
                                     float tolerance) {
     IKSolveResult res;
     const size_t n = joints.size();
@@ -280,7 +284,7 @@ IKSolveResult IKSolver::SolveFABRIK(std::vector<IKJoint> &joints,
         joints[n - 1].position[0] = target[0];
         joints[n - 1].position[1] = target[1];
         joints[n - 1].position[2] = target[2];
-        for (size_t i = n - 2; i < n; --i) {  // size_t 下溢保护
+        for (size_t i = n - 2; i < n; --i) { // size_t 下溢保护
             float dx = joints[i].position[0] - joints[i + 1].position[0];
             float dy = joints[i].position[1] - joints[i + 1].position[1];
             float dz = joints[i].position[2] - joints[i + 1].position[2];

@@ -16,8 +16,7 @@ namespace AssetTool {
 // ── 默认导入标志 ──
 // 注意：去掉 JoinIdenticalVertices 以匹配社区工具的顶点数（不焊接重复顶点）
 //       ImproveCacheLocality 也会移动顶点，一并去掉
-static constexpr unsigned int DEFAULT_FLAGS = aiProcess_Triangulate | aiProcess_GenNormals |
-                                              aiProcess_SortByPType;
+static constexpr unsigned int DEFAULT_FLAGS = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_SortByPType;
 
 // ==========================================================================
 // 辅助：assimp 矩阵/颜色 → 引擎格式
@@ -210,7 +209,8 @@ bool XFileParser::ParseFile(const std::string &filepath) {
         0x95127634, 0x19870430, 0xAC510B91, 0x13322366, 0xEF452301, 0x33333323, 0x33322166,
     };
     for (uint32_t altKey : altKeys) {
-        if (altKey == 0x0B7E7759) continue;
+        if (altKey == 0x0B7E7759)
+            continue;
         std::vector<uint8_t> altBuf(buffer);
         XORCipher altCipher(altKey);
         altCipher.DecryptBuffer(altBuf.data(), altBuf.size());
@@ -218,8 +218,8 @@ bool XFileParser::ParseFile(const std::string &filepath) {
             return Parse(altBuf.data(), altBuf.size());
     }
 
-    m_error = "Cannot parse .x file (tried plain + " + std::to_string(1 + sizeof(altKeys) / sizeof(altKeys[0])) +
-              " keys)";
+    m_error =
+        "Cannot parse .x file (tried plain + " + std::to_string(1 + sizeof(altKeys) / sizeof(altKeys[0])) + " keys)";
     return false;
 }
 
@@ -353,11 +353,11 @@ DX12Engine::Resource::MaterialDesc XFileMaterial::ToMaterialDesc() const {
     DX12Engine::Resource::MaterialDesc desc;
     desc.shader = "PBR/Standard";
 
-    // ColorRGBA: faceColor = (a, r, g, b) 来自 .x 文件
-    desc.params.baseColor[0] = faceColor[1]; // R
-    desc.params.baseColor[1] = faceColor[2]; // G
-    desc.params.baseColor[2] = faceColor[3]; // B
-    desc.params.baseColor[3] = faceColor[0]; // A
+    // ColorRGBA: faceColor 按 RGBA 存储（AiColorToFloat4 写入 r,g,b,a）
+    desc.params.baseColor[0] = faceColor[0]; // R
+    desc.params.baseColor[1] = faceColor[1]; // G
+    desc.params.baseColor[2] = faceColor[2]; // B
+    desc.params.baseColor[3] = faceColor[3]; // A
 
     float p = (power > 0.0f) ? power : 10.0f;
     desc.params.roughness = std::max(0.05f, std::min(0.95f, 1.0f / (p + 1.0f)));

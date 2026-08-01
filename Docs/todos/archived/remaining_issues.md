@@ -1,7 +1,7 @@
 # 全局待办清单
 
-> 日期：2026-07-27
-> 本次会话：`CameraComponent` ECS 结构体创建 + SceneConstructor 接入 + CameraEditor 注册 + ExportToDescription 导出。实体关系模型设计定案（扁平 JSON + ID 引用，引擎 CORE 只存不处理）。关系设计文档参见 `Docs/architecture/RelationshipModel.md`。
+> 日期：2026-08-01（上次更新 2026-07-27）
+> 本次会话（2026-08-01）：**UKW 资产管线转向引擎侧**。DCC 侧定案：骨骼视觉断开为数据固有（部件变换矩阵语义，非关节链几何），接受现状；唯一有效改动是 FBX 导出改二进制（Blender 5.2 不支持 ASCII）。删除 07/08 DCC 文档，新增 `07_EngineAssetPipeline.md`（两条 dxmesh 路径：importrobot 已实现 skinned 输出，FBX→dxmesh 暂缓）。快照见 `Docs/snapshots/UKW_AssetPipeline_Snapshot_20260801.md`。引擎侧下一步：SkeletonManager 加载 `.bone`（U1）+ SkinnedComponent 接入（U2）+ 蒙皮渲染链路（U3）。
 >
 > 详细快照见 `Docs/snapshots/WorldRefactor_Snapshot_20260723.md`。
 >
@@ -21,13 +21,26 @@
 |:-:|:-----|:-------|:------|
 | 1 | 公告牌手动放置（JSON 驱动） | P2 | 已有 `BillboardDesc`/`BillboardComponent`/Builder，只需恢复注册 + 接入 |
 | 2 | 公告牌程序化体积生成 | P3 | `BillboardVolumeDesc` + CPU 生成，见 `BillboardSystemArchitecture.md` |
-| 3 | 蒙皮角色 JSON 加载 | P3 | 需 AssetTool 将 `.m3d` 导出为 `.dxmesh`（含 `DxMeshFlag_Skinned`） |
+| 3 | 蒙皮角色 JSON 加载 | P3 | ✅ 资产侧已通：`importrobot` 已将 `.hod+.x` 合并为 skinned `.dxmesh`（`DxMeshSkinnedVertex`，A3 已就绪）+ `.bone` 骨架。剩余：引擎侧 SkeletonManager 加载 `.bone` + SkinnedComponent 接入（见下方"UKW 引擎侧管线"） |
 
 ### 动画管线（2026-07-31 定案）
 
 | # | 任务 | 优先级 | 说明 |
 |:-:|:-----|:-------|:------|
 | 3a | **ANI 解析器** | P1 | ✅ 已完成（2026-07-31）：`ANIParser` 读 `Script.ani`（文件名头 + HOD/HD2 块序列）→ 按组提取帧矩阵 + Tail 状态机。1.008 原版（HOD）与 PUK 2.008（AN2+HD2）双格式，标记法 + 母版驱动，无固定步长，25 机体全量拆解成功。**下一步：B2 `.anim` 现代化资产（全量转切分剪辑 + AnimLoader）**。详见 `Docs/architecture/CharacterAsset.md` §九 阶段 B1/B2 |
+
+### UKW 引擎侧管线（2026-08-01 定案）
+
+> DCC 侧已定案：骨骼视觉断开为数据固有（部件变换矩阵语义），接受现状；唯一有效改动是 FBX 导出改二进制（Blender 5.2 不支持 ASCII）。已删除 07/08 DCC 文档。详见 `Docs/snapshots/UKW_AssetPipeline_Snapshot_20260801.md`、`Docs/targets/UKW_PowerUpKit/07_EngineAssetPipeline.md`。
+
+| # | 任务 | 优先级 | 说明 |
+|:-:|:-----|:-------|:------|
+| U1 | **SkeletonManager 加载 `.bone`** | P1 | 引擎侧从 `.bone` JSON 加载骨架树（现有 `SkeletonManager.h/.cpp` 为骨架实现，补 `LoadFromJSON`：name/parentIndex/position/rotation/scale） |
+| U2 | **SkinnedComponent 接入** | P1 | 场景加载时创建 SkinnedComponent（骨架引用 + 网格引用），`SceneConstructor` 框架已有 |
+| U3 | **蒙皮渲染链路** | P1 | GPU 骨骼缓冲（StructuredBuffer<float4x4>）+ 蒙皮着色器绑定（`DxMeshSkinnedVertex` 的 R8G8B8A8_UINT boneIndices + boneWeights） |
+| U4 | **动画资产 B2（.anim 现代化）** | P2 | ANI 解析已完（B1），下一步全量转切分剪辑 + AnimLoader |
+| U5 | **IK 入引擎** | P2 | IKSolver 已离线验证（B 方案），引擎侧接 FABRIK 需先清蒙皮管线三段缺口（U1-U3） |
+| U6 | **FBX → 资产转换（fbxs2dxmesh）** | P3 | Blender 合并后 FBX（如 `kd-03.fbx`，15 mesh）→ dxmesh 的转换器，暂缓；仅在需要 Blender 修模成果回流时开发 |
 
 ### 基础设施改进
 

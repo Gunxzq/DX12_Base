@@ -162,7 +162,8 @@ void MPDParser::ExtractTileNames(const uint8_t *data, size_t size) {
             std::string name = CP932ToUTF8(raw);
             std::string stem = name;
             auto dot = stem.rfind('.');
-            if (dot != std::string::npos) stem = stem.substr(0, dot);
+            if (dot != std::string::npos)
+                stem = stem.substr(0, dot);
             if (stem.size() < 2 || seen.count(name))
                 return "";
             seen.insert(name);
@@ -178,7 +179,8 @@ void MPDParser::ExtractTileNames(const uint8_t *data, size_t size) {
 
     // 第一个名字：头部（偏移 9）后直接找 .x\0
     std::string firstName = extractName(9, 256);
-    if (!firstName.empty()) names.push_back(firstName);
+    if (!firstName.empty())
+        names.push_back(firstName);
 
     // 后续名字：每个 FFFF0001 对应一个条目
     for (size_t i = 0; i + 16 < size; ++i) {
@@ -223,17 +225,20 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
     // 统计 Type A 锚点的 XX 值分布
     std::map<uint8_t, int> xxCounts;
     for (size_t i = 0; i + 8 < size; ++i) {
-        if (data[i + 1] == 0x00 && data[i + 2] == 0x00 && data[i + 3] == 0x00 &&
-            data[i + 4] == 0x00 && data[i + 5] == 0x00 &&
-            data[i + 6] == 0x80 && data[i + 7] == 0x3F) {
+        if (data[i + 1] == 0x00 && data[i + 2] == 0x00 && data[i + 3] == 0x00 && data[i + 4] == 0x00 &&
+            data[i + 5] == 0x00 && data[i + 6] == 0x80 && data[i + 7] == 0x3F) {
             uint8_t xx = data[i];
-            if (xx != 0) xxCounts[xx]++;
+            if (xx != 0)
+                xxCounts[xx]++;
         }
     }
     uint8_t dominantXX = 0;
     int maxCount = 0;
     for (const auto &[xx, count] : xxCounts) {
-        if (count > maxCount) { maxCount = count; dominantXX = xx; }
+        if (count > maxCount) {
+            maxCount = count;
+            dominantXX = xx;
+        }
     }
 
     // 解析辅助 lambda：从锚点 off 处解析一个 Type A 条目，返回 m4 位置（0=失败）
@@ -242,11 +247,16 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
         size_t m2 = m1 + 20;
         size_t m3 = m2 + 20;
         size_t m4 = m3 + 20;
-        if (m4 + 10 > size) return 0;
-        if (!isMarker(m1)) return 0;
-        if (!isMarker(m2)) return 0;
-        if (!isMarker(m3)) return 0;
-        if (!isMarker(m4)) return 0;
+        if (m4 + 10 > size)
+            return 0;
+        if (!isMarker(m1))
+            return 0;
+        if (!isMarker(m2))
+            return 0;
+        if (!isMarker(m3))
+            return 0;
+        if (!isMarker(m4))
+            return 0;
 
         size_t gap3Off = m3 + 4;
         float x = *reinterpret_cast<const float *>(data + gap3Off + 4);
@@ -254,15 +264,18 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
         float z = *reinterpret_cast<const float *>(data + gap3Off + 12);
         (void)y;
 
-        uint32_t index = static_cast<uint32_t>(data[m4 + 4]) |
-                        (static_cast<uint32_t>(data[m4 + 5]) << 8);
+        uint32_t index = static_cast<uint32_t>(data[m4 + 4]) | (static_cast<uint32_t>(data[m4 + 5]) << 8);
 
         // 渲染文本（m4 后固定 6 字节偏移处开始，遇连续 00 停止）
         std::string renderText;
         size_t tp = m4 + 4 + 6;
         int zeroRun = 0;
         while (tp < size && zeroRun < 2) {
-            if (data[tp] == 0x00) { ++zeroRun; ++tp; continue; }
+            if (data[tp] == 0x00) {
+                ++zeroRun;
+                ++tp;
+                continue;
+            }
             zeroRun = 0;
             if (data[tp] >= 0x20 && data[tp] <= 0x7E) {
                 renderText += static_cast<char>(data[tp]);
@@ -270,13 +283,15 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
                 renderText += static_cast<char>(data[tp]);
             } else if (data[tp] >= 0x80) {
                 renderText += static_cast<char>(data[tp]);
-            } else { break; }
+            } else {
+                break;
+            }
             ++tp;
-            if (renderText.size() > 240) break;
+            if (renderText.size() > 240)
+                break;
         }
 
-        if (x > -10000 && x < 10000 && z > -10000 && z < 10000 &&
-            std::isfinite(x) && std::isfinite(z)) {
+        if (x > -10000 && x < 10000 && z > -10000 && z < 10000 && std::isfinite(x) && std::isfinite(z)) {
             MPDTile tile;
             tile.tileIndex = index;
             tile.posX = x;
@@ -299,10 +314,14 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
     // ================================================================
     if (dominantXX != 0) {
         for (size_t off = 0; off + 80 < size; ++off) {
-            if (data[off] != dominantXX) continue;
-            if (std::memcmp(data + off + 1, "\x00\x00\x00\x00\x00", 5) != 0) continue;
-            if (data[off + 6] != 0x80 || data[off + 7] != 0x3F) continue;
-            if (seenPos.count(off)) continue;
+            if (data[off] != dominantXX)
+                continue;
+            if (std::memcmp(data + off + 1, "\x00\x00\x00\x00\x00", 5) != 0)
+                continue;
+            if (data[off + 6] != 0x80 || data[off + 7] != 0x3F)
+                continue;
+            if (seenPos.count(off))
+                continue;
             seenPos.insert(off);
 
             size_t m4 = parseTileAtAnchor(off, dominantXX);
@@ -310,13 +329,18 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
                 // 连续条目：紧跟 m4+8 处可能有 XX=0 的条目
                 size_t nextOff = m4 + 8;
                 while (nextOff + 80 < size) {
-                    if (data[nextOff] != 0x00) break;
-                    if (std::memcmp(data + nextOff + 1, "\x00\x00\x00\x00\x00", 5) != 0) break;
-                    if (data[nextOff + 6] != 0x80 || data[nextOff + 7] != 0x3F) break;
-                    if (seenPos.count(nextOff)) break;
+                    if (data[nextOff] != 0x00)
+                        break;
+                    if (std::memcmp(data + nextOff + 1, "\x00\x00\x00\x00\x00", 5) != 0)
+                        break;
+                    if (data[nextOff + 6] != 0x80 || data[nextOff + 7] != 0x3F)
+                        break;
+                    if (seenPos.count(nextOff))
+                        break;
                     seenPos.insert(nextOff);
                     size_t nm4 = parseTileAtAnchor(nextOff, 0);
-                    if (nm4 == 0) break;
+                    if (nm4 == 0)
+                        break;
                     nextOff = nm4 + 8;
                 }
             }
@@ -328,19 +352,25 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
     // ================================================================
     std::set<size_t> seenBF;
     for (size_t off = 0; off + 80 < size; ++off) {
-        if (!isBFMarker(off)) continue;
-        if (seenBF.count(off)) continue;
+        if (!isBFMarker(off))
+            continue;
+        if (seenBF.count(off))
+            continue;
         seenBF.insert(off);
 
         // 验证后续 3 个 3F 标记，间隔 8-8-24
-        size_t m2 = off + 4 + 8;    // off + 4 + 8
-        size_t m3 = m2 + 4 + 8;     // m2 + 4 + 8
-        size_t m4 = m3 + 4 + 24;    // m3 + 4 + 24
+        size_t m2 = off + 4 + 8; // off + 4 + 8
+        size_t m3 = m2 + 4 + 8;  // m2 + 4 + 8
+        size_t m4 = m3 + 4 + 24; // m3 + 4 + 24
 
-        if (m4 + 10 > size) continue;
-        if (!isMarker(m2)) continue;
-        if (!isMarker(m3)) continue;
-        if (!isMarker(m4)) continue;
+        if (m4 + 10 > size)
+            continue;
+        if (!isMarker(m2))
+            continue;
+        if (!isMarker(m3))
+            continue;
+        if (!isMarker(m4))
+            continue;
 
         // 坐标在 gap3 (m3+4 ~ m4)，偏移 +12 (X) 和 +20 (Z)
         size_t gap3Off = m3 + 4;
@@ -348,15 +378,18 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
         float z = *reinterpret_cast<const float *>(data + gap3Off + 20);
 
         // 索引在 m4 后
-        uint32_t index = static_cast<uint32_t>(data[m4 + 4]) |
-                        (static_cast<uint32_t>(data[m4 + 5]) << 8);
+        uint32_t index = static_cast<uint32_t>(data[m4 + 4]) | (static_cast<uint32_t>(data[m4 + 5]) << 8);
 
         // 渲染文本（m4 后固定 6 字节偏移处开始，遇连续 00 停止）
         std::string renderText;
         size_t tp = m4 + 4 + 6;
         int zeroRun = 0;
         while (tp < size && zeroRun < 2) {
-            if (data[tp] == 0x00) { ++zeroRun; ++tp; continue; }
+            if (data[tp] == 0x00) {
+                ++zeroRun;
+                ++tp;
+                continue;
+            }
             zeroRun = 0;
             if (data[tp] >= 0x20 && data[tp] <= 0x7E) {
                 renderText += static_cast<char>(data[tp]);
@@ -368,11 +401,11 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
                 break;
             }
             ++tp;
-            if (renderText.size() > 240) break;
+            if (renderText.size() > 240)
+                break;
         }
 
-        if (x > -10000 && x < 10000 && z > -10000 && z < 10000 &&
-            std::isfinite(x) && std::isfinite(z)) {
+        if (x > -10000 && x < 10000 && z > -10000 && z < 10000 && std::isfinite(x) && std::isfinite(z)) {
             MPDTile tile;
             tile.tileIndex = index;
             tile.posX = x;
@@ -380,8 +413,8 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
             tile.renderText = renderText;
             parsed.push_back(tile);
             // 输出 BF 条目二进制（以索引为中心）用于验证
-            std::cout << "[TILE] idx=" << index << " (0x" << std::hex << index << std::dec
-                      << ") @" << x << "," << z << " raw=";
+            std::cout << "[TILE] idx=" << index << " (0x" << std::hex << index << std::dec << ") @" << x << "," << z
+                      << " raw=";
             size_t hexStart = m4 + 4;
             size_t hexEnd = std::min(m4 + 16, size);
             for (size_t hi = hexStart; hi < hexEnd; ++hi)
@@ -396,9 +429,8 @@ void MPDParser::ParseCoordinateSection(const uint8_t *data, size_t size) {
     std::set<std::pair<uint32_t, uint64_t>> dedup;
     std::vector<MPDTile> unique;
     for (const auto &tile : parsed) {
-        uint64_t coordKey = (static_cast<uint64_t>(
-            *reinterpret_cast<const uint32_t *>(&tile.posX)) << 32) |
-            *reinterpret_cast<const uint32_t *>(&tile.posZ);
+        uint64_t coordKey = (static_cast<uint64_t>(*reinterpret_cast<const uint32_t *>(&tile.posX)) << 32) |
+                            *reinterpret_cast<const uint32_t *>(&tile.posZ);
         auto key = std::make_pair(tile.tileIndex, coordKey);
         if (dedup.find(key) == dedup.end()) {
             dedup.insert(key);
@@ -533,14 +565,19 @@ void MPDParser::ExtractConfigText(const uint8_t *data, size_t size) {
             continue;
         size_t textPos = i + 4 + 3; // FFFF00 XX (4B) + 3B gap
         // 跳过前导 00
-        while (textPos < size && data[textPos] == 0x00) ++textPos;
-        if (textPos + 5 >= size) continue;
+        while (textPos < size && data[textPos] == 0x00)
+            ++textPos;
+        if (textPos + 5 >= size)
+            continue;
 
         // 收集文本直到结束标记 64 00 64 00 00 00 F0 41 或 FFFF00 或 00 00 80 3F
         // 用 00 作为字段分隔符，每个 00 分隔的段独立成条目
         std::vector<uint8_t> currentField;
         auto flushField = [&]() {
-            if (currentField.size() < 3) { currentField.clear(); return; }
+            if (currentField.size() < 3) {
+                currentField.clear();
+                return;
+            }
             currentField.push_back(0);
             std::string raw(reinterpret_cast<const char *>(currentField.data()));
             std::string decoded = CP932ToUTF8(raw);
@@ -586,9 +623,11 @@ void MPDParser::ExtractConfigText(const uint8_t *data, size_t size) {
 
     auto extractParen = [&](size_t start) -> std::string {
         size_t open = text.find('(', start);
-        if (open == std::string::npos) return {};
+        if (open == std::string::npos)
+            return {};
         size_t close = text.find(')', open);
-        if (close == std::string::npos) return {};
+        if (close == std::string::npos)
+            return {};
         return text.substr(open + 1, close - open - 1);
     };
 
@@ -628,8 +667,10 @@ void MPDParser::ExtractConfigText(const uint8_t *data, size_t size) {
             auto comma = args.find(',');
             if (comma != std::string::npos) {
                 m_result.bgmFile = args.substr(comma + 1);
-                while (!m_result.bgmFile.empty() && m_result.bgmFile.front() == ' ') m_result.bgmFile.erase(0, 1);
-                while (!m_result.bgmFile.empty() && m_result.bgmFile.back() == ' ') m_result.bgmFile.pop_back();
+                while (!m_result.bgmFile.empty() && m_result.bgmFile.front() == ' ')
+                    m_result.bgmFile.erase(0, 1);
+                while (!m_result.bgmFile.empty() && m_result.bgmFile.back() == ' ')
+                    m_result.bgmFile.pop_back();
             }
         }
         pos += 11;
@@ -640,7 +681,10 @@ void MPDParser::ExtractConfigText(const uint8_t *data, size_t size) {
     std::set<std::string> seenPop;
     while ((pos = text.find("PopInfo(", pos)) != std::string::npos) {
         auto close = text.find(')', pos);
-        if (close == std::string::npos || close - pos > 80) { pos += 7; continue; }
+        if (close == std::string::npos || close - pos > 80) {
+            pos += 7;
+            continue;
+        }
         std::string args = text.substr(pos + 8, close - pos - 8);
         int firstVal = 0;
         if (sscanf(args.c_str(), "%d", &firstVal) == 1 && firstVal >= 0 && firstVal <= 999) {
@@ -711,8 +755,8 @@ std::string MPDData::ToText() const {
 
     // ---- 00 00 80 3F 文本标记（渲染参数） ----
     if (!renderSettings.empty()) {
-        oss << "\n--- Render Settings (" << renderSettings.size() << " unique, "
-            << renderWithAt << " with @, " << renderWithoutAt << " without @) ---\n";
+        oss << "\n--- Render Settings (" << renderSettings.size() << " unique, " << renderWithAt << " with @, "
+            << renderWithoutAt << " without @) ---\n";
         for (size_t i = 0; i < renderSettings.size(); ++i)
             oss << "  [" << i << "] " << SanitizeUTF8(renderSettings[i]) << "\n";
     }
@@ -721,10 +765,9 @@ std::string MPDData::ToText() const {
     if (!popInfoEntries.empty()) {
         oss << "\n--- PopInfo (" << popInfoEntries.size() << " entries) ---\n";
         for (const auto &pi : popInfoEntries) {
-            oss << "  [" << pi.popIndex << "] Pos=(" << std::fixed << std::setprecision(2)
-                << pi.posX << ", " << pi.posY << ", " << pi.posZ << ")"
-                << "  Params=" << pi.param1 << "," << pi.param2
-                << "  Text: " << SanitizeUTF8(pi.rawText) << "\n";
+            oss << "  [" << pi.popIndex << "] Pos=(" << std::fixed << std::setprecision(2) << pi.posX << ", " << pi.posY
+                << ", " << pi.posZ << ")"
+                << "  Params=" << pi.param1 << "," << pi.param2 << "  Text: " << SanitizeUTF8(pi.rawText) << "\n";
         }
     }
 
@@ -748,7 +791,10 @@ void MPDData::FilterByExistingFiles(const std::vector<std::string> &existingFile
 
     // 构建真实文件名集合（全小写，去掉路径只留文件名）
     // 同时保留原始顺序，用于后续补充缺失条目
-    struct FileEntry { std::string name; std::string lower; };
+    struct FileEntry {
+        std::string name;
+        std::string lower;
+    };
     std::vector<FileEntry> realFiles;
     std::set<std::string> realFileSet;
     for (const auto &path : existingFiles) {
@@ -795,8 +841,8 @@ void MPDData::FilterByExistingFiles(const std::vector<std::string> &existingFile
     tileNames = filtered;
     size_t after = tileNames.size();
 
-    std::cout << "[FilterByExistingFiles] " << before << " → " << after
-              << " tile names (removed " << (before - after) << " non-existing)\n";
+    std::cout << "[FilterByExistingFiles] " << before << " → " << after << " tile names (removed " << (before - after)
+              << " non-existing)\n";
 }
 
 // ==========================================================================
@@ -815,11 +861,14 @@ void MPDParser::ExtractRenderSettings(const uint8_t *data, size_t size) {
             continue;
 
         size_t textPos = i + 4 + gap;
-        if (textPos + 4 >= size) continue;
+        if (textPos + 4 >= size)
+            continue;
 
         // 跳过前导 00
-        while (textPos < size && data[textPos] == 0x00) ++textPos;
-        if (textPos + 4 >= size) continue;
+        while (textPos < size && data[textPos] == 0x00)
+            ++textPos;
+        if (textPos + 4 >= size)
+            continue;
 
         // 收集文本直到遇到连续 00 或 00 00 80 3F
         std::vector<uint8_t> textBytes;
@@ -829,17 +878,24 @@ void MPDParser::ExtractRenderSettings(const uint8_t *data, size_t size) {
             uint8_t b = data[j];
             if (b == 0x00) {
                 ++zeroRun;
-                if (zeroRun >= 3) break;
+                if (zeroRun >= 3)
+                    break;
                 continue;
             }
             zeroRun = 0;
-            if (b == 0x0D || b == 0x0A) continue;
-            if (b == 0x40) hasAt = true; // @
+            if (b == 0x0D || b == 0x0A)
+                continue;
+            if (b == 0x40)
+                hasAt = true; // @
             textBytes.push_back(b);
         }
-        if (textBytes.size() < 4) continue;
+        if (textBytes.size() < 4)
+            continue;
 
-        if (hasAt) countWithAt++; else countWithoutAt++;
+        if (hasAt)
+            countWithAt++;
+        else
+            countWithoutAt++;
 
         textBytes.push_back(0);
         std::string raw(reinterpret_cast<const char *>(textBytes.data()));
@@ -848,7 +904,10 @@ void MPDParser::ExtractRenderSettings(const uint8_t *data, size_t size) {
         // 去重
         bool dup = false;
         for (const auto &s : settings) {
-            if (s == decoded) { dup = true; break; }
+            if (s == decoded) {
+                dup = true;
+                break;
+            }
         }
         if (!dup && decoded.size() > 2)
             settings.push_back(decoded);
@@ -880,14 +939,16 @@ void MPDParser::ExtractPopInfo(const uint8_t *data, size_t size) {
 
     // 解析 PopInfo 段
     for (size_t mi = 0; mi + 1 < m3fPos.size(); ++mi) {
-        size_t m2 = m3fPos[mi];       // 标记2（当前）
-        size_t m3 = m3fPos[mi + 1];   // 标记3（下一个）
+        size_t m2 = m3fPos[mi];     // 标记2（当前）
+        size_t m3 = m3fPos[mi + 1]; // 标记3（下一个）
 
         // 标记2 后跳过前导00，找 PopInfo 文本
         size_t textPos = m2 + 4;
-        while (textPos < size && data[textPos] == 0x00) ++textPos;
+        while (textPos < size && data[textPos] == 0x00)
+            ++textPos;
         // 读参数（2 × uint16，8字节）
-        if (textPos + 8 > m3) continue;
+        if (textPos + 8 > m3)
+            continue;
         int param1 = static_cast<int>(data[textPos]) | (static_cast<int>(data[textPos + 1]) << 8);
         int param2 = static_cast<int>(data[textPos + 2]) | (static_cast<int>(data[textPos + 3]) << 8);
         textPos += 8;
@@ -899,7 +960,8 @@ void MPDParser::ExtractPopInfo(const uint8_t *data, size_t size) {
                 break;
             ++popStart;
         }
-        if (popStart + 8 >= m3) continue;
+        if (popStart + 8 >= m3)
+            continue;
 
         int popIdx = 0;
         sscanf(reinterpret_cast<const char *>(data + popStart + 8), "%d", &popIdx);
@@ -914,8 +976,8 @@ void MPDParser::ExtractPopInfo(const uint8_t *data, size_t size) {
                     break;
             }
             // 检查后缀 00 2E BD 3B B3
-            if (textEnd + 5 <= m3 && data[textEnd] == 0x00 && data[textEnd + 1] == 0x2E &&
-                data[textEnd + 2] == 0xBD && data[textEnd + 3] == 0x3B && data[textEnd + 4] == 0xB3)
+            if (textEnd + 5 <= m3 && data[textEnd] == 0x00 && data[textEnd + 1] == 0x2E && data[textEnd + 2] == 0xBD &&
+                data[textEnd + 3] == 0x3B && data[textEnd + 4] == 0xB3)
                 break;
             ++textEnd;
         }
@@ -926,15 +988,15 @@ void MPDParser::ExtractPopInfo(const uint8_t *data, size_t size) {
         size_t m1 = 0;
         for (int back = 4; back < 60 && back <= (int)m2; ++back) {
             size_t pos = m2 - back;
-            if (data[pos] == 0x00 && data[pos + 1] == 0x00 && data[pos + 2] == 0x80 &&
-                (data[pos + 3] & 0x0F) == 0x0F) {
+            if (data[pos] == 0x00 && data[pos + 1] == 0x00 && data[pos + 2] == 0x80 && (data[pos + 3] & 0x0F) == 0x0F) {
                 m1 = pos;
                 break;
             }
         }
 
         // 如果没找到标记1，跳过
-        if (m1 == 0) continue;
+        if (m1 == 0)
+            continue;
 
         // 在标记1→标记2之间找坐标 float
         float posX = 0, posY = 0, posZ = 0;
@@ -943,15 +1005,20 @@ void MPDParser::ExtractPopInfo(const uint8_t *data, size_t size) {
             float y = *reinterpret_cast<const float *>(data + off + 4);
             float z = *reinterpret_cast<const float *>(data + off + 8);
             if (x > 100 && x < 10000 && z > 100 && z < 10000) {
-                posX = x; posY = y; posZ = z;
+                posX = x;
+                posY = y;
+                posZ = z;
                 break;
             }
         }
 
         MPDPopInfo entry;
         entry.popIndex = popIdx;
-        entry.posX = posX; entry.posY = posY; entry.posZ = posZ;
-        entry.param1 = param1; entry.param2 = param2;
+        entry.posX = posX;
+        entry.posY = posY;
+        entry.posZ = posZ;
+        entry.param1 = param1;
+        entry.param2 = param2;
         entry.rawText = rawText;
         entries.push_back(entry);
 

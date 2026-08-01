@@ -4,10 +4,7 @@
 
 namespace AssetTool {
 
-XORCipher::XORCipher(uint32_t key)
-    : m_key(key)
-{
-}
+XORCipher::XORCipher(uint32_t key) : m_key(key) {}
 
 void XORCipher::DecryptBuffer(uint8_t *data, size_t size) const {
     // XOR 逐 int（4 字节块），不足 4 字节的尾部保持原样
@@ -31,8 +28,7 @@ bool XORCipher::NeedsDecrypt(const std::string &extension) {
     std::string ext = extension;
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-    return ext == ".hod" || ext == ".ani" || ext == ".mpd" ||
-           ext == ".sdt" || ext == ".fx" || ext == ".dds";
+    return ext == ".hod" || ext == ".ani" || ext == ".mpd" || ext == ".sdt" || ext == ".fx" || ext == ".dds";
 }
 
 } // namespace AssetTool

@@ -20,8 +20,8 @@ namespace AssetTool {
 namespace {
 
 // 帧块常量（实测逆向，2026-07-31）
-constexpr size_t HOD_DATA_SIZE   = 9847;   // 每帧 HOD 数据体长度（从 "HOD" 魔术起）
-constexpr size_t TAIL_HEADER     = 16;     // Tail 16B 头（段数/时间/速度/段1大小）
+constexpr size_t HOD_DATA_SIZE = 9847; // 每帧 HOD 数据体长度（从 "HOD" 魔术起）
+constexpr size_t TAIL_HEADER = 16;     // Tail 16B 头（段数/时间/速度/段1大小）
 
 #ifdef _WIN32
 /// 宽字符路径 → UTF-8（仅用于错误消息显示）
@@ -36,14 +36,13 @@ static std::string WideToUTF8Local(const std::wstring &wstr) {
 #endif
 
 /// 是否名字字符（文件名主体：字母/数字/下划线/点）
-inline bool IsNameChar(unsigned char c) {
-    return std::isalnum(c) || c == '_' || c == '.';
-}
+inline bool IsNameChar(unsigned char c) { return std::isalnum(c) || c == '_' || c == '.'; }
 
 /// 从 .hod 位置向前提取帧名（不含 .hod 扩展名）
 std::string ExtractFrameBaseName(const uint8_t *data, size_t hodPos) {
     size_t s = hodPos;
-    while (s > 0 && IsNameChar(data[s - 1])) s--;
+    while (s > 0 && IsNameChar(data[s - 1]))
+        s--;
     return std::string(reinterpret_cast<const char *>(data + s), hodPos - s);
 }
 
@@ -173,7 +172,8 @@ bool ANIParser::ParseBuffer(const uint8_t *data, size_t size) {
     //     HD2 块数远多于 .hod 位置数 → 帧边界 = HD2 魔术本身，名字区 = [uint16 长度][Shift-JIS 名字]
     size_t hd2ScanCount = 0;
     for (size_t i = 0; i + 3 <= size; ++i) {
-        if (std::memcmp(data + i, "HD2", 3) == 0) hd2ScanCount++;
+        if (std::memcmp(data + i, "HD2", 3) == 0)
+            hd2ScanCount++;
     }
     bool variantNoHod = (hd2ScanCount >= 8 && hodPositions.size() * 4 < hd2ScanCount);
 
@@ -212,8 +212,10 @@ bool ANIParser::ParseBuffer(const uint8_t *data, size_t size) {
         // 标准模式（有 .hod 帧标记）：首个 .hod 即母版文件名（ANIRobo/AN2Robo/AN2a...）→ 帧定位跳过
         if (!variantNoHod && hodPositions.size() > 1) {
             std::string base = ExtractFrameBaseName(data, hodPositions[0]);
-            if (base == "ANIRobo" || base == "AN2Robo" || base == "AN2robo" ||
-                base == "AN2a" || base == "ANIsenkan" || base == "AN2Hangar" || base == "AN2hangar") {
+            // 含 "ANIa"（KD-08 变体 1.008 原版，2026-08-01 修复：此前被误当帧边界致首帧 0 字节）
+            if (base == "ANIRobo" || base == "ANIrobo" || base == "AN2Robo" || base == "AN2robo" || base == "AN2a" ||
+                base == "ANIa" || base == "ANIsenkan" || base == "AN2Hangar" || base == "AN2hangar" ||
+                base == "ANIHangar") {
                 bi = 1;
             }
         }
@@ -253,9 +255,13 @@ bool ANIParser::ParseBuffer(const uint8_t *data, size_t size) {
                     // 校验名字区为 Shift-JIS 高位字节居多
                     size_t hi = 0;
                     for (size_t b = 0; b < len; ++b) {
-                        if (data[i - len + b] >= 0x80) hi++;
+                        if (data[i - len + b] >= 0x80)
+                            hi++;
                     }
-                    if (hi * 2 >= len) { nameArea = o; break; }
+                    if (hi * 2 >= len) {
+                        nameArea = o;
+                        break;
+                    }
                 }
             }
             frames.push_back({i, i, nameArea, true, partCount});
@@ -323,7 +329,10 @@ bool ANIParser::ParseBuffer(const uint8_t *data, size_t size) {
         else {
             // 最后一帧：延伸到 IKDATA（End.dat 魔数）前
             for (size_t i = frames[k].hodStart; i + 6 <= size; ++i) {
-                if (std::memcmp(data + i, "IKDATA", 6) == 0) { dataEnd = i; break; }
+                if (std::memcmp(data + i, "IKDATA", 6) == 0) {
+                    dataEnd = i;
+                    break;
+                }
             }
         }
 
@@ -335,10 +344,9 @@ bool ANIParser::ParseBuffer(const uint8_t *data, size_t size) {
 
         // 空 Tail 兜底：无明文 Tail 时，用"部件数 × 每部件大小"推算帧数据结束
         // （部件数来自 HD2/HOD 头标记，每部件大小为确定结构，非写死固定步长）
-        size_t calcEnd = frames[k].hodStart +
-                         (frames[k].isHd2
-                              ? (static_cast<size_t>(frames[k].partCount) * 179 - 8 + 19)
-                              : (7 + static_cast<size_t>(frames[k].partCount) * 328));
+        size_t calcEnd =
+            frames[k].hodStart + (frames[k].isHd2 ? (static_cast<size_t>(frames[k].partCount) * 179 - 8 + 19)
+                                                  : (7 + static_cast<size_t>(frames[k].partCount) * 328));
 
         // 帧数据结束：明文 Tail → Tail 起点；空 Tail（dataEnd > calcEnd）→ calcEnd；组内帧 → dataEnd
         size_t frameEnd = dataEnd;
@@ -353,9 +361,8 @@ bool ANIParser::ParseBuffer(const uint8_t *data, size_t size) {
 
         ANIFrame frame;
         frame.name = ExtractFrameBaseName(data, frames[k].hodPos) + ".hod";
-        size_t n = (frameEnd > frames[k].hodStart) ? std::min(frameEnd - frames[k].hodStart,
-                                                               size - frames[k].hodStart)
-                                                   : 0;
+        size_t n =
+            (frameEnd > frames[k].hodStart) ? std::min(frameEnd - frames[k].hodStart, size - frames[k].hodStart) : 0;
         frame.data.assign(data + frames[k].hodStart, data + frames[k].hodStart + n);
         cur.frames.push_back(std::move(frame));
 
@@ -378,7 +385,10 @@ bool ANIParser::ParseBuffer(const uint8_t *data, size_t size) {
         ANITail tail;
         size_t dataEnd = size;
         for (size_t i = frames.back().hodStart; i + 6 <= size; ++i) {
-            if (std::memcmp(data + i, "IKDATA", 6) == 0) { dataEnd = i; break; }
+            if (std::memcmp(data + i, "IKDATA", 6) == 0) {
+                dataEnd = i;
+                break;
+            }
         }
         if (ParseTail(data, size, dataEnd, size, true, tail))
             cur.tail = std::move(tail);
@@ -401,14 +411,16 @@ bool ANIParser::ParseBuffer(const uint8_t *data, size_t size) {
         size_t minGap = 0, maxGap = 0;
         for (size_t k = 0; k + 1 < frames.size(); ++k) {
             size_t g = frames[k + 1].hodPos - frames[k].hodPos;
-            if (minGap == 0 || g < minGap) minGap = g;
-            if (g > maxGap) maxGap = g;
+            if (minGap == 0 || g < minGap)
+                minGap = g;
+            if (g > maxGap)
+                maxGap = g;
         }
         size_t totalFrames = 0;
-        for (const auto &g : groups) totalFrames += g.frames.size();
-        snprintf(buf, sizeof(buf),
-                 "部件数=%u .hod块=%zu 帧块间距min/max=%zu/%zu 组数=%zu 总帧数=%zu",
-                 partCount, frames.size(), minGap, maxGap, groups.size(), totalFrames);
+        for (const auto &g : groups)
+            totalFrames += g.frames.size();
+        snprintf(buf, sizeof(buf), "部件数=%u .hod块=%zu 帧块间距min/max=%zu/%zu 组数=%zu 总帧数=%zu", partCount,
+                 frames.size(), minGap, maxGap, groups.size(), totalFrames);
         m_diagnostics = buf;
     }
 
@@ -434,7 +446,7 @@ bool ANIParser::ParseMaster(const uint8_t *data, size_t size, size_t magicPos, b
 
     // 部件名起点：HOD 母版 0x0F / HD2 母版 0x13；每部件步长：HOD 328B / HD2 399B
     const size_t nameOffset = isHd2 ? 0x13 : 0x0F;
-    const size_t entrySize  = isHd2 ? 399 : 328;
+    const size_t entrySize = isHd2 ? 399 : 328;
     size_t pos = magicPos + nameOffset;
 
     m_master.bones.reserve(partCount);
@@ -459,9 +471,10 @@ bool ANIParser::ParseMaster(const uint8_t *data, size_t size, size_t magicPos, b
     return !m_master.bones.empty();
 }
 
-bool ANIParser::ParseTail(const uint8_t *data, size_t size, size_t tailOffset,
-                          size_t tailLimit, bool isLastGroup, ANITail &out) const {
-    if (tailOffset + TAIL_HEADER > size) return false;
+bool ANIParser::ParseTail(const uint8_t *data, size_t size, size_t tailOffset, size_t tailLimit, bool isLastGroup,
+                          ANITail &out) const {
+    if (tailOffset + TAIL_HEADER > size)
+        return false;
 
     // 16B 头：段数/版本(uint32) 时间值(uint32) 速度(float) 段1脚本大小(uint32)
     uint32_t n = 0, timeVal = 0, seg1Size = 0;
@@ -482,7 +495,10 @@ bool ANIParser::ParseTail(const uint8_t *data, size_t size, size_t tailOffset,
         // 最后一组：Tail 延伸到文件尾 IKDATA（End.dat 魔数）前
         size_t ik = size;
         for (size_t i = tailOffset; i + 6 <= size; ++i) {
-            if (std::memcmp(data + i, "IKDATA", 6) == 0) { ik = i; break; }
+            if (std::memcmp(data + i, "IKDATA", 6) == 0) {
+                ik = i;
+                break;
+            }
         }
         tailEnd = ik;
     } else if (n > 0 && seg1Size > 0 && seg1Size < 4 * 1024 * 1024 &&
@@ -497,7 +513,8 @@ bool ANIParser::ParseTail(const uint8_t *data, size_t size, size_t tailOffset,
                 spSeg = speed;
                 seg = seg1Size;
             } else {
-                if (pos + 12 > tailLimit) break;
+                if (pos + 12 > tailLimit)
+                    break;
                 std::memcpy(&tSeg, data + pos + 0, 4);
                 std::memcpy(&spSeg, data + pos + 4, 4);
                 std::memcpy(&seg, data + pos + 8, 4);
@@ -514,16 +531,19 @@ bool ANIParser::ParseTail(const uint8_t *data, size_t size, size_t tailOffset,
             pos += seg;
         }
         // 跳零到 Note 起点（Tail 段尾零填充后为下一组动画名）
-        while (pos < tailLimit && data[pos] == 0) pos++;
+        while (pos < tailLimit && data[pos] == 0)
+            pos++;
         tailEnd = pos;
     } else {
         // n==0：纯零填充 Tail（空脚本），跳零到 Note 起点
         size_t pos = tailOffset;
-        while (pos < tailLimit && data[pos] == 0) pos++;
+        while (pos < tailLimit && data[pos] == 0)
+            pos++;
         tailEnd = pos;
     }
 
-    if (tailEnd <= tailOffset || tailEnd > size) return false;
+    if (tailEnd <= tailOffset || tailEnd > size)
+        return false;
     size_t len = tailEnd - tailOffset;
     if (len > TAIL_HEADER) {
         out.script.assign(data + tailOffset + TAIL_HEADER, data + tailEnd);
@@ -551,8 +571,9 @@ bool ANIParser::WriteOutput(const std::string &outputDir) const {
             std::string outName = FramePrefix(static_cast<uint32_t>(i + 1)) + "_" + frame.name;
             fs::path outPath = groupPath / outName;
             std::ofstream out(outPath, std::ios::binary);
-            if (out) out.write(reinterpret_cast<const char *>(frame.data.data()),
-                               static_cast<std::streamsize>(frame.data.size()));
+            if (out)
+                out.write(reinterpret_cast<const char *>(frame.data.data()),
+                          static_cast<std::streamsize>(frame.data.size()));
         }
 
         // Tail.dat：16B 头 + 明文脚本（含尾零填充，与拆解产物一致）
@@ -576,7 +597,8 @@ bool ANIParser::WriteOutput(const std::string &outputDir) const {
         {
             fs::path txtPath = groupPath / "Tail.txt";
             std::ofstream out(txtPath, std::ios::binary);
-            if (!out) continue;
+            if (!out)
+                continue;
 
             for (size_t si = 0; si < g.tail.segments.size(); ++si) {
                 const ANITailSegment &seg = g.tail.segments[si];
@@ -590,9 +612,12 @@ bool ANIParser::WriteOutput(const std::string &outputDir) const {
                 char speedBuf[32];
                 snprintf(speedBuf, sizeof(speedBuf), "%.5f", seg.speed);
                 std::string speedStr = speedBuf;
-                while (!speedStr.empty() && speedStr.back() == '0') speedStr.pop_back();
-                if (!speedStr.empty() && speedStr.back() == '.') speedStr.pop_back();
-                if (speedStr.rfind("0.", 0) == 0) speedStr = speedStr.substr(1); // 0.xxx → .xxx
+                while (!speedStr.empty() && speedStr.back() == '0')
+                    speedStr.pop_back();
+                if (!speedStr.empty() && speedStr.back() == '.')
+                    speedStr.pop_back();
+                if (speedStr.rfind("0.", 0) == 0)
+                    speedStr = speedStr.substr(1); // 0.xxx → .xxx
                 out << seg.time << "," << speedStr << "\r\n";
 
                 // #####Begin#####

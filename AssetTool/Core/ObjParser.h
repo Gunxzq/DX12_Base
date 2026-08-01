@@ -11,10 +11,10 @@ namespace AssetTool {
 
 /// OBJ 文件解析结果，与 XFileMesh 兼容
 struct ObjMesh {
-    std::vector<float> positions;   // float3
-    std::vector<float> normals;     // float3
-    std::vector<float> texcoords;   // float2
-    std::vector<uint32_t> indices;  // triangle list
+    std::vector<float> positions;  // float3
+    std::vector<float> normals;    // float3
+    std::vector<float> texcoords;  // float2
+    std::vector<uint32_t> indices; // triangle list
 
     /// 是否包含法线
     bool HasNormals() const { return !normals.empty(); }

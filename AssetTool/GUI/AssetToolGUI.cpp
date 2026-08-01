@@ -81,7 +81,6 @@ namespace fs = std::filesystem;
 #define IDC_MAIN_BTN_MAP_BUILD 1018
 #define IDC_MAIN_BTN_CONVERT_PNG 1019
 #define IDC_MAIN_BTN_IMPORT_ROBOT 1020
-#define IDC_MAIN_CHK_EXPORT_X 1021
 #define IDC_MAIN_BTN_CONVERT_ANI 1022
 #define IDC_MAIN_BTN_IMPORT_ANI 1023
 
@@ -1479,7 +1478,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (hFont)
             SendMessageW(g_hBtnConvertPNG, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // "导入机体" + "验证导出" + "从 ANI 合并" + "ANI 拆解"（同一行）
+        // "导入机体"（ANI → 引擎资产）+ "ANI → FBX"（唯一 FBX 导出）+ "ANI 拆解"（同一行）
         y += 38;
         g_hBtnImportRobot = CreateWindowExW(0, L"BUTTON", L"🤖 导入机体",
                                             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED, margin, y, 200, 32,
@@ -1487,25 +1486,18 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (hFont)
             SendMessageW(g_hBtnImportRobot, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // 导出格式选项（.x + FBX 合并为一个验证导出开关，与导入机体同行）
-        CreateWindowExW(0, L"BUTTON", L"验证导出（.x+FBX）", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                        margin + 206, y, 160, 32, hWnd, (HMENU)IDC_MAIN_CHK_EXPORT_X, g_hInst, nullptr);
-        HWND hChk = GetDlgItem(hWnd, IDC_MAIN_CHK_EXPORT_X);
-        if (hChk && hFont)
-            SendMessageW(hChk, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-        // "从 ANI 合并" 按钮（跟在 FBX 复选框后面）
+        // "ANI → FBX"：唯一 FBX 导出选项（动画全量 + 材质 + Emissive 归一；x 已废弃不再导出）
         g_hBtnImportANI =
-            CreateWindowExW(0, L"BUTTON", L"从 ANI 合并",
-                            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED, margin + 372, y, 120, 32, hWnd,
+            CreateWindowExW(0, L"BUTTON", L"ANI → FBX",
+                            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED, margin + 206, y, 120, 32, hWnd,
                             (HMENU)IDC_MAIN_BTN_IMPORT_ANI, g_hInst, nullptr);
         if (hFont)
             SendMessageW(g_hBtnImportANI, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        // "ANI 拆解" 按钮（跟在从 ANI 合并后面）
+        // "ANI 拆解" 按钮（跟在 ANI → FBX 后面）
         g_hBtnConvertANI =
             CreateWindowExW(0, L"BUTTON", L"ANI 拆解",
-                            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED, margin + 498, y, 120, 32, hWnd,
+                            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED, margin + 332, y, 120, 32, hWnd,
                             (HMENU)IDC_MAIN_BTN_CONVERT_ANI, g_hInst, nullptr);
         if (hFont)
             SendMessageW(g_hBtnConvertANI, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -1743,9 +1735,9 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
-        // 导入机体（.hod + .x 合并）
+        // 导入机体（ANI 驱动 → 引擎资产：dxmesh/hod.json/scene.json/.bone/.mat，不含 FBX）
         if (id == IDC_MAIN_BTN_IMPORT_ROBOT) {
-            if (g_converting || g_hodFiles.empty())
+            if (g_converting || g_aniFiles.empty())
                 return 0;
             wchar_t outputDir[MAX_PATH] = {};
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_OUTPUT, outputDir, MAX_PATH);
@@ -1769,36 +1761,33 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
             wchar_t inputDir[MAX_PATH] = {};
             GetDlgItemTextW(hWnd, IDC_MAIN_EDIT_INPUT, inputDir, MAX_PATH);
 
-            // 对每个 .hod 文件执行 importrobot 命令
+            // 对每个 .ani 文件执行 MergeFromANI（骨骼信息只从 ANI 首帧提取，不依赖同目录 Robo.hod）
             std::wstring outDir = outputDir;
             std::wstring inDir = inputDir;
-            bool exportVerify = (IsDlgButtonChecked(hWnd, IDC_MAIN_CHK_EXPORT_X) == BST_CHECKED);
-            std::vector<fs::path> hodCopy = g_hodFiles;
-            std::thread t([hodCopy, inDir, outDir, hWnd, exportVerify]() {
+            std::vector<fs::path> aniCopy = g_aniFiles;
+            std::thread t([aniCopy, inDir, outDir, hWnd]() {
                 g_converting = true;
-                g_convertTotal = static_cast<int>(hodCopy.size());
+                g_convertTotal = static_cast<int>(aniCopy.size());
                 g_convertProgress = 0;
                 g_convertSuccess = 0;
                 g_convertErrors = 0;
                 int idx = 0;
-                for (const auto &hodPath : hodCopy) {
+                for (const auto &aniPath : aniCopy) {
                     if (!g_converting)
                         break;
                     idx++;
                     g_convertProgress = idx;
-                    std::string hodA = WideToUTF8(hodPath.wstring());
+                    std::string aniA = WideToUTF8(aniPath.wstring());
                     std::string outA = WideToUTF8(outDir);
                     std::string inA = WideToUTF8(inDir);
-                    fs::path relPath = fs::relative(hodPath, inA);
+                    fs::path relPath = fs::relative(aniPath, inA);
                     std::string robotOutDir = outA + "/" + relPath.parent_path().string();
                     fs::create_directories(robotOutDir);
-                    SetStatusFmt(g_hStatus, L"[%d/%d] 导入: %s", idx, (int)hodCopy.size(), hodPath.filename().c_str());
+                    SetStatusFmt(g_hStatus, L"[%d/%d] 导入: %s", idx, (int)aniCopy.size(), aniPath.filename().c_str());
                     AssetTool::RobotMergeOptions opts;
                     opts.lrSwap = true; // LR 交换固定开启（骨骼树正确性优先，GUI 不再暴露选项）
-                    opts.exportX = exportVerify;   // .x + FBX 合并为一个验证导出开关
-                    opts.exportFBX = exportVerify;
                     try {
-                        auto result = AssetTool::RobotMerger::Merge(hodA, robotOutDir, opts);
+                        auto result = AssetTool::RobotMerger::MergeFromANI(aniA, robotOutDir, opts);
                         if (result.success)
                             g_convertSuccess++;
                         else {
@@ -1813,14 +1802,13 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_converting = false;
                 PostMessageW(hWnd, WM_USER + 3, 0, 0);
                 SetStatusFmt(g_hStatus, L"导入完成: %d 成功, %d 失败 (%d 机体)", (int)g_convertSuccess,
-                             (int)g_convertErrors, (int)hodCopy.size());
-                // (旧内联代码 Loop 2 已移除，改用 RobotMerger::MergeWithCallback)
+                             (int)g_convertErrors, (int)aniCopy.size());
             });
             t.detach();
             return 0;
         }
 
-        // 从 ANI 合并部件（.ani 母版骨架 + 同目录 .x/.hod → x/fbx/bone）
+        // ANI → FBX（唯一 FBX 导出：动画全量 + 材质子网格 + Emissive 归一；不含引擎资产）
         if (id == IDC_MAIN_BTN_IMPORT_ANI) {
             if (g_converting || g_aniFiles.empty())
                 return 0;
@@ -1848,9 +1836,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             std::wstring outDir = outputDir;
             std::wstring inDir = inputDir;
-            bool exportVerify = (IsDlgButtonChecked(hWnd, IDC_MAIN_CHK_EXPORT_X) == BST_CHECKED);
             std::vector<fs::path> aniCopy = g_aniFiles;
-            std::thread t([aniCopy, inDir, outDir, hWnd, exportVerify]() {
+            std::thread t([aniCopy, inDir, outDir, hWnd]() {
                 g_converting = true;
                 g_convertTotal = static_cast<int>(aniCopy.size());
                 g_convertProgress = 0;
@@ -1868,23 +1855,18 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
                     fs::path relPath = fs::relative(aniPath, inA);
                     std::string robotOutDir = outA + "/" + relPath.parent_path().string();
                     fs::create_directories(robotOutDir);
-                    SetStatusFmt(g_hStatus, L"[%d/%d] ANI 合并: %s", idx, (int)aniCopy.size(), aniPath.filename().c_str());
-                    AssetTool::RobotMergeOptions opts;
-                    opts.lrSwap = true;
-                    opts.exportX = exportVerify;
-                    opts.exportFBX = exportVerify;
+                    SetStatusFmt(g_hStatus, L"[%d/%d] ANI → FBX: %s", idx, (int)aniCopy.size(), aniPath.filename().c_str());
+                    // 骨骼信息只从 ANI 首帧提取（不依赖同目录 Robo.hod）；输出 {stem}_anim.fbx
+                    std::string animStem = aniPath.stem().string();
+                    if (animStem.empty())
+                        animStem = "Robo";
                     try {
-                        auto result = AssetTool::RobotMerger::MergeFromANI(aniA, robotOutDir, opts);
-                        if (result.success) {
+                        auto animResult = AssetTool::RobotMerger::ExportAnimationsFBX(aniA, robotOutDir, animStem);
+                        if (animResult.success)
                             g_convertSuccess++;
-                            // 联动导出动画 FBX（B2.5）：每组（Tail 标记划分）→ aiAnimation
-                            std::string animStem = result.stem.empty() ? "Robo" : result.stem;
-                            auto animResult = AssetTool::RobotMerger::ExportAnimationsFBX(aniA, robotOutDir, animStem);
-                            if (!animResult.success)
-                                SetStatusFmt(g_hStatus, L"⚠ 动画导出失败: %s", UTF8ToWide(animResult.error).c_str());
-                        } else {
+                        else {
                             g_convertErrors++;
-                            SetStatusFmt(g_hStatus, L"❌ 失败: %s", UTF8ToWide(result.error).c_str());
+                            SetStatusFmt(g_hStatus, L"❌ FBX 导出失败: %s", UTF8ToWide(animResult.error).c_str());
                         }
                     } catch (const std::exception &e) {
                         g_convertErrors++;
@@ -1893,7 +1875,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
                 }
                 g_converting = false;
                 PostMessageW(hWnd, WM_USER + 3, 0, 0);
-                SetStatusFmt(g_hStatus, L"ANI 合并完成: %d 成功, %d 失败 (%d 机体)", (int)g_convertSuccess,
+                SetStatusFmt(g_hStatus, L"ANI → FBX 完成: %d 成功, %d 失败 (%d 动画)", (int)g_convertSuccess,
                              (int)g_convertErrors, (int)aniCopy.size());
             });
             t.detach();
@@ -1976,7 +1958,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         EnableWindow(g_hBtnConvertHOD, hodCount > 0 ? TRUE : FALSE);
         EnableWindow(g_hBtnMapBuild, sptCount > 0 && mpdCount > 0 ? TRUE : FALSE);
         EnableWindow(g_hBtnConvertPNG, pngCount > 0 ? TRUE : FALSE);
-        EnableWindow(g_hBtnImportRobot, hodCount > 0 ? TRUE : FALSE);
+        EnableWindow(g_hBtnImportRobot, aniCount > 0 ? TRUE : FALSE);
         EnableWindow(g_hBtnConvertANI, aniCount > 0 ? TRUE : FALSE);
         EnableWindow(g_hBtnImportANI, aniCount > 0 ? TRUE : FALSE);
         break;
@@ -1989,7 +1971,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         EnableWindow(g_hBtnConvertHOD, !g_hodFiles.empty());
         EnableWindow(g_hBtnMapBuild, !g_sptFiles.empty());
         EnableWindow(g_hBtnConvertPNG, !g_pngFiles.empty());
-        EnableWindow(g_hBtnImportRobot, !g_hodFiles.empty());
+        EnableWindow(g_hBtnImportRobot, !g_aniFiles.empty());
         EnableWindow(g_hBtnConvertANI, !g_aniFiles.empty());
         EnableWindow(g_hBtnImportANI, !g_aniFiles.empty());
         break;

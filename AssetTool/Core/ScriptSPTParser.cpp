@@ -11,8 +11,8 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
-#include <sstream>
 #include <iomanip>
+#include <sstream>
 #include <vector>
 
 #define NOMINMAX
@@ -24,13 +24,16 @@ namespace AssetTool {
 // Shift-JIS (CP932) → UTF-8
 // ==========================================================================
 static std::string SJISToUTF8(const std::string &sjis) {
-    if (sjis.empty()) return sjis;
+    if (sjis.empty())
+        return sjis;
     int wideLen = MultiByteToWideChar(932, 0, sjis.c_str(), (int)sjis.size(), nullptr, 0);
-    if (wideLen <= 0) return sjis;
+    if (wideLen <= 0)
+        return sjis;
     std::wstring wide(wideLen, L'\0');
     MultiByteToWideChar(932, 0, sjis.c_str(), (int)sjis.size(), &wide[0], wideLen);
     int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), wideLen, nullptr, 0, nullptr, nullptr);
-    if (utf8Len <= 0) return sjis;
+    if (utf8Len <= 0)
+        return sjis;
     std::string utf8(utf8Len, '\0');
     WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), wideLen, &utf8[0], utf8Len, nullptr, nullptr);
     return utf8;
@@ -41,9 +44,11 @@ static std::string SJISToUTF8(const std::string &sjis) {
 // ==========================================================================
 static std::string Trim(const std::string &s) {
     size_t start = 0;
-    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r')) start++;
+    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r'))
+        start++;
     size_t end = s.size();
-    while (end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\r')) end--;
+    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\r'))
+        end--;
     return s.substr(start, end - start);
 }
 
@@ -64,7 +69,11 @@ static std::vector<std::string> SplitArgs(const std::string &line) {
     std::string cur;
     bool inQuote = false;
     for (char c : line) {
-        if (c == '"') { inQuote = !inQuote; cur += c; continue; }
+        if (c == '"') {
+            inQuote = !inQuote;
+            cur += c;
+            continue;
+        }
         if (c == ',' && !inQuote) {
             args.push_back(Unquote(Trim(cur)));
             cur.clear();
@@ -72,7 +81,8 @@ static std::vector<std::string> SplitArgs(const std::string &line) {
             cur += c;
         }
     }
-    if (!cur.empty()) args.push_back(Unquote(Trim(cur)));
+    if (!cur.empty())
+        args.push_back(Unquote(Trim(cur)));
     return args;
 }
 
@@ -80,14 +90,22 @@ static std::vector<std::string> SplitArgs(const std::string &line) {
 // 解析一个 float 参数
 // ==========================================================================
 static float ParseFloat(const std::string &s) {
-    try { return std::stof(s); } catch (...) { return 0.0f; }
+    try {
+        return std::stof(s);
+    } catch (...) {
+        return 0.0f;
+    }
 }
 
 // ==========================================================================
 // 解析一个 int 参数
 // ==========================================================================
 static int ParseInt(const std::string &s) {
-    try { return std::stoi(s); } catch (...) { return 0; }
+    try {
+        return std::stoi(s);
+    } catch (...) {
+        return 0;
+    }
 }
 
 // ==========================================================================
@@ -95,12 +113,14 @@ static int ParseInt(const std::string &s) {
 // ==========================================================================
 void ScriptSPTParser::ParseLine(const std::string &line) {
     std::string trimmed = Trim(line);
-    if (trimmed.empty() || trimmed[0] == '\'') return; // 注释
+    if (trimmed.empty() || trimmed[0] == '\'')
+        return; // 注释
 
     // 提取函数名和参数
     auto parenOpen = trimmed.find('(');
     auto parenClose = trimmed.rfind(')');
-    if (parenOpen == std::string::npos || parenClose == std::string::npos) return;
+    if (parenOpen == std::string::npos || parenClose == std::string::npos)
+        return;
 
     std::string funcName = Trim(trimmed.substr(0, parenOpen));
     std::string argsStr = trimmed.substr(parenOpen + 1, parenClose - parenOpen - 1);
@@ -111,42 +131,33 @@ void ScriptSPTParser::ParseLine(const std::string &line) {
         m_result.fogR = ParseInt(args[1]);
         m_result.fogG = ParseInt(args[2]);
         m_result.fogB = ParseInt(args[3]);
-    }
-    else if (funcName == "SetLightColor" && args.size() >= 3) {
+    } else if (funcName == "SetLightColor" && args.size() >= 3) {
         m_result.lightR = ParseInt(args[0]);
         m_result.lightG = ParseInt(args[1]);
         m_result.lightB = ParseInt(args[2]);
-    }
-    else if (funcName == "LoadWaterXFile" && args.size() >= 1) {
+    } else if (funcName == "LoadWaterXFile" && args.size() >= 1) {
         m_result.waterModel = args[0];
-    }
-    else if (funcName == "LoadHitXFile" && args.size() >= 1) {
+    } else if (funcName == "LoadHitXFile" && args.size() >= 1) {
         m_result.hitModel = args[0];
-    }
-    else if (funcName == "LoadMaterialXFile" && args.size() >= 1) {
+    } else if (funcName == "LoadMaterialXFile" && args.size() >= 1) {
         m_result.materialFile = args[0];
-    }
-    else if (funcName == "BgmFileName" && args.size() >= 2) {
+    } else if (funcName == "BgmFileName" && args.size() >= 2) {
         m_result.bgmFile = args[1];
-    }
-    else if (funcName == "LoadBuildingXFile" && args.size() >= 2) {
+    } else if (funcName == "LoadBuildingXFile" && args.size() >= 2) {
         m_result.buildingFiles.push_back(args[1]);
-    }
-    else if (funcName == "LoadMapXFile" && args.size() >= 3) {
+    } else if (funcName == "LoadMapXFile" && args.size() >= 3) {
         MapTileEntry entry;
         entry.index = ParseInt(args[0]);
         entry.modelFile = args[1];
         entry.hitFile = args[2];
         m_result.mapTiles.push_back(entry);
-    }
-    else if (funcName == "MapSetting" && args.size() >= 3) {
+    } else if (funcName == "MapSetting" && args.size() >= 3) {
         MapSettingEntry entry;
         entry.index = ParseInt(args[0]);
         entry.xfileNo = ParseInt(args[1]);
         entry.waterHeight = ParseFloat(args[2]);
         m_result.mapSettings.push_back(entry);
-    }
-    else if (funcName == "MapSettingEx" && args.size() >= 11) {
+    } else if (funcName == "MapSettingEx" && args.size() >= 11) {
         MapSettingEntry entry;
         entry.index = ParseInt(args[0]);
         entry.xfileNo = ParseInt(args[1]);
@@ -155,8 +166,7 @@ void ScriptSPTParser::ParseLine(const std::string &line) {
             entry.params[i] = ParseInt(args[i + 2]);
         entry.waterHeight = ParseFloat(args[10]);
         m_result.mapSettings.push_back(entry);
-    }
-    else if (funcName == "SetBuilding" && args.size() >= 6) {
+    } else if (funcName == "SetBuilding" && args.size() >= 6) {
         BuildingInstance bld;
         bld.mapNo = ParseInt(args[0]);
         bld.index = ParseInt(args[1]);
@@ -207,7 +217,8 @@ bool ScriptSPTParser::ParseFile(const std::string &filepath) {
             };
             bool decrypted = false;
             for (uint32_t altKey : altKeys) {
-                if (altKey == 0x0B7E7759) continue;
+                if (altKey == 0x0B7E7759)
+                    continue;
                 std::vector<uint8_t> altBuf(buffer);
                 XORCipher altCipher(altKey);
                 altCipher.DecryptBuffer(altBuf.data(), altBuf.size());
@@ -269,10 +280,10 @@ std::string SceneData::ToJSON() const {
         oss << "  \"mapTiles\": [\n";
         for (size_t i = 0; i < mapTiles.size(); ++i) {
             const auto &t = mapTiles[i];
-            oss << "    {\"index\":" << t.index
-                << ",\"model\":\"" << t.modelFile
-                << "\",\"hit\":\"" << t.hitFile << "\"}";
-            if (i + 1 < mapTiles.size()) oss << ",";
+            oss << "    {\"index\":" << t.index << ",\"model\":\"" << t.modelFile << "\",\"hit\":\"" << t.hitFile
+                << "\"}";
+            if (i + 1 < mapTiles.size())
+                oss << ",";
             oss << "\n";
         }
         oss << "  ],\n";
@@ -283,12 +294,10 @@ std::string SceneData::ToJSON() const {
         oss << "  \"buildings\": [\n";
         for (size_t i = 0; i < buildings.size(); ++i) {
             const auto &b = buildings[i];
-            oss << "    {\"map\":" << b.mapNo
-                << ",\"index\":" << b.index
-                << ",\"buildNo\":" << b.buildNo
-                << ",\"hp\":" << b.hp
-                << ",\"pos\":[" << b.posX << "," << b.posY << "," << b.posZ << "]}";
-            if (i + 1 < buildings.size()) oss << ",";
+            oss << "    {\"map\":" << b.mapNo << ",\"index\":" << b.index << ",\"buildNo\":" << b.buildNo
+                << ",\"hp\":" << b.hp << ",\"pos\":[" << b.posX << "," << b.posY << "," << b.posZ << "]}";
+            if (i + 1 < buildings.size())
+                oss << ",";
             oss << "\n";
         }
         oss << "  ]\n";
@@ -342,7 +351,8 @@ std::string SceneData::ToText() const {
 // ==========================================================================
 bool SceneData::WriteJSON(const std::string &outputPath) const {
     std::ofstream ofs(outputPath);
-    if (!ofs) return false;
+    if (!ofs)
+        return false;
     ofs << ToJSON();
     return true;
 }

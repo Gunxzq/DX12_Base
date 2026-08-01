@@ -1306,31 +1306,6 @@ static int CommandANI2Anim(const std::vector<std::string> &args) {
 }
 
 // ==========================================================================
-// 命令：ani2frames — 每帧导出嵌套 x（调试/观察：从 x 逐个看 ANI 动作姿势）
-// ==========================================================================
-
-static int CommandANI2Frames(const std::vector<std::string> &args) {
-    if (args.size() < 2) {
-        std::cerr << "Usage: AssetTool ani2frames <Script.ani> <output_dir> [stem]\n";
-        return 1;
-    }
-
-    std::string aniPath = args[0];
-    std::string outDir = args[1];
-    std::string stem = (args.size() >= 3) ? args[2] : "Robo";
-
-    std::cout << "[ani2frames] " << aniPath << " → " << outDir << " (stem=" << stem << ")\n";
-
-    auto result = AssetTool::RobotMerger::ExportAnimationFramesX(aniPath, outDir, stem);
-    if (!result.success) {
-        std::cerr << "[ani2frames] FAILED: " << result.error << "\n";
-        return 1;
-    }
-    std::cout << "[ani2frames] OK — " << result.partCount << " 帧 → " << outDir << "\n";
-    return 0;
-}
-
-// ==========================================================================
 // CommandANI2IK — B 方案：FABRIK 离线验证（脚贴地 / 手瞄准）
 // 从 ANI 首帧 HOD（= 母版骨架，含部件名/A/B/矩阵）识别 arm/leg 链，
 // 用母版驱动链定义（兼容 KD-06 大写 Arm1/Arm2/Arm3 变体），对每条链
@@ -1456,22 +1431,16 @@ static int CommandImportRobot(const std::vector<std::string> &args) {
     std::string hodPath = args[0];
     std::string outDir = args[1];
     bool lrSwap = true;
-    bool exportX = false;
-    bool exportFBX = false;
 
     // 解析可选参数
     for (size_t i = 2; i < args.size(); ++i) {
         if (args[i] == "--no-lrswap") lrSwap = false;
-        if (args[i] == "--export-x") exportX = true;
-        if (args[i] == "--export-fbx") exportFBX = true;
     }
 
     std::cout << "[importrobot] " << hodPath << " → " << outDir << "\n";
 
     AssetTool::RobotMergeOptions opts;
     opts.lrSwap = lrSwap;
-    opts.exportX = exportX;
-    opts.exportFBX = exportFBX;
 
     auto result = AssetTool::RobotMerger::Merge(hodPath, outDir, opts);
     if (!result.success) {
@@ -1569,17 +1538,13 @@ static void PrintUsage(const char *progName) {
     std::cout << "      XOR decrypt DDS texture (default key: 0x0B7E7759)\n\n";
     std::cout << "  " << progName << " batch <input_dir> <output_dir>\n";
     std::cout << "      Batch convert all assets in a directory\n\n";
-    std::cout << "  " << progName << " importrobot <Robo.hod> <output_dir> [--no-lrswap] [--export-x] [--export-fbx]\n";
+    std::cout << "  " << progName << " importrobot <Robo.hod> <output_dir> [--no-lrswap]\n";
     std::cout << "      Import robot: merge .x parts + skeleton → .dxmesh + .bone + hod.json + scene.json\n";
-    std::cout << "        --no-lrswap  disable LR bone swap\n";
-    std::cout << "        --export-x   export .x with bone hierarchy (DE verification)\n";
-    std::cout << "        --export-fbx export FBX with skeleton + skinning\n\n";
+    std::cout << "        --no-lrswap  disable LR bone swap\n\n";
     std::cout << "  " << progName << " ani2output <Script.ani> <output_dir>\n";
     std::cout << "      Parse animation source: split by Tail marker into groups, each with HOD frames + Tail\n";
     std::cout << "  " << progName << " ani2anim <Script.ani> <output_dir> [stem]\n";
     std::cout << "      Export animation FBX: each group (Tail-marked) → aiAnimation with bone channels\n";
-    std::cout << "  " << progName << " ani2frames <Script.ani> <output_dir> [stem]\n";
-    std::cout << "      Export each frame as nested .x (debug): observe ANI poses per frame\n";
     std::cout << "  " << progName << " ani2ik <Script.ani> <output_dir> [stem]\n";
     std::cout << "      FABRIK offline validation (B plan): identify arm/leg chains from master skeleton,\n";
     std::cout << "      solve foot-ground / hand-aim demo targets, write {stem}_ik_report.txt\n\n";
@@ -1632,8 +1597,6 @@ int main(int argc, char *argv[]) {
         return CommandANI2Output(args);
     } else if (command == "ani2anim") {
         return CommandANI2Anim(args);
-    } else if (command == "ani2frames") {
-        return CommandANI2Frames(args);
     } else if (command == "ani2ik") {
         return CommandANI2IK(args);
     } else if (command == "map") {

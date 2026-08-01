@@ -236,14 +236,14 @@ WEAPONPOINT(编号, 作为发射口的零件名称, 发射口性质);
 
 **Tail 段完全同构**：PUK 版 Tail 与 1.008 一致（16B 头 + 明文 SPT，`IF(@`/`ENDIF;`），193 个明文 Tail 全部位于 HD2 块间，Tail 解析逻辑直接复用。
 
-**25 机体全量解析结果（2026-07-31 AssetTool 实测）**：成功 25 / 失败 0；组数随机体 2~82 组不等（KD-03=66、KD-04_4=74、KD-05=76、KD-08_7_2=54...）。
+**25 机体全量解析结果（2026-07-31 AssetTool 实测）**：`ani2output` 全量拆解成功 25 / 失败 0；组数随机体 2~82 组不等（KD-03=66、KD-04_4=74、KD-05=76、KD-08_7_2=54...）。**FBX 导出例外（2026-08-01 确认）**：8 个机体 `ani2anim` 失败——其中 7 个（KD-04_4/KD-05_4/KD-05_5/KD-08_5~08_7_2）为 **PUK 2.008 专属机体**（头部 `AN2a/AN2robo/AN2hangar`，仅 HD2 魔术，无 1.008 原版 ani，属正常缺失，舍弃处理）；KD-08 为 **1.008 原版 `ANIa.hod` 变体**，修复 ANIParser 母版名列表补 `"ANIa"` 后可正常导出。
 
 **ANI 母版管线与步骤划分（2026-07-31 定案）**：
 - **目标**：导入机体的合并部件功能改为 ANI 母版驱动——解析母版拿骨骼 → 合并部件 → 输出母版对应 x/fbx/bone → 全部动画数据 + Tail 按组分隔输出到单一 TXT（不分文件夹）→ 最终得到**含动画信息的 FBX + 状态机 Tail 文本**
 - **已实现**：
   - `ANIParser::GetMaster()`：解析母版块（HD2 类型=0 / HOD 首块）→ `ANIMaster`（部件名 + A/B 层级，root 在 index 0）
-  - `RobotMerger::MergeFromANI(aniPath, outputDir)`：母版驱动合并入口——解析 ANI 母版 → 定位同目录 `Robo.hod`（绑定矩阵）→ 校验母版/HOD 部件数 → 复用 HOD 合并管线输出 x/fbx/bone（bone 同样输出）
-- **绑定矩阵来源（决策）**：PUK 母版数据区（135B/部件）经实测为 **TRS 编码而非 4×4 矩阵**（Body_d 数据区 pos=(0.15,0.41,0.07) vs HOD 绑定矩阵平移 (0,1.3624,0) 完全不同），故矩阵**暂用同目录 Robo.hod**（HODParser 已验证）；母版数据区 TRS 格式待逆向后可彻底脱离 HOD
+  - `RobotMerger::MergeFromANI(aniPath, outputDir)`：母版驱动合并入口——解析 ANI 母版 → **HOD 骨骼来源：仅 ANI 首帧提取**（`WriteFirstFrameHOD`，第 1 组第 1 帧标准 HOD 9847B；2026-08-01 定案：**不依赖同目录 Robo.hod**）→ 校验母版/HOD 部件数 → 复用 HOD 合并管线输出引擎资产（dxmesh/hod.json/scene.json/.bone）
+- **绑定矩阵来源（2026-08-01 定案）**：PUK 母版数据区（135B/部件）经实测为 **TRS 编码而非 4×4 矩阵**（Body_d 数据区 pos=(0.15,0.41,0.07) vs HOD 绑定矩阵平移 (0,1.3624,0) 完全不同），故矩阵**只取 ANI 首帧 HOD**（帧数据即标准 HOD 9847B，连续可靠，HODParser 直解）；`MergeFromANI`/`ExportAnimationsFBX` 均已移除同目录 Robo.hod 回退，提取失败直接报错
 - **下一任务（B2.5）**：动画帧矩阵 + Tail 状态机按动画组分隔输出到同一 TXT（不分文件夹）
 
 ### 2.5 动画帧 → FBX 转换链路（B2.5，2026-07-31 设计）
@@ -388,9 +388,11 @@ HOD 绑定姿势与 ANI 动画关键帧共用同一套骨骼变换公式：
 
 > 骨骼蒙皮的细节见 `Basic.txt` 着色器中的 `vs_2_0 SkinVS` — 使用 `D3DCOLORtoUBYTE4` 解码 `BLENDINDICES`，支持最多 4 个骨骼权重，最多 26 个骨骼矩阵。
 
-### 6.3 .x 嵌套层级导出（2026-07-31 更新）
+### 6.3 .x 嵌套层级导出（2026-07-31 设计，2026-08-01 已废弃删除）
 
-导出包含完整骨骼树和正确局部矩阵的 `.x` 文件，采用两阶段处理：
+> **废弃说明（2026-08-01 用户定案）**：x 已用不上不再导出，`exportX` 分支（nested.x）与 `RobotMergerX.cpp` 已删除，本节仅保留局部矩阵推导公式（nested.x 与 .bone/FBX 共用同一套 boneWorld 推导，公式仍然有效）。
+
+导出包含完整骨骼树和正确局部矩阵的 `.x` 文件，采用两阶段处理（历史实现，公式现用于 .bone/FBX）：
 
 **第一阶段：世界矩阵计算**（`boneWorld`）
 
@@ -414,9 +416,6 @@ swapLR("arm2", "arm2_r"); swapLR("leg2", "leg2_r");
 swapLR("Hand", "Hand_r"); swapLR("leg3", "leg3_r");
 ```
 
-**输出文件**：
-- `Robo_nested.x`：29 骨骼嵌套层级，局部矩阵，正确网格
-
 ### 6.4 顶点格式：DxMeshSkinnedVertex 刚性绑定
 
 合并网格时，顶点**不解烘焙到世界空间**，保持局部坐标，改为 `DxMeshSkinnedVertex` 格式：
@@ -434,6 +433,70 @@ swapLR("Hand", "Hand_r"); swapLR("leg3", "leg3_r");
 - 每个部件的所有顶点属于同一骨骼（刚性绑定），`boneWeights[0]=1.0`
 - 运行时由 `boneWorld[boneIndex]` 驱动顶点变换
 - SubMesh 与骨骼解耦：SubMesh 服务于材质槽，不隐含骨骼映射
+
+### 6.5 FBX 材质导出（2026-08-01）
+
+**背景**：此前 FBX 导出材质仅写 diffuse 颜色 + shininess（注释"仅颜色，无纹理"），虽不影响骨骼/动画验证，但 Blender 中无贴图。`XFileParser` 解析 `.x` 时已拿到完整材质（`XFileMaterial`），纹理引用为**纯文件名**（如 `IMG0082.png`，源 PNG 与 `.x` 部件同目录）。
+
+**实现**（`RobotMerger.cpp`，Merge 6b 与 ExportAnimationsFBX §6 共用）：
+- `CreatePartMaterial()`：补全材质属性：
+  - Diffuse ← `faceColor`
+  - Specular ← `specularColor`
+  - Emissive ← `emissiveColor`
+  - Shininess ← `power`
+
+**纹理导出暂缓（用户定案，2026-08-01）**：
+- **assimp 6.0.4 bug**：FBX 导出器 `FBXExporter.cpp:1769` 对外部引用纹理在空 `tpath_by_image` 上解引用 `end()` 迭代器 → Debug 断言崩溃（`cannot dereference end map/set iterator`）。社区 PR #6405 已确认并提供修复（`tp_elem->second` → 已检查的 `tfile_path`），但未合入当前版本
+- 曾尝试设纹理属性（`AI_MATKEY_TEXTURE_DIFFUSE(0)`），修复了 aiString 专用重载问题后仍被上述 assimp bug 阻塞
+- **决策**：UKW 贴图本身很少（DX9 时代），**导出不带纹理**，后续可在 Blender 内补充；待 assimp 修复（PR #6405 合入）后再启用纹理导出
+- 附：`XFileMaterial::textureFilename` 保留在解析端，将来启用时直接可用
+
+**材质显示限制（2026-08-01 实测确认，用户定案）**：
+- **现象**：导出的帧 .x 与 FBX 在 Blender 中材质显示为统一灰 `#4C4C4EFF`（0.072157 线性值经 sRGB 显示 ≈ 0.298）；帧 .x 模型解析异常
+- **根因（工具链限制，非导出代码 bug）**：
+  - `xof 0302txt` 手写文本格式 **assimp 无法解析**（`Cannot parse string ... as a real number`）——连社区基准（GUI nested.x）同样解析失败，即 Blender/assimp 本就不支持该格式；`x2mesh` 的 assimp 导入仅对源 `.x`（xof 0303bin 二进制）有效
+  - 源 `.x` 导入 Blender 后**材质同样丢失**（Blender 对 DirectX .x 材质支持有限）——与导出侧无关
+  - 帧 .x 的 faceColor 数据实际正确（源 Body/Head 各部件可解析出多组 baseColor，如 Body 8 组、Head 5 组），但显示端不认
+
+**Emissive 属性名归一（方案 A，2026-08-01 追加）⚠️→✅**：
+- **问题**：动画 FBX 中带自发光的子网格（`KD-03_Body_003` / `KD-03_Head_001`，Emissive 黄绿 `0.949,1,0.451`，Diffuse=0）在 Blender 视觉全黑——DE 里能看到发光（全靠 Emissive），Blender 中 Diffuse=0 + Emissive 读不到 = 全黑
+- **根因**：assimp FBX 导出器写 `P: "Emissive", "Vector3D"`，而 Blender 导入器（`elem_props_get_color_rgb`）只认 `EmissiveColor`（`Color` 类型）——属性名与类型均不匹配
+- **修复**（`RobotMergerFBX.cpp` §8a）：导出写盘后对 ASCII FBX 文本做替换 `"Emissive", "Vector3D", "Vector"` → `"EmissiveColor", "Color", "A"`，命中数打印日志；Diffuse/Specular 本就正常（`DiffuseColor`/`SpecularColor` + `Color` 类型），仅 Emissive 需要归一
+- **必须 ASCII（`"fbxa"`）**：二进制 FBX 无纯文本属性，文本归一对二进制无效——动画导出用 `"fbxa"`（ASCII）保证归一生效
+- **验证（2026-08-01 Blender 无异常 ✅）**：`Emissive 属性名归一: 38 处`、EmissiveColor 39 处、0.949/1/0.451 2 处、残留旧格式 0 处；动画 FBX 65 clips/15 bones/38 meshes；Blender 骨骼/材质/发光/动画验证无异常 ✅
+
+**x 整体废弃 + FBX 为主载体（2026-08-01 用户定案）**：
+- x 已用不上不再导出（`ExportAnimationFramesX`/`ani2frames`/nested.x 材质块均移除）；GUI 复选框 `IDC_MAIN_CHK_EXPORT_X` 删除
+- **FBX 为主载体，必须完整**：65 clips 全量动画 + 材质子网格 + Emissive 归一 + 骨骼树 + 蒙皮（GUI "ANI → FBX" 按钮，唯一 FBX 导出）
+
+**最终方案（2026-08-01 用户定案；静态导出拆分 2026-08-01 追加）**：
+- **导出端拆子网格（本轮更新，覆盖此前"不拆"结论）**：早期尝试证明"子网格拆分 + .x 材质块"会破坏 Frame 层级（骨骼绑定错乱），故当时回退为单骨骼单 Mesh；**本轮（2026-08-01 追加）在保留 Frame 层级的前提下实现子网格拆分**——动画 FBX（`RobotMergerFBX.cpp`）按材质拆子网格 + 00x 命名 + 材质保留 + LR 成对交换
+- **FBX 骨骼命名统一 `_bone` 后缀（2026-08-01）**：`fbxBoneName` lambda 生成 `{stem}_bone`（如 `Body_d.x` → `Body_d_bone`），骨骼节点/蒙皮绑定/动画通道三处同源；Blender FBX 导入器对骨骼名与网格对象名共享唯一化命名空间，**同名会合并节点并丢失骨骼树**，故骨骼名必须与网格名（`Body_d`）区分
+- **引擎 .mat 承载材质**：子网格材质信息（faceColor / specular / emissive / power / textureFilename）完整导出到 `scene.json` materials 段（各子网格独立 matKey），供引擎生成 `.mat` 材质（Body 5 材质含绿色 Diffuse R:0 G:140 B:3 均在）
+- **纹理来源**：UKW 源纹理为**现成 PNG**（如 `KD-03/IMG0082.png` 512×512），DX9 时代一机体 1~2 张贴图，**无需重新制作**，只需关联；UKW 纹理为**复合材质**（faceColor × 贴图），非纯漫反射
+- **Blender 二次修正**：
+  - 子网格拆分：Blender `Edit Mode → Mesh → Separate → By Material`，按材质槽拆分 **不触碰 Armature（骨骼）**，拆出的 mesh 仍经 Armature Modifier 绑定原骨骼
+  - 材质/贴图：Blender 内配 Principled BSDF（Base Color = 贴图 × 颜色）→ **Bake Diffuse** 将复合材质固化为一 张 PBR Base Color 贴图，导出供引擎使用
+  - 简化：机器人材质差异主要在漫反射颜色，主贴图共用（全部部件挂 IMG0082.png），个别彩色部件用 faceColor 纯色覆盖
+- **结论**：资产 FBX 导出已支持**子网格拆分 + 材质保留**，配合 Blender 二次处理（Principled BSDF + Bake）完成材质落地
+
+**faceColor ARGB 错位修复（2026-08-01，"全蓝"根因）**：
+- 根因：`XFileMaterial::faceColor` 按 **RGBA** 存储（`AiColorToFloat4` 写入 r,g,b,a），但 `CreatePartMaterial`/`ToMaterialDesc`/scene.json 三处均按 **ARGB 错位**映射 `(faceColor[1],[2],[3],[0])`，把 alpha=1 塞进 B 通道 → 导出全蓝
+- 修复：三处同步改为 `faceColor[0..3]` 直读（RGBA）
+
+**RobotMerger.cpp 适度拆分（2026-08-01，缓解 C1060 编译堆不足）**：
+- 1917 行 → 921 行；`Mat4x4`→`RobotMergerMath.cpp`、共享辅助（IsRenderBone/CreatePartMaterial/ParseFrameToLocalMatrices/WriteFirstFrameHOD）→`RobotMergerUtil.h/.cpp`、动画 FBX→`RobotMergerFBX.cpp`；API 不变
+- `RobotMergerX.cpp`（每帧 .x 导出）已废弃删除；CMake 源文件为显式列表，新文件需手动登记
+
+**核心清理（2026-08-01 用户定案）**：
+- **x 导出全删**：`exportX` 分支（nested.x）、`RobotMergerX.cpp`、`CopyTextureRelative`/`WriteXMaterialBlock` 全部移除；CLI `--export-x`、GUI 复选框 `IDC_MAIN_CHK_EXPORT_X` 同步删除
+- **静态 FBX 冗余删除**：`exportFBX` 分支（Merge 6c）移除，只保留 `ExportAnimationsFBX` 动画全量 FBX
+- **GUI 三按钮分工**：`导入机体`（ANI→引擎资产 dxmesh/hod.json/scene.json/.bone）、`ANI → FBX`（唯一 FBX 导出）、`ANI 拆解`（帧 HOD + Tail 状态机，tail 暂无引擎资产）
+
+**FBX 蒙皮结构（纯蒙皮方案，2026-08-01 定案）**：
+- **网格挂场景根 + 顶点烘焙到绑定世界坐标**：`bindWorld`（Body_d 修正 + 层级累乘 + Ry180°）对部件局部坐标做 `TransformPoint`（法线 `TransformDirection`），`offsetMatrix = inverse(bindWorld)`——绑定姿势下顶点即世界位置，Pose 旋转时"骨骼矩阵 × offsetMatrix × 烘焙顶点 = 骨骼旋转增量 × 绑定世界位置"（DE 变换子网格语义）
+- **层级只属于骨骼树**：15 根 `LimbNode` 骨骼链（Body_d→Body→Head/arm/leg），38 个 mesh 平铺挂根，通过 aiBone 蒙皮绑定——与 DE 时代"层级 = HOD 骨骼树、网格 = 平铺部件"同构
+- **验证（Blender Pose 模式 ✅）**：Pose 模式下选择骨骼可驱动对应子网格局部变形——"动骨骼整体动"是**未进 Pose 模式**（Object 模式拖动整个 Armature）所致，非数据问题；纯蒙皮 + 烘焙方案生效
 
 ---
 
@@ -526,7 +589,7 @@ if (eDesc.skinned) {
 |:-----|:------|:------|
 | HOD → hod.json | ✅ HODParser 完整 | 已有 TRS 分解 + JSON 输出（转置 bug 已修复，position 恢复非零） |
 | hod.json → SkeletonHandle | ✅ 已实现 | `SkeletonManager::LoadFromJSON` + `SkeletonLoader::ParseBoneFile`（2026-07-31） |
-| .bone 资产导出 | ✅ 已验证 | RobotMerger 输出 Y-up 局部矩阵，与 nested.x 逐位一致（见快照） |
+| .bone 资产导出 | ✅ 已验证 | RobotMerger 输出 Y-up 局部矩阵，与 nested.x 逐位一致（快照已并入本文档） |
 | SkinnedComponent 创建 | ⚠️ 框架已有 | `SceneConstructor` 中需要补充 skinned 分支 |
 | 网格合并 + SubMesh | ✅ `DxMeshSkinnedVertex` 刚性绑定 | AssetTool 输出 skinned 格式，不解烘焙 |
 | **ANI 动画解析** | 🔜 **下一会话第一任务** | 先实现解析器（HOD 块序列 → 每帧部件局部矩阵）；`.anim` 现代化资产化为下一步 |
@@ -559,7 +622,7 @@ Body.x
 ├── leg1_r.x → leg2_r.x → leg3_r.x    ← 右腿 3 节链
 ```
 
-- 局部矩阵公式（§6.2）：`boneWorld[bi] = local × boneWorld[parent]`（Body_d -1.30 修正 + 层级累乘 + Ry180°），已在 nested.x / .bone / ani2frames 三处验证一致
+- 局部矩阵公式（§6.2）：`boneWorld[bi] = local × boneWorld[parent]`（Body_d -1.30 修正 + 层级累乘 + Ry180°），已在 nested.x / .bone 两处验证一致（每帧 .x 导出 `ani2frames` 已于 2026-08-01 废弃）
 - **骨骼 = 可见部件**：UKW 极老，无独立骨架资产，HOD 拼接部件（实体 `.x` 模型）本身就是骨骼；排除武装（gun/sword/Shield/Weapon_point 等）后，剩余部件即全部可见骨骼 → **IK 修改骨骼矩阵 = 直接驱动可见部件，天然直观**
 
 ### 8.2 关节自由度观察：必然多轴，不能锁轴
@@ -591,12 +654,13 @@ KD-06:     Arm1/Arm2/Arm3（大写！）+ Wing1~3/W_Tail/BackW/LegG（43 骨骼�
 - KD-06 用**大写命名**且多 Arm3（前臂分段）、Wing/Tail 结构
 - **IK 链定义不能硬编码骨骼名**：引擎侧必须以**母版骨架**（`ANIParser::GetMaster()` 的部件名 + A/B 层级）动态识别 `arm1→arm2→Hand` / `Arm1→Arm2→Arm3→Hand` 这类链，而非写死字符串
 
-### 8.4 Blender 骨骼视觉不连续（已确认不改数据）
+### 8.4 Blender 骨骼显示不连续（数据正确，DCC 重建 rig 已立项 2026-08-01）
 
-- **现象**：FBX 导入 Blender 后骨骼显示为互不连接的短棒，层级树与动画均正确
+- **现象**：FBX 导入 Blender 后骨骼显示为互不连接的短棒，**Pose 模式下只能动其中一个端点**（骨骼链无连接视觉，调整受限）；层级树与动画均正确。**关键观察（2026-08-01）**：骨骼**端点位置正确**（head = 部件平移点，与机体部件对齐），只是**骨骼之间没有连接**（tail 未延伸到子骨骼端点）——问题纯粹在"连接视觉"，不在端点位置
 - **根因**：HOD 矩阵描述的是**部件变换**（位置/朝向），非**关节链几何**（head/tail）；FBX 骨骼节点只有矩阵，Blender 全靠矩阵推导 head（=平移）与 tail（=沿局部轴固定长度），部件间有物理间隙 → 视觉断开。**与数据正确性无关**
-- **已实测**：改动骨骼（head/tail）会导致动画效果异常——head/tail 与骨骼矩阵耦合，改了就破坏蒙皮与动画。**结论：不动骨骼数据**
-- **处理**：Blender 侧纯显示调整（Display As: Stick/Wire + 调大 Display Size + In Front）过渡；重建 rig（新骨架 + 权重迁移）为一次性工程，仅在确认需要长期 DCC 动画工作时立项
+- **蒙皮本身正常**：Pose 模式下选择骨骼可驱动对应子网格（纯蒙皮 + 顶点烘焙方案生效，见 §6.5）——"动骨骼整体动"的旧现象是**未进入 Pose 模式**（Object 模式拖动整个 Armature）所致，非数据问题
+- **已实测**：改动现有骨骼（head/tail）会导致动画效果异常——head/tail 与骨骼矩阵耦合，改了就破坏蒙皮与动画。**结论：不动导出骨骼数据**
+- **决策（2026-08-01 定案）**：**接受现状**。DCC 重建 rig（新建 Armature + 重绑）经实测与现状无差别——骨骼视觉断开是 UKW 数据固有（部件变换矩阵语义，非关节链几何，多分支父骨骼无法全连），任何 head/tail 调整都会破坏蒙皮/动画配对。**唯一有效改动**：FBX 导出改为**二进制格式**（Blender 5.2 导入器不支持 ASCII FBX），导入时勾选 **Force Connect Children** 可使单链（臂/腿 3 节链）连接，Pose 模式可摆姿势；多分支处视觉断开接受
 
 ### 8.5 IK 落地路径（B 方案：AssetTool 离线验证先行）
 

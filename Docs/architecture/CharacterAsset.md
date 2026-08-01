@@ -2,7 +2,7 @@
 
 > 日期：2026-07-31
 > 状态：方向文档（设计定案）
-> 关联：`AssetSpecification.md`、`AssetTypeDefinition.md`、`SkeletalMeshAssetPipeline.md`、`SkinnedAnimation.md`、`AssetTool_ExportPipeline_Snapshot_20260731.md`
+> 关联：`AssetSpecification.md`、`AssetTypeDefinition.md`、`SkeletalMeshAssetPipeline.md`、`SkinnedAnimation.md`、`UKW_PowerUpKit/02_RobotAndAnimation.md`（AssetTool 导出结论已并入）
 
 ---
 
