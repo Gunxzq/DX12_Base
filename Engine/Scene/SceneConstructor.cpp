@@ -63,7 +63,8 @@ void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext
     }
 
     // 收集所有依赖路径（解析为基于项目根的绝对路径）
-    std::vector<std::pair<std::string, AssetType>> assets;
+    // 类型不再显式声明——由 AssetManager 按后缀推断（见 AssetLoaderImprovement.md）
+    std::vector<std::string> assets;
     std::string root = context->GetProjectConfig().Root;
     std::string baseURL = desc.baseURL;
 
@@ -78,14 +79,14 @@ void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext
     };
 
     for (const auto &[key, path] : desc.dependencies.meshes) {
-        assets.emplace_back(resolve(path), AssetType::Mesh);
+        assets.emplace_back(resolve(path));
     }
     // 材质不加入 batch——等纹理加载完成后在 OnDependenciesLoaded 中统一解析注册
     for (const auto &[key, path] : desc.dependencies.textures) {
-        assets.emplace_back(resolve(path), AssetType::Texture);
+        assets.emplace_back(resolve(path));
     }
     for (const auto &[key, path] : desc.dependencies.terrains) {
-        assets.emplace_back(resolve(path), AssetType::Terrain);
+        assets.emplace_back(resolve(path));
     }
 
     // 存储解析后的路径映射（用于 OnDependenciesLoaded 中查缓存）

@@ -3,7 +3,10 @@
 #include "Background/BackgroundExecutor.h"
 #include "Core/SharedDataStore/SharedDataStore.h"
 #include "Renderer/Material/MaterialHandle.h"
+#include "Resource/Character/CharacterData.h"
+#include "Resource/Struct/ClipHandle.h"
 #include "Resource/Struct/GeometryHandle.h"
+#include "Resource/Struct/SkeletonHandle.h"
 #include "Resource/Struct/TextureHandle.h"
 #include "Scheduler/Task.h"
 #include <cstdint>
@@ -25,6 +28,8 @@ namespace Resource {
 class GeometryResourceManager;  // 前向声明
 class MaterialManager;          // 前向声明
 class TextureManager;           // 前向声明
+class SkeletonManager;          // 前向声明
+class AnimationManager;         // 前向声明
 class DescriptorHeapCollection; // 前向声明
 
 // ========================================================================
@@ -70,15 +75,38 @@ struct AssetResult {
 
     // 材质结果（Material 类型专用）
     MaterialHandle materialHandle;
+
+    // 骨骼结果（Skeleton 类型专用）
+    Resource::SkeletonHandle skeletonHandle;
+
+    // 动画剪辑结果（Animation 类型专用）
+    Resource::ClipHandle clipHandle;
+
+    // 角色结果（Character 类型专用：复合资产，含 Handle 引用集）
+    Resource::CharacterData characterData;
 };
 
 using AssetCallback = std::function<void(const AssetResult &result)>;
+
+// ========================================================================
+// Loader 注册表（2026-08-02 定案，见 Docs/architecture/AssetLoaderImprovement.md）
+//   以文件后缀分发加载请求，替代 switch(type)。类型由 Loader 声明（InferType 派生）。
+//   后缀匹配规则：extension() 小写 → 查表；若为 ".json" 再对 stem() 的 extension() 查表
+//   （自动覆盖 .scene.json 等双后缀）。".anim" 不注册——见 LoadAnimation 专用入口。
+// ========================================================================
+
+// 创建并提交 LoadTask 的闭包（捕获 managers/deviceContext），返回请求 id
+using LoaderFunc = std::function<uint32_t(const std::string &path, AssetCallback onComplete, uint8_t priority)>;
+
+struct LoaderEntry {
+    LoaderFunc func; // 创建并提交 LoadTask 的闭包
+    AssetType type;  // 该后缀产出的类型（供 InferType + AssetResult.type）
+};
 
 // 单个加载请求
 struct AssetRequest {
     uint32_t id;
     std::string path;
-    AssetType type;
     uint8_t priority = 1; // 0=最高, 255=最低
     AssetCallback onComplete;
 };
@@ -154,16 +182,41 @@ public:
 
     void Initialize(Renderer::D3D12DeviceContext *deviceContext, Async::BackgroundExecutor *executor,
                     Resource::GeometryResourceManager *geoMgr = nullptr, Resource::MaterialManager *matMgr = nullptr,
-                    Resource::TextureManager *texMgr = nullptr,
+                    Resource::TextureManager *texMgr = nullptr, Resource::SkeletonManager *skeletonMgr = nullptr,
+                    Resource::AnimationManager *animMgr = nullptr,
                     Resource::DescriptorHeapCollection *descHeaps = nullptr);
     void Shutdown();
 
-    // 单资产加载
-    uint32_t Load(const std::string &path, AssetType type, AssetCallback onComplete, uint8_t priority = 1);
+    // 单资产加载（只传路径，类型由后缀推断——见 InferType）
+    uint32_t Load(const std::string &path, AssetCallback onComplete, uint8_t priority = 1);
 
-    // 批量加载（全部完成后回调，返回 batch 指针用于追加子任务）
-    AssetBatchPtr LoadBatch(const std::vector<std::pair<std::string, AssetType>> &assets,
-                            AssetCallback perAssetComplete, std::function<void()> onAllComplete);
+    // 注册加载器：ext 统一小写带点（".dxmesh" / ".bone" / ".scene"）
+    // 后注册的覆盖先注册的（允许模块覆盖默认加载器）
+    void RegisterLoader(std::string ext, AssetType type, LoaderFunc func);
+
+    // ── 各资产类型 Loader 自注册（定义在 Loaders/*.cpp，2026-08-02 按资产类型拆文件） ──
+    // Initialize() 末尾调用完成默认注册；编辑器/Game 端也可在使用 AssetManager 之前自行调用
+    // （后调用覆盖默认加载器，注册时机只需早于 Load()）。新增资产类型 = 新增 Loaders/xxx.cpp
+    // + 此处一行声明，不改 AssetManager 主体（开放封闭）。
+    void RegisterMeshLoader();
+    void RegisterTextureLoader();
+    void RegisterMaterialLoader();
+    void RegisterSkeletonLoader();
+    void RegisterCharacterLoader();
+
+    /// 从路径推断资产类型：extension() 小写查表；若为 ".json" 再对 stem() 的 extension() 查表
+    /// （自动覆盖 .scene.json 等双后缀）。未命中返回 AssetType::None。
+    AssetType InferType(const std::string &path) const;
+
+    // 动画剪辑专用加载：需要骨架 BoneNames 做通道匹配（.anim 通道按骨骼名对齐）
+    // .anim 不注册注册表——anim 与 bone 以骨骼名紧密耦合，必须携带骨架上下文（见 AssetLoaderImprovement.md §3.4）
+    // 调用方须先加载 .bone（SkeletonHandle 就绪）后传入其 BoneNames
+    uint32_t LoadAnimation(const std::string &path, const std::vector<std::string> &boneNames, AssetCallback onComplete,
+                           uint8_t priority = 1);
+
+    // 批量加载（全部完成后回调，返回 batch 指针用于追加子任务；类型由各路径后缀推断）
+    AssetBatchPtr LoadBatch(const std::vector<std::string> &paths, AssetCallback perAssetComplete,
+                            std::function<void()> onAllComplete);
 
     // 每帧调用（驱动 BackgroundExecutor::Tick）
     void Update();
@@ -180,13 +233,15 @@ private:
     Resource::GeometryResourceManager *m_geoMgr = nullptr;
     Resource::MaterialManager *m_matMgr = nullptr;
     Resource::TextureManager *m_texMgr = nullptr;
+    Resource::SkeletonManager *m_skeletonMgr = nullptr;
+    Resource::AnimationManager *m_animMgr = nullptr;
     Resource::DescriptorHeapCollection *m_descHeaps = nullptr;
 
     // 进行中的批量加载
     std::vector<AssetBatchPtr> m_activeBatches;
 
-    // 加载器注册表（类型 → 创建 LoadTask 的函数）
-    // TODO: 后续扩展为可注册的 Loader 接口
+    // 加载器注册表：后缀（小写带点）→ Loader（2026-08-02 定案，替代 switch(type)）
+    std::unordered_map<std::string, LoaderEntry> m_loaders;
 
     // ========================================================================
     // 缓存：路径 → 加载结果
@@ -196,6 +251,17 @@ private:
 
     /// 检查缓存，命中则直接回调并返回 true
     bool TryCache(const std::string &path, AssetCallback &callback);
+
+    // 按后缀查 Loader（小写 extension() 查表；".json" 再对 stem() 的 extension() 查表）
+    // 未命中返回 nullptr
+    const LoaderEntry *FindLoader(const std::string &path) const;
+
+    // 各类型 Loader 实现（Initialize 末尾注册到 m_loaders）
+    uint32_t LoadMeshImpl(const std::string &path, AssetCallback onComplete, uint8_t priority);
+    uint32_t LoadTextureImpl(const std::string &path, AssetCallback onComplete, uint8_t priority);
+    uint32_t LoadMaterialImpl(const std::string &path, AssetCallback onComplete, uint8_t priority);
+    uint32_t LoadSkeletonImpl(const std::string &path, AssetCallback onComplete, uint8_t priority);
+    uint32_t LoadCharacterImpl(const std::string &path, AssetCallback onComplete, uint8_t priority);
 };
 
 } // namespace Resource
