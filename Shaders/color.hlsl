@@ -110,21 +110,25 @@ float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, floa
 // SV_Target2: Material     (R8G8B8A8_UNORM) — R=Metallic, G=Roughness, B=AO
 // SV_Target3: WorldPos     (R16G16B16A16_FLOAT)
 // ========================================================================
-struct GBufferOutput {
-    float4 Albedo   : SV_Target0;
-    float4 Normal   : SV_Target1;
+struct GBufferOutput
+{
+    float4 Albedo : SV_Target0;
+    float4 Normal : SV_Target1;
     float4 Material : SV_Target2;
     float4 WorldPos : SV_Target3;
+    float4 Emissive : SV_Target4; // 自发光（不参与光照，直接叠加）
 };
 
-GBufferOutput PS_GBuffer(VertexOut pin) {
+GBufferOutput PS_GBuffer(VertexOut pin)
+{
     GBufferOutput output = (GBufferOutput)0.0f;
 
     uint matIndex = gInstanceData[pin.InstanceIndex].MaterialIndex;
     MaterialData matData = gMaterialData[matIndex];
 
     float4 texColor = 1.0f;
-    [branch] if (matData.BaseColorTexIndex != 0xFFFFFFFF) {
+    [branch] if (matData.BaseColorTexIndex != 0xFFFFFFFF)
+    {
         texColor = gTextureMaps[matData.BaseColorTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
     }
     float3 albedo = matData.BaseColor.rgb * texColor.rgb;
@@ -132,18 +136,21 @@ GBufferOutput PS_GBuffer(VertexOut pin) {
     float roughness = matData.Roughness;
     float ao = matData.Ambient;
 
-    [branch] if (matData.MetallicRoughnessTexIndex != 0xFFFFFFFF) {
+    [branch] if (matData.MetallicRoughnessTexIndex != 0xFFFFFFFF)
+    {
         float2 mr = gTextureMaps[matData.MetallicRoughnessTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord).rg;
         metallic = mr.r;
         roughness = mr.g;
     }
-    [branch] if (matData.OcclusionTexIndex != 0xFFFFFFFF) {
+    [branch] if (matData.OcclusionTexIndex != 0xFFFFFFFF)
+    {
         ao = gTextureMaps[matData.OcclusionTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord).r;
     }
 
     // 法线贴图 TBN 变换
     float3 N = normalize(pin.WorldNormal);
-    [branch] if (matData.NormalTexIndex != 0xFFFFFFFF) {
+    [branch] if (matData.NormalTexIndex != 0xFFFFFFFF)
+    {
         float4 normalSample = gTextureMaps[matData.NormalTexIndex].Sample(gSamplerAnisotropicWrap, pin.TexCoord);
         normalSample.rgb = lerp(float3(0.5f, 0.5f, 1.0f), normalSample.rgb, matData.NormalStrength);
         N = NormalSampleToWorldSpace(normalSample.rgb, N, normalize(pin.WorldTangent));
@@ -156,6 +163,7 @@ GBufferOutput PS_GBuffer(VertexOut pin) {
                                  ? (gInstanceData[pin.InstanceIndex].ProbeIndex + 1) / 255.0f
                                  : 0.0f);
     output.WorldPos = float4(pin.WorldPos, 1.0f);
+    output.Emissive = float4(matData.Emissive.rgb, 1.0f); // 自发光（HDR），不参与光照
 
     return output;
 }

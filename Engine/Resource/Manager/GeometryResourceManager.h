@@ -75,6 +75,9 @@ public:
     bool IsValid(GeometryHandle handle) const;
     const Math::BoundingVolumeVariant *GetBounds(GeometryHandle handle) const;
 
+    /// 获取网格的 SubMesh 信息（仅 TriangleMesh 有效，其他类型返回 nullptr）
+    const std::vector<SubMeshInfo> *GetSubMeshInfo(GeometryHandle handle) const;
+
     // ========================================================================
     // 几何体释放与引用计数
     // ========================================================================

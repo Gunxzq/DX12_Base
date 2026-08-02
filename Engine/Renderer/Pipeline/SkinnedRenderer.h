@@ -42,8 +42,7 @@ public:
     // G-buffer 蒙皮绘制（延迟渲染 Opaque phase）
     // ========================================================================
     void BeginFrameGBuffer(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
-                           D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
-                           D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart);
+                           D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV, D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart);
     void DrawGBuffer(CommandList &cmdList, const TRenderQueue<SkinnedRenderItem> &queue);
     void EndFrameGBuffer();
 
@@ -70,8 +69,8 @@ private:
     Resource::MaterialManager *m_materialManager = nullptr;
 
     // 着色器字节码
-    Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;         // 蒙皮顶点着色器（G-buffer PSO 复用）
-    Microsoft::WRL::ComPtr<ID3DBlob> m_psGBufferBlob;  // G-buffer 像素着色器
+    Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;        // 蒙皮顶点着色器（G-buffer PSO 复用）
+    Microsoft::WRL::ComPtr<ID3DBlob> m_psGBufferBlob; // G-buffer 像素着色器
 };
 
 } // namespace DX12Engine::Renderer

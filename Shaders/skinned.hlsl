@@ -134,14 +134,17 @@ float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, floa
 // ========================================================================
 // PS_GBuffer — G-buffer MRT 输出（复用蒙皮 VS）
 // ========================================================================
-struct GBufferOutput {
-    float4 Albedo   : SV_Target0;
-    float4 Normal   : SV_Target1;
+struct GBufferOutput
+{
+    float4 Albedo : SV_Target0;
+    float4 Normal : SV_Target1;
     float4 Material : SV_Target2;
     float4 WorldPos : SV_Target3;
+    float4 Emissive : SV_Target4; // 自发光（不参与光照，直接叠加）
 };
 
-GBufferOutput PS_GBuffer(VSOutput pin) {
+GBufferOutput PS_GBuffer(VSOutput pin)
+{
     GBufferOutput output = (GBufferOutput)0.0f;
 
     MaterialData mat = gMaterialData[pin.MatIdx];
@@ -156,7 +159,8 @@ GBufferOutput PS_GBuffer(VSOutput pin) {
     float ao = mat.Ambient;
 
     // MetallicRoughness 贴图
-    if (mat.MetallicRoughnessTextureIndex != 0xFFFFFFFF) {
+    if (mat.MetallicRoughnessTextureIndex != 0xFFFFFFFF)
+    {
         float2 mr = gTextureMaps[mat.MetallicRoughnessTextureIndex].Sample(gsamAnisotropicWrap, pin.TexC).rg;
         metallic = mr.r;
         roughness = mr.g;
@@ -167,7 +171,8 @@ GBufferOutput PS_GBuffer(VSOutput pin) {
 
     // 法线 TBN 变换
     float3 N = normalize(pin.NormalW);
-    if (mat.NormalTextureIndex != 0xFFFFFFFF) {
+    if (mat.NormalTextureIndex != 0xFFFFFFFF)
+    {
         float4 normalSample = gTextureMaps[mat.NormalTextureIndex].Sample(gsamAnisotropicWrap, pin.TexC);
         float3 nm = lerp(float3(0.5f, 0.5f, 1.0f), normalSample.rgb, mat.NormalStrength);
         float3 tangentW = normalize(pin.TangentW);
@@ -178,5 +183,6 @@ GBufferOutput PS_GBuffer(VSOutput pin) {
     output.Normal = float4(N * 0.5f + 0.5f, 1.0f);
     output.Material = float4(metallic, roughness, ao, 0.0f); // probeIndex 暂为 0
     output.WorldPos = float4(pin.PosW, 1.0f);
+    output.Emissive = float4(mat.Emissive.rgb, 1.0f); // 自发光（HDR），不参与光照
     return output;
 }

@@ -359,6 +359,12 @@ DX12Engine::Resource::MaterialDesc XFileMaterial::ToMaterialDesc() const {
     desc.params.baseColor[2] = faceColor[2]; // B
     desc.params.baseColor[3] = faceColor[3]; // A
 
+    // 自发光（XFileMaterial.emissiveColor 由 ConvertAiMaterial 从 AI_MATKEY_COLOR_EMISSIVE 读取）
+    desc.params.emissive[0] = emissiveColor[0];
+    desc.params.emissive[1] = emissiveColor[1];
+    desc.params.emissive[2] = emissiveColor[2];
+    desc.params.emissive[3] = 1.0f;
+
     float p = (power > 0.0f) ? power : 10.0f;
     desc.params.roughness = std::max(0.05f, std::min(0.95f, 1.0f / (p + 1.0f)));
 

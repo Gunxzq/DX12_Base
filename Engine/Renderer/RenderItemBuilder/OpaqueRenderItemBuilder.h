@@ -11,6 +11,7 @@
 
 // 前向声明
 namespace DX12Engine::Resource {
+class GeometryResourceManager;
 class MaterialManager;
 class TextureManager;
 } // namespace DX12Engine::Resource
@@ -27,6 +28,8 @@ public:
     void SetFrustum(const Frustum *frustum) { m_frustum = frustum; }
     void SetCameraPos(const DirectX::XMFLOAT3 &pos) { m_cameraPos = pos; }
     void SetLODSystem(const LODSystem *system) { m_lodSystem = system; }
+    /// 设置几何体管理器（SubMesh 展开需要）
+    void SetGeometryManager(Resource::GeometryResourceManager *geoMgr) { m_geometryManager = geoMgr; }
 
     /// 设置实体过滤器（可选，用于编辑器端按场景标记过滤）
     /// @param filter 返回 true 表示该实体应被构建，false 跳过
@@ -47,6 +50,7 @@ private:
     FrameResourceManager *m_frameResourceManager;
     Resource::MaterialManager *m_materialManager;
     Resource::TextureManager *m_textureManager;
+    Resource::GeometryResourceManager *m_geometryManager = nullptr;
 
     const Frustum *m_frustum = nullptr;
     const LODSystem *m_lodSystem = nullptr;

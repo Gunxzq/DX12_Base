@@ -428,6 +428,8 @@ RobotMergeResult RobotMerger::MergeWithCallback(const std::string &hodPath, cons
         jm["params"]["metallic"] = matDesc.params.metallic;
         jm["params"]["roughness"] = matDesc.params.roughness;
         jm["params"]["ao"] = matDesc.params.ao;
+        jm["params"]["emissive"] = {matDesc.params.emissive[0], matDesc.params.emissive[1],
+                                    matDesc.params.emissive[2], matDesc.params.emissive[3]};
         if (!texRef.empty()) {
             jm["textures"]["baseColor"] = fs::path(texRef).stem().string();
         }

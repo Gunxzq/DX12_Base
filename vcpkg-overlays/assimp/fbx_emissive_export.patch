@@ -1,0 +1,21 @@
+diff --git a/code/AssetLib/FBX/FBXExporter.cpp b/code/AssetLib/FBX/FBXExporter.cpp
+--- a/code/AssetLib/FBX/FBXExporter.cpp
++++ b/code/AssetLib/FBX/FBXExporter.cpp
+@@ -1463,7 +1463,17 @@
+         if (m->Get(AI_MATKEY_COLOR_DIFFUSE, c) == aiReturn_SUCCESS) {
+             p.AddP70colorA("DiffuseColor", c.r, c.g, c.b);
+             //p.AddP70numberA("DiffuseFactor", 1.0);
+         }
++        // 发光材质：Blender 5.2 只认 "EmissiveColor"/Color + "EmissiveFactor"（modern 属性），
++        // legacy "Emissive"/Vector3D（下方 legacy 段写出）会被导入器忽略 → X→FBX 链路丢发光数据。
++        // 此处补写 modern 属性（颜色 + 强度），保证 ani2anim 导出的 FBX 进入 Blender 不丢发光。
++        // 导入器侧 GetColorPropertyFromMaterial(props, "Emissive") 即读回 "EmissiveColor"/"EmissiveFactor"。
++        if (m->Get(AI_MATKEY_COLOR_EMISSIVE, c) == aiReturn_SUCCESS) {
++            p.AddP70colorA("EmissiveColor", c.r, c.g, c.b);
++            ai_real emissiveIntensity = 1.0;
++            m->Get(AI_MATKEY_EMISSIVE_INTENSITY, emissiveIntensity);
++            p.AddP70numberA("EmissiveFactor", emissiveIntensity);
++        }
+         if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, c) == aiReturn_SUCCESS) {
+             // "TransparentColor" / "TransparencyFactor"...
+             // thanks FBX, for your insightful interpretation of consistency

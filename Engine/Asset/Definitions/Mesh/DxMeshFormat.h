@@ -13,7 +13,8 @@
 //
 // 与现有顶点格式的兼容性：
 //   DxMeshStaticVertex ↔ GeometryGenerator::Vertex（布局相同，44 字节）
-//   DxMeshSkinnedVertex ↔ M3dVertex（布局相同，64 字节）
+//   DxMeshSkinnedVertex = DxMeshStaticVertex 头部（44B）+ 骨骼尾部（20B）= 64 字节
+//   头部 position/normal/tangentU/texC 与静态一致，换渲染器前 44 字节可正确读出（见 SubMeshMaterialSlots.md §2.3a）
 // ============================================================================
 
 #pragma pack(push, 1)
@@ -65,11 +66,12 @@ struct DxMeshStaticVertex {
 static_assert(sizeof(DxMeshStaticVertex) == 44, "DxMeshStaticVertex must be 44 bytes");
 
 // ── 蒙皮顶点 ──
-// 对应 M3dVertex 布局
+// 头部与 DxMeshStaticVertex 一致（position/normal/tangentU/texC），仅尾部追加骨骼字段
+// 布局统一：头部 44B 静态/蒙皮共用，换渲染器前 44 字节可正确读出（见 SubMeshMaterialSlots.md §2.3a）
 struct DxMeshSkinnedVertex {
     float position[3];      // offset  0, 12 bytes
-    float tangentU[3];      // offset 12, 12 bytes
-    float normal[3];        // offset 24, 12 bytes
+    float normal[3];        // offset 12, 12 bytes
+    float tangentU[3];      // offset 24, 12 bytes
     float texC[2];          // offset 36,  8 bytes
     float boneWeights[4];   // offset 44, 16 bytes
     uint8_t boneIndices[4]; // offset 60,  4 bytes

@@ -1,8 +1,8 @@
 #include "TransparentRenderItemBuilder.h"
 #include "ECS/Core/Components.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
-#include "Renderer/Scene/CameraManager.h"
 #include "Renderer/Material/MaterialManager.h"
+#include "Renderer/Scene/CameraManager.h"
 #include "Resource/Texture/TextureManager.h"
 
 using namespace DX12Engine::Renderer;
@@ -36,7 +36,7 @@ uint32_t TransparentRenderItemBuilder::Count(ECS::Registry &registry) {
             if (lodMesh)
                 geoHandle = PickLOD(*lodMesh, transform.position, m_cameraPos, m_lodSystem->GetLODConfig());
         }
-        if (!geoHandle.IsValid() || !comp.materialHandle.IsValid())
+        if (!geoHandle.IsValid() || comp.materialSlots.empty() || !comp.materialSlots[0].IsValid())
             continue;
 
         count++;
@@ -68,7 +68,7 @@ void TransparentRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQu
         if (!geoHandle.IsValid())
             continue;
 
-        MaterialHandle materialHandle = comp.materialHandle;
+        MaterialHandle materialHandle = comp.materialSlots.empty() ? MaterialHandle::Invalid() : comp.materialSlots[0];
         if (!materialHandle.IsValid())
             continue;
 

@@ -1,10 +1,10 @@
 #include "ShadowRenderer.h"
 #include "Common/d3dUtil.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
+#include "Renderer/Utils/ShaderUtils.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DirectX;
 using namespace DX12Engine::Resource;
@@ -207,7 +207,9 @@ void ShadowRenderer::DrawIndexedInstancedSubmesh(CommandList &cmdList, GeometryH
     cmdList.Get()->SetGraphicsRootShaderResourceView(2, instanceBufferAddress);
 
     uint32_t actualIndexCount = indexCount > 0 ? indexCount : mesh->indexCount;
-    cmdList.Get()->DrawIndexedInstanced(actualIndexCount, instanceCount, startIndex, startVertex, 0);
+    // BaseVertexLocation 恒为 0：dxmesh 索引已绝对化，startVertex 仅记录不参与绘制（见 SubMeshMaterialSlots.md §2.3）
+    (void)startVertex;
+    cmdList.Get()->DrawIndexedInstanced(actualIndexCount, instanceCount, startIndex, 0, 0);
 }
 
 // ============================================================================
@@ -326,8 +328,8 @@ void ShadowRenderer::LoadPointInstancedShaders() {
     compileFlags |= D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
 
-    HRESULT hr =
-        CompileShaderFromFile(L"Shaders/Shadow.hlsl", "PointShadowVS_Instanced", "vs_5_1", compileFlags, m_pointInstancedVSBlob, &errors);
+    HRESULT hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "PointShadowVS_Instanced", "vs_5_1", compileFlags,
+                                       m_pointInstancedVSBlob, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -385,21 +387,24 @@ void ShadowRenderer::LoadPointGSShaders() {
 
     HRESULT hr;
 
-    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "PointShadowVS_GS", "vs_5_1", compileFlags, m_pointGSVSBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "PointShadowVS_GS", "vs_5_1", compileFlags, m_pointGSVSBlob,
+                               &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         throw std::runtime_error("ShadowRenderer: Failed to compile PointShadowVS_GS");
     }
 
-    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "PointShadowGS", "gs_5_1", compileFlags, m_pointGSGSBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "PointShadowGS", "gs_5_1", compileFlags, m_pointGSGSBlob,
+                               &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         throw std::runtime_error("ShadowRenderer: Failed to compile PointShadowGS");
     }
 
-    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "ShadowPS_Point", "ps_5_1", compileFlags, m_pointGSPSBlob, &errors);
+    hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "ShadowPS_Point", "ps_5_1", compileFlags, m_pointGSPSBlob,
+                               &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
@@ -455,7 +460,8 @@ void ShadowRenderer::LoadSpotShaders() {
     compileFlags |= D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
 
-    HRESULT hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "SpotShadowVS_Instanced", "vs_5_1", compileFlags, m_spotVSBlob, &errors);
+    HRESULT hr = CompileShaderFromFile(L"Shaders/Shadow.hlsl", "SpotShadowVS_Instanced", "vs_5_1", compileFlags,
+                                       m_spotVSBlob, &errors);
     if (FAILED(hr)) {
         if (errors)
             OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));

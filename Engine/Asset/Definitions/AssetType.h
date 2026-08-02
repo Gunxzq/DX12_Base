@@ -18,7 +18,7 @@ enum class AssetType : uint8_t {
     Scene,    ///< 场景描述 (.scene)
 
     // 原子资产扩展（2026-07-31，CharacterAsset.md 设计定案）
-    Skeleton, ///< 骨骼 (.bone) — 骨骼树 + rest pose（HOD 解析导出）
+    Skeleton,  ///< 骨骼 (.bone) — 骨骼树 + rest pose（HOD 解析导出）
     Animation, ///< 动画剪辑 (.anim) — 骨骼动画剪辑（播放/调帧/循环）
 
     // 复合资产扩展
@@ -27,7 +27,9 @@ enum class AssetType : uint8_t {
     // 预留
     Prefab,         ///< 预制体 (.prefab) — 实体模板（预留）
     ParticleSystem, ///< 粒子系统 (.particle) — 预留
-    Audio           ///< 音频 (.wav / .ogg) — 预留
+    Audio,          ///< 音频 (.wav / .ogg) — 预留
+
+    None = 255 ///< 哨兵：InferType 未命中 / 未知扩展名（与 FileIconProvider 现有 255 哨兵一致）
 };
 
 } // namespace DX12Engine::Resource

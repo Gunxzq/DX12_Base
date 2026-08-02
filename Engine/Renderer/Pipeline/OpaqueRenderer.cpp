@@ -122,7 +122,9 @@ void OpaqueRenderer::DrawInstancedGBuffer(CommandList &cmdList, GeometryHandle g
     cmdList.Get()->SetGraphicsRootShaderResourceView(3, instanceBufferAddress);
 
     uint32_t actualIndexCount = indexCount > 0 ? indexCount : mesh->indexCount;
-    cmdList.Get()->DrawIndexedInstanced(actualIndexCount, instanceCount, startIndex, startVertex, 0);
+    // BaseVertexLocation 恒为 0：dxmesh 索引已绝对化，startVertex 仅记录不参与绘制（见 SubMeshMaterialSlots.md §2.3）
+    (void)startVertex;
+    cmdList.Get()->DrawIndexedInstanced(actualIndexCount, instanceCount, startIndex, 0, 0);
 }
 
 void OpaqueRenderer::EndFrameGBuffer() {}
@@ -224,12 +226,13 @@ void OpaqueRenderer::CreateGBufferPSO() {
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 
-    // 4 个 MRT + 深度
-    psoDesc.NumRenderTargets = 4;
+    // 5 个 MRT + 深度
+    psoDesc.NumRenderTargets = 5;
     psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;     // Albedo
     psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Normal
     psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;     // Material
     psoDesc.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT; // WorldPos
+    psoDesc.RTVFormats[4] = DXGI_FORMAT_R11G11B10_FLOAT;    // Emissive
     psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleDesc.Count = 1;
 

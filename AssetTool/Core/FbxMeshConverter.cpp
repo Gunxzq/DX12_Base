@@ -105,6 +105,22 @@ void ExtractMaterial(const aiMaterial *mat, DX12Engine::Resource::MaterialDesc &
     float roughness = 0.5f;
     if (mat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == AI_SUCCESS)
         desc.params.roughness = roughness;
+
+    // 自发光（Blender Principled BSDF Emission）：颜色 + 强度两步
+    // FBX 导出为 EmissiveColor（RGB）+ EmissiveFactor（标量），assimp 分别映射为
+    // AI_MATKEY_COLOR_EMISSIVE / AI_MATKEY_EMISSIVE_INTENSITY（见 vcpkg assimp material.h）
+    aiColor3D emissive(0.0f, 0.0f, 0.0f);
+    if (mat->Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == AI_SUCCESS) {
+        desc.params.emissive[0] = emissive.r;
+        desc.params.emissive[1] = emissive.g;
+        desc.params.emissive[2] = emissive.b;
+    }
+    float emissiveIntensity = 1.0f;
+    if (mat->Get(AI_MATKEY_EMISSIVE_INTENSITY, emissiveIntensity) == AI_SUCCESS && emissiveIntensity != 1.0f) {
+        desc.params.emissive[0] *= emissiveIntensity;
+        desc.params.emissive[1] *= emissiveIntensity;
+        desc.params.emissive[2] *= emissiveIntensity;
+    }
 }
 
 /// 尝试复制材质基础色纹理到 Textures/，返回 Textures/ 下文件名（空 = 无纹理）
@@ -433,6 +449,8 @@ FbxConvertResult FbxMeshConverter::Convert(const std::string &fbxPath, const std
         jm["params"]["metallic"] = desc.params.metallic;
         jm["params"]["roughness"] = desc.params.roughness;
         jm["params"]["ao"] = desc.params.ao;
+        jm["params"]["emissive"] = {desc.params.emissive[0], desc.params.emissive[1], desc.params.emissive[2],
+                                    desc.params.emissive[3]};
         if (!desc.textures.baseColor.empty())
             jm["textures"]["baseColor"] = desc.textures.baseColor;
 

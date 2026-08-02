@@ -1,0 +1,102 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://dx12engine.dev/schemas/animation.schema.json",
+    "title": "Animation Clip File",
+    "description": "骨骼动画剪辑文件格式定义。一个剪辑包含时长、帧率、循环标志与若干骨骼通道（channels），每通道由按时间排序的键帧（position/rotation/scale）组成。骨骼名（bone）是命名约定字符串，运行时与 .bone 的骨骼名匹配，不是资产引用。",
+    "type": "object",
+    "required": ["version", "duration", "channels"],
+
+    "properties": {
+        "version": {
+            "description": "动画格式版本号",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1
+        },
+        "name": {
+            "description": "剪辑名（应与 .character 的 clips 键一致；转换器默认取动画名）",
+            "type": "string"
+        },
+        "duration": {
+            "description": "剪辑总时长（秒）= 最大键帧时间。由 FBX mDuration / mTicksPerSecond 计算。",
+            "type": "number",
+            "minimum": 0
+        },
+        "fps": {
+            "description": "采样帧率。由 FBX mTicksPerSecond 取（10~240）；ANI 帧率来自 Tail 头速度值，回退 30。",
+            "type": "number",
+            "minimum": 1
+        },
+        "loop": {
+            "description": "循环标志",
+            "type": "boolean",
+            "default": true
+        },
+        "channels": {
+            "description": "骨骼通道数组，每项对应一根骨骼的完整动画曲线",
+            "type": "array",
+            "items": { "$ref": "#/definitions/Channel" }
+        },
+        "metadata": {
+            "description": "可选元数据（源文件路径、原始格式等）",
+            "type": "object",
+            "properties": {
+                "source": { "type": "string" },
+                "sourceFormat": { "type": "string", "enum": ["ani", "fbx"] }
+            }
+        }
+    },
+
+    "definitions": {
+        "Channel": {
+            "description": "一根骨骼的动画通道。bone 名为引擎骨骼名（去 _bone 后缀、过滤 _end 末端），须与 .bone 的骨骼名匹配。",
+            "type": "object",
+            "required": ["bone", "keyframes"],
+            "properties": {
+                "bone": {
+                    "description": "骨骼名（引擎空间命名，无 _bone 后缀、无 _end 末端）",
+                    "type": "string"
+                },
+                "keyframes": {
+                    "description": "键帧数组，按 t 升序",
+                    "type": "array",
+                    "items": { "$ref": "#/definitions/Keyframe" }
+                }
+            }
+        },
+        "Keyframe": {
+            "description": "一个时间点的骨骼局部变换（TRS）。position/scale 线性插值，rotation 四元数球面插值。坐标系为引擎空间 Y-up 左手系，AssetTool 转换时负责右手→左手（翻转 Z）。",
+            "type": "object",
+            "required": ["t", "position", "rotation"],
+            "properties": {
+                "t": {
+                    "description": "时间（秒）",
+                    "type": "number",
+                    "minimum": 0
+                },
+                "position": {
+                    "description": "平移 [x, y, z]",
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 3,
+                    "maxItems": 3
+                },
+                "rotation": {
+                    "description": "旋转四元数 [x, y, z, w]",
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 4,
+                    "maxItems": 4
+                },
+                "scale": {
+                    "description": "缩放 [x, y, z]",
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "default": [1, 1, 1]
+                }
+            }
+        }
+    }
+}

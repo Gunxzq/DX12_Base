@@ -33,17 +33,12 @@ public:
     // ========================================================================
 
     /// 开始光照 Pass：绑定根签名、常量缓冲、G-buffer SRV + SSAO
-    void BeginFrame(CommandList &cmdList,
-                    D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
-                    D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                    D3D12_GPU_DESCRIPTOR_HANDLE albedoSrv,
-                    D3D12_GPU_DESCRIPTOR_HANDLE normalSrv,
-                    D3D12_GPU_DESCRIPTOR_HANDLE materialSrv,
-                    D3D12_GPU_DESCRIPTOR_HANDLE worldPosSrv,
-                    D3D12_GPU_DESCRIPTOR_HANDLE ssaoSrv,
-                    D3D12_GPU_DESCRIPTOR_HANDLE envMapSrv = {},
-                    D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySrv = {},
-                    D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV = {},
+    void BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
+                    D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE albedoSrv,
+                    D3D12_GPU_DESCRIPTOR_HANDLE normalSrv, D3D12_GPU_DESCRIPTOR_HANDLE materialSrv,
+                    D3D12_GPU_DESCRIPTOR_HANDLE worldPosSrv, D3D12_GPU_DESCRIPTOR_HANDLE emissiveSrv,
+                    D3D12_GPU_DESCRIPTOR_HANDLE ssaoSrv, D3D12_GPU_DESCRIPTOR_HANDLE envMapSrv = {},
+                    D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySrv = {}, D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV = {},
                     D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = {});
 
     /// 绘制全屏 Quad（4 顶点 TRIANGLESTRIP）

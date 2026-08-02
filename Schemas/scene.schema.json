@@ -188,7 +188,7 @@
 
         "MeshComponent": {
             "type": "object",
-            "required": ["geometry", "material"],
+            "required": ["geometry"],
             "properties": {
                 "geometry": {
                     "type": "string",
@@ -196,7 +196,12 @@
                 },
                 "material": {
                     "type": "string",
-                    "description": "引用 materials 中的 key"
+                    "description": "引用 materials 中的 key（向后兼容：等效于 materials: [key]）"
+                },
+                "materials": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "材质槽数组（SubMesh 级材质分配），[i] 对应第 i 个子网格。长度 = 网格 SubMesh 数。相同材质可重复出现。"
                 },
                 "receivesShadow": {
                     "type": "boolean",

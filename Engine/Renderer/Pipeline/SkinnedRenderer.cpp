@@ -1,11 +1,11 @@
 #include "SkinnedRenderer.h"
 #include "Common/d3dUtil.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
+#include "Renderer/Utils/ShaderUtils.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include <DirectXMath.h>
-#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;
@@ -26,11 +26,13 @@ void SkinnedRenderer::Initialize() {
 
     // 编译蒙皮顶点着色器（G-buffer PSO 使用）
     {
-        UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
+        UINT compileFlags =
+            D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
         Microsoft::WRL::ComPtr<ID3DBlob> errors;
         HRESULT hr = CompileShaderFromFile(L"Shaders/skinned.hlsl", "VS", "vs_5_1", compileFlags, m_vsBlob, &errors);
         if (FAILED(hr)) {
-            if (errors) OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+            if (errors)
+                OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
             ThrowIfFailed(hr);
         }
     }
@@ -55,9 +57,11 @@ void SkinnedRenderer::Update(float deltaTime) { (void)deltaTime; }
 void SkinnedRenderer::LoadGBufferShader() {
     UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
-    HRESULT hr = CompileShaderFromFile(L"Shaders/skinned.hlsl", "PS_GBuffer", "ps_5_1", compileFlags, m_psGBufferBlob, &errors);
+    HRESULT hr =
+        CompileShaderFromFile(L"Shaders/skinned.hlsl", "PS_GBuffer", "ps_5_1", compileFlags, m_psGBufferBlob, &errors);
     if (FAILED(hr)) {
-        if (errors) OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+        if (errors)
+            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         ThrowIfFailed(hr);
     }
 }
@@ -86,15 +90,21 @@ void SkinnedRenderer::CreateGBufferRootSignature() {
     params[5].InitAsShaderResourceView(13, 1, D3D12_SHADER_VISIBILITY_VERTEX);
 
     CD3DX12_STATIC_SAMPLER_DESC samplers[3];
-    samplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
-    samplers[1].Init(1, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
-    samplers[2].Init(2, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, 0.0f, 8);
+    samplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                     D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    samplers[1].Init(1, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                     D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+    samplers[2].Init(2, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                     D3D12_TEXTURE_ADDRESS_MODE_WRAP, 0.0f, 8);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rsDesc(6, params, 3, samplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    CD3DX12_ROOT_SIGNATURE_DESC rsDesc(6, params, 3, samplers,
+                                       D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
     Microsoft::WRL::ComPtr<ID3DBlob> sig, err;
     D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err);
-    if (err) OutputDebugStringA(reinterpret_cast<const char *>(err->GetBufferPointer()));
-    device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(), IID_PPV_ARGS(&m_gbufferRootSignature));
+    if (err)
+        OutputDebugStringA(reinterpret_cast<const char *>(err->GetBufferPointer()));
+    device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
+                                IID_PPV_ARGS(&m_gbufferRootSignature));
 }
 
 void SkinnedRenderer::CreateGBufferPSO() {
@@ -108,18 +118,20 @@ void SkinnedRenderer::CreateGBufferPSO() {
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 4;
+    psoDesc.NumRenderTargets = 5;
     psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
     psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT;
     psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;
     psoDesc.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    psoDesc.RTVFormats[4] = DXGI_FORMAT_R11G11B10_FLOAT; // Emissive
     psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleDesc.Count = 1;
-    // Input layout: PosL(12) + TangentU(12) + NormalL(12) + TexC(8) + BoneWeights(16) + BoneIndices(16)
+    // Input layout: 头部与静态一致 PosL(12) + NormalL(12) + TangentU(12) + TexC(8)，尾部蒙皮 BoneWeights(16) +
+    // BoneIndices(4) 见 SubMeshMaterialSlots.md §2.3a（顶点布局统一）
     D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"BLENDWEIGHTS", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 44, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"BLENDINDICES", 0, DXGI_FORMAT_R8G8B8A8_UINT, 0, 60, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
@@ -136,7 +148,8 @@ void SkinnedRenderer::CreateGBufferPSO() {
 void SkinnedRenderer::BeginFrameGBuffer(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                         D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
                                         D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart) {
-    if (!m_gbufferRootSignature) return;
+    if (!m_gbufferRootSignature)
+        return;
     cmdList.Get()->SetGraphicsRootSignature(m_gbufferRootSignature.Get());
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, passConstantsAddress);
     // slot 1: dummy（占位）
@@ -197,8 +210,10 @@ void SkinnedRenderer::DrawItems(CommandList &cmdList, const TRenderQueue<Skinned
         cmdList.Get()->IASetIndexBuffer(&ibView);
         cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
 
+        // BaseVertexLocation 恒为 0：dxmesh 索引已绝对化，startVertex 仅记录不参与绘制（见 SubMeshMaterialSlots.md
+        // §2.3）
         cmdList.Get()->DrawIndexedInstanced(item.indexCount > 0 ? item.indexCount : mesh->indexCount,
-                                            item.instanceCount, item.startIndex, item.startVertex, 0);
+                                            item.instanceCount, item.startIndex, 0, 0);
     }
 }
 

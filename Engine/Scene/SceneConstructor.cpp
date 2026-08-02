@@ -213,8 +213,8 @@ void SceneConstructor::OnDependenciesLoaded() {
         MaterialHandle matHandle = m_context->MaterialMgr->RegisterMaterial(data);
         if (matHandle.IsValid()) {
             matMap[key] = matHandle;
-            // log->Info("[SceneConstructor] Material '{}' registered: handle={} texSRV={}", key,
-            //           static_cast<uint32_t>(matHandle.index), data.baseColorTextureId);
+            log->Info("[SceneConstructor][Diag] Material '{}' registered: handleIndex={} materialId=0x{:08x}", key,
+                      matHandle.index, static_cast<uint32_t>(data.materialId));
         } else {
             log->Warn("[SceneConstructor] Material '{}' RegisterMaterial failed", key);
         }
@@ -579,11 +579,17 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
                     auto matIt = matMap.find(matKey);
                     if (matIt != matMap.end() && matIt->second.IsValid()) {
                         meshComp.materialSlots.push_back(matIt->second);
+                        log->Info("[SceneConstructor][Diag] Entity '{}' slot#{}: '{}' -> handleIndex={}", eDesc.name,
+                                  meshComp.materialSlots.size() - 1, matKey, matIt->second.index);
                     } else {
-                        log->Warn("[SceneConstructor] Material '{}' not found for entity '{}'", matKey, eDesc.name);
+                        log->Warn("[SceneConstructor][Diag] Entity '{}' slot#{}: '{}' NOT FOUND in matMap", eDesc.name,
+                                  meshComp.materialSlots.size(), matKey);
                         meshComp.materialSlots.push_back(Resource::MaterialHandle::Invalid());
                     }
                 }
+            } else {
+                log->Warn("[SceneConstructor][Diag] Entity '{}' mesh has NO materials array (materials.empty)",
+                          eDesc.name);
             }
 
             registry->AddComponent<ECS::MeshComponent>(entity, std::move(meshComp));

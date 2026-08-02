@@ -128,6 +128,19 @@ const Math::BoundingVolumeVariant *GeometryResourceManager::GetBounds(GeometryHa
                       *variant);
 }
 
+const std::vector<SubMeshInfo> *GeometryResourceManager::GetSubMeshInfo(GeometryHandle handle) const {
+    const auto *variant = GetGeometryVariant(handle);
+    if (!variant)
+        return nullptr;
+
+    // 仅 TriangleMesh 有 SubMesh 信息
+    const auto *mesh = std::get_if<TriangleMesh>(variant);
+    if (!mesh)
+        return nullptr;
+
+    return &mesh->subMeshes;
+}
+
 // ============================================================================
 // 释放与引用计数
 // ============================================================================

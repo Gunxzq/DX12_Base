@@ -1,12 +1,12 @@
 // TerrainRenderer.cpp
 #include "TerrainRenderer.h"
 #include "Common/d3dUtil.h"
+#include "Renderer/Material/MaterialManager.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
+#include "Renderer/Utils/ShaderUtils.h"
 #include "Resource/Geometry/PatchMesh.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include "Renderer/Material/MaterialManager.h"
-#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DirectX;
 using namespace DX12Engine::Resource;
@@ -51,16 +51,14 @@ void TerrainRenderer::EndFrame() {
 void TerrainRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
                                  D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
-                                 D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV,
-                                 D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
+                                 D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
     if (!m_pso || !m_rootSignature) {
         ErrorReporter::Report("TerrainRenderer::BeginFrame: PSO or RootSignature not initialized");
         return;
     }
 
     // 设置通用资源（Pass、Lights、材质、阴影）
-    BindCommonResources(cmdList, passConstantsAddress, lightCBAddress,
-                        materialBufferSRV, shadowDataSRV, shadowMapSRV);
+    BindCommonResources(cmdList, passConstantsAddress, lightCBAddress, materialBufferSRV, shadowDataSRV, shadowMapSRV);
 }
 
 void TerrainRenderer::DrawTerrain(CommandList &cmdList, const TerrainRenderItem &item) {
@@ -304,9 +302,11 @@ void TerrainRenderer::CreatePSO() {
 void TerrainRenderer::LoadGBufferShader() {
     UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
-    HRESULT hr = CompileShaderFromFile(L"Shaders/Terrain.hlsl", "PS_GBuffer", "ps_5_1", compileFlags, m_psGBuffer, &errors);
+    HRESULT hr =
+        CompileShaderFromFile(L"Shaders/Terrain.hlsl", "PS_GBuffer", "ps_5_1", compileFlags, m_psGBuffer, &errors);
     if (FAILED(hr)) {
-        if (errors) OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
+        if (errors)
+            OutputDebugStringA(reinterpret_cast<const char *>(errors->GetBufferPointer()));
         throw std::runtime_error("TerrainRenderer: Failed to compile PS_GBuffer");
     }
 }
@@ -353,17 +353,20 @@ void TerrainRenderer::BeginFrameGBuffer(CommandList &cmdList, D3D12_GPU_VIRTUAL_
 }
 
 void TerrainRenderer::DrawTerrainGBuffer(CommandList &cmdList, const TerrainRenderItem &item) {
-    if (!m_geometryManager) return;
+    if (!m_geometryManager)
+        return;
     const PatchMesh *mesh = m_geometryManager->GetGeometry<PatchMesh>(item.geometryHandle);
-    if (!mesh || !mesh->isGpuReady) return;
+    if (!mesh || !mesh->isGpuReady)
+        return;
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
     ID3D12Resource *vb = gpuMgr.GetResource(mesh->vertexBufferHandle);
     ID3D12Resource *ib = gpuMgr.GetResource(mesh->indexBufferHandle);
-    if (!vb || !ib) return;
+    if (!vb || !ib)
+        return;
 
-    D3D12_VERTEX_BUFFER_VIEW vbView = {vb->GetGPUVirtualAddress(),
-                                       (UINT)(mesh->vertexCount * mesh->vertexStride), mesh->vertexStride};
+    D3D12_VERTEX_BUFFER_VIEW vbView = {vb->GetGPUVirtualAddress(), (UINT)(mesh->vertexCount * mesh->vertexStride),
+                                       mesh->vertexStride};
     D3D12_INDEX_BUFFER_VIEW ibView = {ib->GetGPUVirtualAddress(),
                                       (UINT)(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2)),
                                       mesh->indexFormat};

@@ -104,7 +104,8 @@ void ProbeBuilder::Build(const ProbeCaptureInfo *probes, uint32_t probeCount, EC
             if (distSq > combined * combined)
                 continue;
 
-            uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp->materialHandle);
+            uint32_t materialIdx = m_materialManager->GetGPUIndex(
+                meshComp->materialSlots.empty() ? Resource::MaterialHandle::Invalid() : meshComp->materialSlots[0]);
 
             InstanceData instData = {};
             DirectX::XMMATRIX worldInvTranspose = DirectX::XMMatrixTranspose(DirectX::XMMatrixInverse(nullptr, world));

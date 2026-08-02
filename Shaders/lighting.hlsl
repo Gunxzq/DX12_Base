@@ -39,6 +39,7 @@ Texture2D gAlbedoRT : register(t20);
 Texture2D gNormalRT : register(t21);
 Texture2D gMaterialRT : register(t22);
 Texture2D gWorldPosRT : register(t23);
+Texture2D gEmissiveRT : register(t24);
 Texture2D gSsaoMap : register(t16);
 
 SamplerState gSamplerPointClamp : register(s3);
@@ -97,8 +98,7 @@ float4 PS(QuadOut pin) : SV_Target
         Light light = gLights[i];
         float3 lightContrib = 0;
 
-        [branch]
-        if (light.Type == 0) // Directional
+        [branch] if (light.Type == 0) // Directional
         {
             lightContrib = ComputeDirectionalLightDeferred(light, albedo, metallic, roughness, N, V);
             if (light.CastShadow > 0.5f)
@@ -124,5 +124,8 @@ float4 PS(QuadOut pin) : SV_Target
     uint probeIndex = (uint)(mat.a * 255.0f);
     float3 reflection = ComputeEnvironmentReflectionDeferred(reflect(-V, N), albedo, metallic, roughness, N, V, probeIndex);
 
-    return float4(ambient + direct + reflection, 1.0f);
+    // 自发光（G-buffer Emissive 通道，HDR，不参与光照直接叠加）
+    float3 emissive = gEmissiveRT.Sample(gSamplerPointClamp, pin.UV).rgb;
+
+    return float4(ambient + direct + reflection + emissive, 1.0f);
 }

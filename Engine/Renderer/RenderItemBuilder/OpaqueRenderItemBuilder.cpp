@@ -2,6 +2,7 @@
 #include "ECS/Core/Components.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/Material/MaterialManager.h"
+#include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Texture/TextureManager.h"
 
 using namespace DX12Engine::Renderer;
@@ -36,7 +37,7 @@ OpaqueRenderItemBuilder::OpaqueRenderItemBuilder(FrameResourceManager *frameReso
     : m_frameResourceManager(frameResources), m_materialManager(materialManager), m_textureManager(textureManager) {}
 
 // ========================================================================
-// Count — 轻量计数遍（只做剔除+LOD判断，不分配不构建）
+// Count — 轻量计数遍（按 SubMesh 计数）
 // ========================================================================
 
 uint32_t OpaqueRenderItemBuilder::Count(ECS::Registry &registry) {
@@ -72,7 +73,7 @@ uint32_t OpaqueRenderItemBuilder::Count(ECS::Registry &registry) {
 }
 
 // ========================================================================
-// BuildTyped — 实际构建
+// BuildTyped — 实际构建（按 SubMesh 展开）
 // ========================================================================
 
 void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<OpaqueRenderItem> &outQueue) {
@@ -110,26 +111,85 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         if (!geoHandle.IsValid())
             continue;
 
-        uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp.materialHandle);
-
-        InstanceData instData = {};
-        XMMATRIX world = transform.GetMatrix();
-        XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
-        XMStoreFloat4x4(&instData.World, world);
-        XMStoreFloat4x4(&instData.WorldInvTranspose, worldInvTranspose);
-        instData.MaterialIndex = materialIdx;
-        instData.ReceiveShadow = meshComp.receivesShadow ? 1 : 0;
-
         uint32_t probeIdx = UINT32_MAX;
         auto *reflectionComp = registry.TryGetComponent<ReflectionConsumerComponent>(entity);
         if (reflectionComp)
             probeIdx = reflectionComp->probeIndex;
-        instData.ProbeIndex = probeIdx;
 
-        BatchKey key{geoHandle, materialIdx, meshComp.startIndex, meshComp.startVertex, meshComp.indexCount};
-        auto &entry = batches[key];
-        entry.instances.push_back(instData);
-        entry.probeIndex = probeIdx;
+        // 准备 InstanceData 公共部分（材质索引和 SubMesh 相关字段在循环内填充）
+        InstanceData baseInstData = {};
+        XMMATRIX world = transform.GetMatrix();
+        XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+        XMStoreFloat4x4(&baseInstData.World, world);
+        XMStoreFloat4x4(&baseInstData.WorldInvTranspose, worldInvTranspose);
+        baseInstData.ReceiveShadow = meshComp.receivesShadow ? 1 : 0;
+        baseInstData.ProbeIndex = probeIdx;
+
+        // 获取 SubMesh 信息
+        const std::vector<SubMeshInfo> *subMeshes = nullptr;
+        if (m_geometryManager) {
+            subMeshes = m_geometryManager->GetSubMeshInfo(geoHandle);
+        }
+
+        if (subMeshes && !subMeshes->empty()) {
+            // SubMesh 展开：每个 SubMesh 生成一个 RenderItem
+            for (size_t i = 0; i < subMeshes->size(); ++i) {
+                const auto &sm = (*subMeshes)[i];
+
+                // 获取该 SubMesh 的材质
+                MaterialHandle matHandle;
+                if (i < meshComp.materialSlots.size() && meshComp.materialSlots[i].IsValid()) {
+                    matHandle = meshComp.materialSlots[i];
+                } else if (!meshComp.materialSlots.empty() && meshComp.materialSlots[0].IsValid()) {
+                    matHandle = meshComp.materialSlots[0]; // fallback
+                } else {
+                    continue; // 无有效材质，跳过此 SubMesh
+                }
+
+                uint32_t materialIdx = m_materialManager->GetGPUIndex(matHandle);
+                // startVertex 恒传 0：dxmesh 索引已绝对化，BaseVertexLocation 必须为 0（见 SubMeshMaterialSlots.md
+                // §2.3）
+                BatchKey key{geoHandle, materialIdx, sm.startIndex, 0, sm.indexCount};
+                auto &entry = batches[key];
+
+                InstanceData instData = baseInstData;
+                instData.MaterialIndex = materialIdx;
+                entry.instances.push_back(instData);
+                entry.probeIndex = probeIdx;
+            }
+        } else {
+            // 无 SubMesh 信息，整个网格作为一个整体（旧路径兼容）
+            // 从 TriangleMesh 读取完整索引范围
+            uint32_t fullIndexCount = 0;
+            uint32_t fullStartIndex = 0;
+            int32_t fullStartVertex = 0;
+            if (m_geometryManager) {
+                const auto *triangleMesh = m_geometryManager->GetGeometry<TriangleMesh>(geoHandle);
+                if (triangleMesh) {
+                    fullIndexCount = triangleMesh->indexCount;
+                    if (!triangleMesh->subMeshes.empty()) {
+                        fullStartIndex = triangleMesh->subMeshes[0].startIndex;
+                        // startVertex 恒 0：索引已绝对化（见 SubMeshMaterialSlots.md §2.3）
+                        fullStartVertex = 0;
+                        fullIndexCount = triangleMesh->subMeshes[0].indexCount;
+                    }
+                }
+            }
+
+            MaterialHandle matHandle =
+                meshComp.materialSlots.empty() ? Resource::MaterialHandle::Invalid() : meshComp.materialSlots[0];
+            if (!matHandle.IsValid())
+                continue;
+
+            uint32_t materialIdx = m_materialManager->GetGPUIndex(matHandle);
+            BatchKey key{geoHandle, materialIdx, fullStartIndex, fullStartVertex, fullIndexCount};
+            auto &entry = batches[key];
+
+            InstanceData instData = baseInstData;
+            instData.MaterialIndex = materialIdx;
+            entry.instances.push_back(instData);
+            entry.probeIndex = probeIdx;
+        }
     }
 
     for (auto &[key, entry] : batches) {
@@ -141,9 +201,8 @@ void OpaqueRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<O
         uint32_t instCount = static_cast<uint32_t>(instances.size());
         m_pendingBatches.push_back({std::move(instances), queueIndex});
 
-        OpaqueRenderItem item =
-            OpaqueRenderItem::Create(key.geometry, key.materialIdx, 0, instCount,
-                                     entry.probeIndex, key.startIndex, key.startVertex, key.indexCount);
+        OpaqueRenderItem item = OpaqueRenderItem::Create(key.geometry, key.materialIdx, 0, instCount, entry.probeIndex,
+                                                         key.startIndex, key.startVertex, key.indexCount);
         item.tempSlot = static_cast<uint32_t>(m_pendingBatches.size() - 1);
         outQueue.Add(item);
     }

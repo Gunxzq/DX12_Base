@@ -81,46 +81,40 @@ void LightingRenderer::CreateRootSignature() {
     //   slot 3: t21 Normal RT                               (SRV 描述符表)
     //   slot 4: t22 Material RT                             (SRV 描述符表)
     //   slot 5: t23 WorldPos RT                             (SRV 描述符表)
-    //   slot 6: t16 SSAO Map                                (SRV 描述符表)
-    //   slot 7: t10 EnvMap                                  (SRV 描述符表)
-    //   slot 8: t15 ReflectionCubemapArray                  (SRV 描述符表)
-    //   slot 9: t11,space1 ShadowParams                        (SRV 描述符表)
-    //   slot 10: t14,space1 gShadowMaps[]                      (无界纹理数组 SRV)
-    CD3DX12_ROOT_PARAMETER params[11];
+    //   slot 6: t24 Emissive RT                             (SRV 描述符表)
+    //   slot 7: t16 SSAO Map                                (SRV 描述符表)
+    //   slot 8: t10 EnvMap                                  (SRV 描述符表)
+    //   slot 9: t15 ReflectionCubemapArray                  (SRV 描述符表)
+    //   slot 10: t11,space1 ShadowParams                       (SRV 描述符表)
+    //   slot 11: t14,space1 gShadowMaps[]                      (无界纹理数组 SRV)
+    CD3DX12_ROOT_PARAMETER params[12];
 
     params[0].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
     params[1].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_PIXEL);
 
-    CD3DX12_DESCRIPTOR_RANGE rtRanges[9];
+    CD3DX12_DESCRIPTOR_RANGE rtRanges[10];
     for (uint32_t i = 0; i < 5; ++i)
-        rtRanges[i].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, (i < 4) ? 20 + i : 16, 0);
-    rtRanges[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0); // t10: EnvMap
-    rtRanges[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 15, 0); // t15: Cubemap Array
-    rtRanges[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 11, 1); // t11,space1: ShadowParams
-    rtRanges[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 14, 1); // t14,space1: gShadowMaps[] (无界)
-    for (uint32_t i = 0; i < 9; ++i)
+        rtRanges[i].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 20 + i, 0); // t20..t24: G-buffer 5 张
+    rtRanges[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 16, 0);         // t16: SSAO
+    rtRanges[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0);         // t10: EnvMap
+    rtRanges[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 15, 0);         // t15: Cubemap Array
+    rtRanges[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 11, 1);         // t11,space1: ShadowParams
+    rtRanges[9].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 14, 1);  // t14,space1: gShadowMaps[] (无界)
+    for (uint32_t i = 0; i < 10; ++i)
         params[2 + i].InitAsDescriptorTable(1, &rtRanges[i], D3D12_SHADER_VISIBILITY_PIXEL);
 
     // 静态采样器 s3: PointClamp, s10: EnvMap 线性 Clamp, s11: 阴影比较
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[3];
-    staticSamplers[0].Init(3, D3D12_FILTER_MIN_MAG_MIP_POINT,
-                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-    staticSamplers[1].Init(10, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-    staticSamplers[2].Init(11, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT,
-                           D3D12_TEXTURE_ADDRESS_MODE_BORDER,
-                           D3D12_TEXTURE_ADDRESS_MODE_BORDER,
-                           D3D12_TEXTURE_ADDRESS_MODE_BORDER, 0.0f, 0,
-                           D3D12_COMPARISON_FUNC_LESS_EQUAL,
-                           D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK);
+    staticSamplers[0].Init(3, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+    staticSamplers[1].Init(10, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                           D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+    staticSamplers[2].Init(11, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+                           D3D12_TEXTURE_ADDRESS_MODE_BORDER, D3D12_TEXTURE_ADDRESS_MODE_BORDER, 0.0f, 0,
+                           D3D12_COMPARISON_FUNC_LESS_EQUAL, D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK);
 
     CD3DX12_ROOT_SIGNATURE_DESC rsDesc;
-    rsDesc.Init(11, params, 3, staticSamplers,
-                D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    rsDesc.Init(12, params, 3, staticSamplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> signature, error;
     HRESULT hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error);
@@ -129,8 +123,8 @@ void LightingRenderer::CreateRootSignature() {
     }
     ThrowIfFailed(hr);
 
-    ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(),
-                                              signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
+    ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(),
+                                              IID_PPV_ARGS(&m_rootSignature)));
 }
 
 // ========================================================================
@@ -169,19 +163,15 @@ void LightingRenderer::CreatePSO() {
 // 帧渲染接口
 // ========================================================================
 
-void LightingRenderer::BeginFrame(CommandList &cmdList,
-                                  D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
-                                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress,
-                                  D3D12_GPU_DESCRIPTOR_HANDLE albedoSrv,
-                                  D3D12_GPU_DESCRIPTOR_HANDLE normalSrv,
-                                  D3D12_GPU_DESCRIPTOR_HANDLE materialSrv,
-                                  D3D12_GPU_DESCRIPTOR_HANDLE worldPosSrv,
-                                  D3D12_GPU_DESCRIPTOR_HANDLE ssaoSrv,
-                                  D3D12_GPU_DESCRIPTOR_HANDLE envMapSrv,
+void LightingRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
+                                  D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE albedoSrv,
+                                  D3D12_GPU_DESCRIPTOR_HANDLE normalSrv, D3D12_GPU_DESCRIPTOR_HANDLE materialSrv,
+                                  D3D12_GPU_DESCRIPTOR_HANDLE worldPosSrv, D3D12_GPU_DESCRIPTOR_HANDLE emissiveSrv,
+                                  D3D12_GPU_DESCRIPTOR_HANDLE ssaoSrv, D3D12_GPU_DESCRIPTOR_HANDLE envMapSrv,
                                   D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySrv,
-                                  D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV,
-                                  D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
-    if (!m_pso || !m_rootSignature) return;
+                                  D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
+    if (!m_pso || !m_rootSignature)
+        return;
 
     cmdList.Get()->SetPipelineState(m_pso.Get());
     cmdList.Get()->SetGraphicsRootSignature(m_rootSignature.Get());
@@ -197,30 +187,33 @@ void LightingRenderer::BeginFrame(CommandList &cmdList,
         cmdList.Get()->SetGraphicsRootDescriptorTable(4, materialSrv);
     if (worldPosSrv.ptr != 0)
         cmdList.Get()->SetGraphicsRootDescriptorTable(5, worldPosSrv);
+    if (emissiveSrv.ptr != 0)
+        cmdList.Get()->SetGraphicsRootDescriptorTable(6, emissiveSrv);
 
-    // slot 6: SSAO
+    // slot 7: SSAO
     if (ssaoSrv.ptr != 0)
-        cmdList.Get()->SetGraphicsRootDescriptorTable(6, ssaoSrv);
+        cmdList.Get()->SetGraphicsRootDescriptorTable(7, ssaoSrv);
 
-    // slot 7: 环境贴图
+    // slot 8: 环境贴图
     if (envMapSrv.ptr != 0)
-        cmdList.Get()->SetGraphicsRootDescriptorTable(7, envMapSrv);
+        cmdList.Get()->SetGraphicsRootDescriptorTable(8, envMapSrv);
 
-    // slot 8: 反射探针 Cubemap Array
+    // slot 9: 反射探针 Cubemap Array
     if (cubemapArraySrv.ptr != 0)
-        cmdList.Get()->SetGraphicsRootDescriptorTable(8, cubemapArraySrv);
+        cmdList.Get()->SetGraphicsRootDescriptorTable(9, cubemapArraySrv);
 
-    // slot 9: 阴影采样参数 (ShadowParams)
+    // slot 10: 阴影采样参数 (ShadowParams)
     if (shadowDataSRV.ptr != 0)
-        cmdList.Get()->SetGraphicsRootDescriptorTable(9, shadowDataSRV);
+        cmdList.Get()->SetGraphicsRootDescriptorTable(10, shadowDataSRV);
 
-    // slot 10: 阴影贴图无界数组 gShadowMaps[]（方向光/点光源共用）
+    // slot 11: 阴影贴图无界数组 gShadowMaps[]（方向光/点光源共用）
     if (shadowMapSRV.ptr != 0)
-        cmdList.Get()->SetGraphicsRootDescriptorTable(10, shadowMapSRV);
+        cmdList.Get()->SetGraphicsRootDescriptorTable(11, shadowMapSRV);
 }
 
 void LightingRenderer::Draw(CommandList &cmdList) {
-    if (!m_pso) return;
+    if (!m_pso)
+        return;
     cmdList.Get()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     cmdList.Get()->DrawInstanced(4, 1, 0, 0);
 }

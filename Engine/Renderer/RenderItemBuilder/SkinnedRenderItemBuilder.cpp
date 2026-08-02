@@ -92,7 +92,8 @@ void SkinnedRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
         if (!geoHandle.IsValid())
             continue;
 
-        uint32_t materialIdx = m_materialManager->GetGPUIndex(meshComp.materialHandle);
+        uint32_t materialIdx = m_materialManager->GetGPUIndex(
+            meshComp.materialSlots.empty() ? Resource::MaterialHandle::Invalid() : meshComp.materialSlots[0]);
 
         InstanceData instData = {};
         XMMATRIX world = transform.GetMatrix();
@@ -103,7 +104,7 @@ void SkinnedRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
         instData.ReceiveShadow = meshComp.receivesShadow ? 1 : 0;
         instData.ProbeIndex = UINT32_MAX;
 
-        SkinnedBatchKey key{geoHandle, materialIdx, meshComp.indexCount, meshComp.startIndex, meshComp.startVertex};
+        SkinnedBatchKey key{geoHandle, materialIdx, 0, 0, 0}; // SubMesh 展开在 Step 4 中实现
         auto &entry = batches[key];
         entry.instances.push_back(instData);
         entry.entities.push_back(entity);
@@ -135,10 +136,11 @@ void SkinnedRenderItemBuilder::BuildTyped(ECS::Registry &registry, TRenderQueue<
             continue;
 
         uint32_t slot = static_cast<uint32_t>(m_pendingBatches.size() - 1);
-        SkinnedRenderItem item =
-            SkinnedRenderItem::Create(key.geometry, key.materialIdx, 0, boneBuffer,
-                                      static_cast<uint32_t>(pending.instances.size()), key.indexCount,
-                                      key.startIndex, key.startVertex);
+        // startVertex 恒 0（当前 key 全 0）：dxmesh 索引已绝对化，BaseVertexLocation 必须为 0（见
+        // SubMeshMaterialSlots.md §2.3）
+        SkinnedRenderItem item = SkinnedRenderItem::Create(key.geometry, key.materialIdx, 0, boneBuffer,
+                                                           static_cast<uint32_t>(pending.instances.size()),
+                                                           key.indexCount, key.startIndex, key.startVertex);
         item.tempSlot = slot;
         outQueue.Add(item);
     }

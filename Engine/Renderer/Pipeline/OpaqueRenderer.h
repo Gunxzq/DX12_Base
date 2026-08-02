@@ -48,8 +48,7 @@ public:
 
     // ── G-buffer 输出（延迟渲染） ──
     void BeginFrameGBuffer(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
-                           D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
-                           D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart);
+                           D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV, D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart);
     void DrawInstancedGBuffer(CommandList &cmdList, DX12Engine::Resource::GeometryHandle geometryHandle,
                               D3D12_GPU_VIRTUAL_ADDRESS instanceBufferAddress, uint32_t instanceCount,
                               uint32_t startIndex = 0, int32_t startVertex = 0, uint32_t indexCount = 0);
@@ -78,8 +77,8 @@ private:
     Resource::MaterialManager *m_materialManager = nullptr;
 
     // 着色器字节码
-    Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;         // 顶点着色器（G-buffer PSO 复用）
-    Microsoft::WRL::ComPtr<ID3DBlob> m_psGBufferBlob;  // G-buffer 像素着色器
+    Microsoft::WRL::ComPtr<ID3DBlob> m_vsBlob;        // 顶点着色器（G-buffer PSO 复用）
+    Microsoft::WRL::ComPtr<ID3DBlob> m_psGBufferBlob; // G-buffer 像素着色器
 
     // 投影矩阵（窗口 Resize 时更新）
     DirectX::XMMATRIX m_projectionMatrix;
