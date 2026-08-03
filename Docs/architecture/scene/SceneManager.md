@@ -1393,7 +1393,7 @@ EditorSceneManager::GetSceneEntities(sceneId)
 | 5 | 逐步替换 `SceneManager::GetRegistry()` 调用为 `World::GetRegistry()` | 各调用点替换 |
 | 6 | Editor 端各 Manager 通过 TagComponent 提供逻辑分区视角 | 渐进式 |
 
-> 详细设计见 `Docs/architecture/World.md`。
+> 详细设计见 `Docs/architecture/scene/World.md`。
 
 ---
 

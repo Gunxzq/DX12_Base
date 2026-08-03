@@ -15,7 +15,7 @@ JSON 格式，扁平化存储，实体间的关系通过 ID 引用表达（`rela
 > **设计决策**：扁平 JSON + ID 引用 vs 嵌套树。
 > 选择扁平的理由：（1）解析线性 O(n)，可并行；（2）增量加载只需 append；（3）ECS 天然扁平，`RelationshipComponent` 直接映射 JSON 字段；
 > （4）关系只是数据，可以随意切断，不破坏文件结构。
-> 详见 `Docs/architecture/RelationshipModel.md`。
+> 详见 `Docs/architecture/scene/RelationshipModel.md`。
 
 ### 1.1 顶层结构
 
@@ -151,7 +151,7 @@ JSON 格式，扁平化存储，实体间的关系通过 ID 引用表达（`rela
 
 程序化生成时由 `SceneConstructor` 在 `OnDependenciesLoaded` 阶段调用 `GeometryGenerator` 生成立方体或球体的 VB/IB，创建 DEFAULT 堆 GPU 缓冲并注册到 `GeometryResourceManager`，不依赖外部 mesh 文件。详见 `GeometryGenerator` 接口文档。
 
-> **设计原则**：`sceneEnvironment` 中的数据无 TransformComponent、不被剔除、不被拾取、不被属性卡编辑。它们由 Manager 直接在初始化阶段设置。`entities` 中的 ECS 实体数据则参与完整的剔除/拾取/编辑/序列化流程。详见 `Docs/architecture/EngineOverview.md §9.6`。
+> **设计原则**：`sceneEnvironment` 中的数据无 TransformComponent、不被剔除、不被拾取、不被属性卡编辑。它们由 Manager 直接在初始化阶段设置。`entities` 中的 ECS 实体数据则参与完整的剔除/拾取/编辑/序列化流程。详见 `Docs/architecture/core/EngineOverview.md §9.6`。
 
 ### 1.2 依赖收集
 
@@ -260,7 +260,7 @@ JSON 格式，扁平化存储，实体间的关系通过 ID 引用表达（`rela
 - **引擎 CORE 不自动传播 Transform** — 相机跟随、武器挂点同步等行为由 Gameplay 层脚本实现
 - **Editor 端的联动**（拖动父带动子）由 Editor 端自行实现，不在 CORE 中
 
-详见 `Docs/architecture/RelationshipModel.md`。
+详见 `Docs/architecture/scene/RelationshipModel.md`。
 
 ---
 

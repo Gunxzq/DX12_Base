@@ -244,7 +244,7 @@ static int CommandX2Scene(const std::vector<std::string> &args) {
 
         auto &meshComp = comp["mesh"];
         meshComp["geometry"] = meshKey;
-        meshComp["material"] = meshKey + "_mat0";
+        meshComp["materials"] = {meshKey + "_mat0"};
 
         entities.push_back(entity);
     }
@@ -886,7 +886,7 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
         c["transform"]["rotation"] = {0, 0, 0, 1};
         c["transform"]["scale"] = {1, 1, 1};
         c["mesh"]["geometry"] = meshKey;
-        c["mesh"]["material"] = matKey;
+        c["mesh"]["materials"] = {matKey};
         if (isSkybox) {
             c["skybox"] = nullptr;
             c["transparent"] = nullptr;

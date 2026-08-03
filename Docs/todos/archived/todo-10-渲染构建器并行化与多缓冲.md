@@ -3,6 +3,8 @@
 日期：2026-07-02（合并自原 todo10.md + todo11.md）
 关联：todo.md#14、todo.md#21
 
+> ⚠️ **演进指引（2026-08-03）**：本文"三阶段三次遍历 + CullingResult/LODResult 临时结构每帧分配"的问题，已被 **RendererDataDriven.md §4.1b/c/d 缓存分桶**落地演进——集中粗筛选（RenderSlotCache 缓存表 CRUD 驱动）+ CulledSet 分发到桶 + Builder 消费桶（子集并行计算），CullingResult/LODResult 临时结构不再每帧重建。§一/§二（PreRender 并行化方案）参见 `Docs/architecture/rendering/RendererDataDriven.md` 与 `Docs/snapshots/RendererDataDriven_Snapshot_20260803.md`；§三（多缓冲）仍有效，参见 `FrameResourceManager.md`（FrameResource RingBuffer / FrameSync）。
+
 ---
 
 ## 一、问题背景

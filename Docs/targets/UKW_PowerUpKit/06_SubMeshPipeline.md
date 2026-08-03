@@ -2,7 +2,7 @@
 
 > 日期：2026-07-30（更新：2026-07-30，流程改为刚性绑定不解烘焙）
 > 状态：📋 设计定案
-> 关联：`Docs/architecture/SubMeshMaterialSlots.md`、`Docs/targets/UKW_PowerUpKit/02_RobotAndAnimation.md`、`AssetTool/`
+> 关联：`Docs/architecture/rendering/SubMeshMaterialSlots.md`、`Docs/targets/UKW_PowerUpKit/02_RobotAndAnimation.md`、`AssetTool/`
 
 ---
 
@@ -248,17 +248,19 @@ HODParser 已有输出格式，包含部件名/父子关系/TRS。无需额外�
 
 ---
 
-## 5. 实施步骤（2026-07-30 更新）
+## 5. 实施步骤（2026-07-30 更新；2026-08-01 标注退役）
+
+> ⚠️ **2026-08-01 路线定案**：本表的 A 系列（importrobot / .x 直接拼接）已**退役不调用**，仅作参考实现。引擎资产唯一来源是 Blender 优化后的最终 FBX（见 `07_EngineAssetPipeline.md`，fbxs2dxmesh 立项 P1）。下表保留历史状态供参考。
 
 | Step | 内容 | 关键文件 | 状态 |
 |:----:|:------|:---------|:------|
-| **A** | **AssetTool: 实现合并命令** — 解析 .hod → 合并 .x 部件 → 输出 .dxmesh（DxMeshSkinnedVertex + SubMesh 表）+ hod.json + scene.json | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现（GUI） |
-| **A1** | **变换修正** — Body_d 偏移 + 层级累乘 + Ry(180°) 翻转 | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现 |
-| **A2** | **LR 交换** — 复选框控制 _r 骨骼交换 | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现 |
-| **A3** | **切换到 DxMeshSkinnedVertex** — 顶点不解烘焙，刚性绑定 boneIndex/weight | `AssetTool/AssetToolGUI.cpp` | ❌ 当前仍为烘焙式静态顶点，待改为 skinned 格式 |
-| **B** | **AssetToolGUI: 添加"导入机体"按钮** | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现 |
-| **C** | **引擎侧: SkeletonManager 加载 hod.json** — 从 JSON 加载骨架数据并注册 | `SkeletonManager.h/.cpp` | ❌ 未实现 |
-| **D** | **引擎侧: SkinnedComponent 接入** — 场景加载时创建 SkinnedComponent | `SceneConstructor.cpp` | ⚠️ 框架已有 |
+| **A** | **AssetTool: 实现合并命令** — 解析 .hod → 合并 .x 部件 → 输出 .dxmesh（DxMeshSkinnedVertex + SubMesh 表）+ hod.json + scene.json | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现（GUI，已退役） |
+| **A1** | **变换修正** — Body_d 偏移 + 层级累乘 + Ry(180°) 翻转 | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现（规则被 fbxs2dxmesh 复用） |
+| **A2** | **LR 交换** — 复选框控制 _r 骨骼交换 | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现（FBX 路径不再需要） |
+| **A3** | **切换到 DxMeshSkinnedVertex** — 顶点不解烘焙，刚性绑定 boneIndex/weight | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现（skinned 输出，A3 标记已过时；FBX 路径直接读权重） |
+| **B** | **AssetToolGUI: 添加"导入机体"按钮** | `AssetTool/AssetToolGUI.cpp` | ✅ 已实现（已退役） |
+| **C** | **引擎侧: SkeletonManager 加载 hod.json** — 从 JSON 加载骨架数据并注册 | `SkeletonManager.h/.cpp` | ❌ 未实现（改为从 `.bone` 加载，见待办 U2） |
+| **D** | **引擎侧: SkinnedComponent 接入** — 场景加载时创建 SkinnedComponent | `SceneConstructor.cpp` | ⚠️ 框架已有（见待办 U3） |
 | **E** | **ANI 动画解析** | `AssetTool/Core/ANIParser.cpp` | ✅ 已实现（2026-07-31，1.008 + PUK 双格式，标记法 + 母版驱动） |
 
 > 注意：Step A 的 CLI 版本（`main.cpp` 的 `CommandImportRobot`）不含 A1/A2 的修正步骤，功能落后于 GUI 版本。未来应考虑目录重构：`AssetTool/Core/` 公共逻辑、`AssetTool/CLI/`、`AssetTool/GUI/`。

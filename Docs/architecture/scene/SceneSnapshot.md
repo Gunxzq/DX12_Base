@@ -270,7 +270,7 @@ private:
 
 ### 4.3 与 SceneManager（引擎 CORE）的关系
 
-回顾 `Docs/architecture/SceneManager.md §5`，EditorSceneManager 的核心职责是 **ECS 实体管理**：
+回顾 `Docs/architecture/scene/SceneManager.md §5`，EditorSceneManager 的核心职责是 **ECS 实体管理**：
 
 | 职责 | 说明 |
 |:-----|:------|

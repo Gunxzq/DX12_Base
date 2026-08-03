@@ -46,6 +46,6 @@ Frame N+2: 恢复正常
 
 ## 关联
 
-- `Docs/architecture/SceneSnapshot.md §10.2`
+- `Docs/architecture/scene/SceneSnapshot.md §10.2`
 - `EditorSceneManager::DrawTabBar()`
 - `EditorSceneManager::SwitchScene()`

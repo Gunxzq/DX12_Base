@@ -379,6 +379,6 @@ struct AnimationPreviewState {
 
 ## 相关文档
 
-- 参见 `Docs/architecture/Editor.md` 编辑器架构
-- 参见 `Docs/architecture/SnapshotSystem.md` 文件变更检测
+- 参见 `Docs/architecture/editor/Editor.md` 编辑器架构
+- 参见 `Docs/architecture/core/SnapshotSystem.md` 文件变更检测
 - 参见 `Docs/notes/asyncResource.md` 异步资源加载

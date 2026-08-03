@@ -216,4 +216,4 @@ RenderDoc 显示 G-buffer 四张 RT 在 OpaqueSystem 写入后数据正确，但
 | `Game/Game/RenderPipeline/GameRenderPipeline.h/.cpp` | 改用 `WindowFrameResources` |
 | `Editor/EditorLib/Scene/EditorViewport.h/.cpp` | 改用 `WindowFrameResources`，消除自管理 RT 的重复逻辑 |
 
-详见 `Docs/architecture/WindowFrameResources.md`。
+详见 `Docs/architecture/rendering/WindowFrameResources.md`。

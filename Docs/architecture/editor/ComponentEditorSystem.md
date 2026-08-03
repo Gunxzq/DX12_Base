@@ -376,6 +376,141 @@ Engine/ThirdParty/
 
 ## 九、相关文档
 
-- `Docs/architecture/EditorPanelSystem.md` — 编辑器面板体系
-- `Docs/architecture/Editor.md` — 编辑器架构总览
+- `Docs/architecture/editor/EditorPanelSystem.md` — 编辑器面板体系
+- `Docs/architecture/editor/Editor.md` — 编辑器架构总览
 - `Docs/todos/remaining_issues.md` — 待办清单
+
+---
+
+## 十、已知缺陷与局限（2026-08-01 记录，暂不重构）
+
+> 基于对已实现代码（`Properties/` 四个 Editor + `EditorLayout::DrawProperties` 消费端）的核查记录。
+> 现状结论：**横向扩展性（新增组件类型）良好，纵向能力（字段级）受限**。以下按影响排序。
+
+| # | 缺陷 | 影响 | 备注 |
+|:-:|:-----|:-----|:-----|
+| 1 | **声明式只到组件级，字段级仍是命令式**：每个 Editor 手写 ImGui 控件并直接写组件内存，无字段级拦截点 | Undo/Redo、多选编辑、复制粘贴、重置默认值等编辑器能力无法低成本接入（设计文档 P2 2.3 的"操作前快照"至今未实现） | 纵向优化的核心瓶颈；需字段描述符方案（member pointer + widget 声明）才能解锁 |
+| 2 | **新增组件注册链三处手工环节**：新 Editor 文件 + `ComponentEditorRegistrations.h` 声明 + `Editor::Initialize()` 调用，三处缺一即组件在属性卡中静默缺失 | 漏注册不易察觉，靠人工保证 | 可收敛为宏/静态自注册，但显式调用更可调试，当前可接受 |
+| 3 | **组件绘制顺序不可控**：`DrawProperties()` 直接遍历 `unordered_map<type_index, info>`，展示顺序由哈希决定、无显式排序 | 组件数量增多后展示顺序不可预测 | `category` 字段已声明但消费端**完全未使用**（无分组/排序），属预留元数据 |
+| 4 | **每个 Editor 重复样板代码**：`CollapsingHeader` / `PushStyleVar` / `Indent` / `PushItemWidth` / `Unindent` 等约 10 行在各 Editor 间复制 | 样板噪音，新增 Editor 时复制粘贴易漏配对（Push/Pop 不平衡） | 可用 RAII 面板作用域对象收敛 |
+| 5 | **自定义逻辑无"自定义段"钩子**：`TransformEditor` 的四元数↔欧拉角转换纯手写 | 若未来引入字段描述符方案，此类自定义逻辑无法用纯描述符表达，需保留 escape hatch（如 `CustomSection` 回调） | 设计描述符层时必须预留 |
+| 6 | **组件编辑与序列化四端一致性无联动**：字段直接写组件，若组件结构变更，需手工同步 Editor + `LightDesc` to_json/from_json + `SceneLoader::Parse*` + `SceneConstructor`（规则 23） | 存在"属性卡可编辑但保存后丢失"的隐患（`BugFix_LightDesc_MissingFalloffFields` 同类问题） | 字段描述符方案的红利之一：元数据可与 Desc 序列化双向校验/自动生成 |
+
+### 记录结论
+
+- 当前"组件级声明式 + 字段级命令式"在组件数量少时够用，新增组件类型这条路是通的、干净的，**无需近期改动**。
+- 优化空间的优先级建议（若未来重构）：**字段描述符方案（含自定义段钩子）> 样板代码收敛 > 绘制顺序确定性**。
+- 重构触发条件参考：组件数量跨过 ~10 个，或需要多选编辑/Undo-Redo 时，再考虑上描述符层。
+
+---
+
+## 十一、Gizmo 绘制/计算分离重构（2026-08-01 已执行）
+
+> 背景：`EditorGizmoSystem.cpp` 中四个辅助函数（`WorldToScreen` / `DrawAABBWireframe` / `ComputeFrustumCorners` / `DrawFrustumWireframe`）存在通用数学与引擎侧重复，且"绘制"与"计算"混杂。原则定为**绘制与计算分离**。
+
+### 改动清单
+
+| # | 文件 | 内容 |
+|:-:|:-----|:-----|
+| 1 | `Engine/Renderer/Scene/Struct/Frustum.h/.cpp` | `BuildFromCamera` 增加 `isOrtho` / `orthoSize` 参数（默认 false/0.0，保持现有调用兼容），正交投影下近/远平面尺寸恒定 = orthoSize |
+| 2 | `Engine/Math/ScreenProjection.h`（新增） | `Math::ProjectToScreen(worldPos, viewProj, vpMinX, vpMinY, vpW, vpH)`：世界坐标 → 屏幕像素，无 ImGui 依赖，Editor/Engine 通用 |
+| 3 | `Editor/EditorLib/Viewport/Systems/EditorGizmoSystem.cpp` | 删除 4 个旧辅助函数；新增统一 `DrawBoxWireframe(worldCorners[8], viewProj, ..., dl, connectColor, nearColor, farColor, thickness)`；AABB 分支与视锥体分支均改为"构造世界角点 → DrawBoxWireframe" |
+
+### 关键设计决策
+
+1. **计算层唯一化**：视锥体角点计算统一收敛到 `Frustum::BuildFromCamera`（补正交分支后覆盖透视+正交），Gizmo 不再持有自己的 `ComputeFrustumCorners`。
+2. **绘制层保留 ImGui 依赖**：`DrawBoxWireframe` 仍留在 Gizmo（`ImDrawList` / `ImVec2` / `ImU32`），但其内部投影调用 `Math::ProjectToScreen`——计算归 Math，绘制归 Editor。
+3. **角点布局约定统一**：`DrawBoxWireframe` 约定 8 角点布局"0-3 面 A / 4-7 面 B / i↔i+4 连接"，与 `Frustum::GetCorners()`（BL/BR/TL/TR 环序）天然一致，AABB 分支按同布局构造。
+4. **行为保持**：视锥体三色（近亮/远暗/连接中间色）通过 `nearColor`/`farColor`/`connectColor` 参数保留，AABB 黄色线框传 0/0 复用 connectColor。
+5. **射线检测链路未动**：`VisibleRaycaster`（ScreenToRay / RaycastOnSet / RaycastAll）不在本次改动范围，点击拾取 + 包围盒反馈行为不变。
+
+### 后续可复用面（本次未做）
+
+- `Math::ProjectToScreen` 的逆方向（屏幕→世界）仍由 `VisibleRaycaster::ScreenToRay` 内部持有 NDC 数学，未来可抽到 Math 层统一（`UnprojectScreen`），使世界↔屏幕投影成为单一归属。
+- `DrawBoxWireframe` 目前仅 Gizmo 使用；若未来多实体线框（骨骼/路径/多选）出现，可提为独立 Overlay 模块。
+
+---
+
+## 十二、视锥体绘制修复（2026-08-01 已执行）
+
+> 反馈：重构后相机可见区域（视锥体）绘制异常、蓝色过浅。定位到两个根因并修复。
+
+### 根因 1：`Frustum::BuildFromCamera` up 重正交化方向错误（几何异常）
+
+`Frustum.cpp` 中重正交化 up 的叉积方向写反：
+
+```cpp
+// 修复前：X × Z = -Y，up 翻转 → 角点上下颠倒、滚转丢失
+upVec = XMVector3Normalize(XMVector3Cross(right, fwd));
+// 修复后：Z × X = +Y，up 方向正确
+upVec = XMVector3Normalize(XMVector3Cross(fwd, right));
+```
+
+- 影响：视锥体 8 角点 Y 分量翻转（上下颠倒），相机实体带滚转时视锥体与实体朝向不一致，视觉上"绘制异常"。
+- 由于 `ComputePlanesFromCorners` 从角点重算平面并自动校正法线方向，**剔除/射线检测不受影响**（用户确认射线检测与包围盒正常）——这也是该 bug 未被早期发现的原因。
+- 现有调用方（`CullingSystem`、`LightManager`）传入的 up 均已正交，重正交化仅为数值稳定，修复后输出不变或更正确。
+
+### 根因 2：视锥体颜色过浅（视觉问题）
+
+- 连接边 `connectColor` alpha 仅 120（半透明），叠加在视口图像上显得"蓝色太浅"。
+- 修复：`nearColor (0,200,255,220) → (0,220,255,255)`、`farColor (0,150,200,160) → (0,150,210,190)`、`connectColor (0,180,220,120) → (0,190,235,200)`，线宽 1.5f → 2.0f（恢复重构前的近平面加粗观感）。
+
+### 改动清单
+
+| 文件 | 内容 |
+|:-----|:-----|
+| `Engine/Renderer/Scene/Struct/Frustum.cpp` | `upVec = XMVector3Cross(fwd, right)` 修正叉积方向 + 注释说明 |
+| `Editor/EditorLib/Viewport/Systems/EditorGizmoSystem.cpp` | 视锥体三色饱和度/alpha 提高，线宽 2.0f |
+
+### 经验教训
+
+1. **标准叉积在左手系的约定**：`up × forward = +X` 依赖向量定义，但重正交化 up 时用 `forward × right`（Z × X = +Y）而非 `right × forward`（X × Z = -Y），两者差一个负号，肉眼不可见的角点翻转会直接体现为渲染方向错误。
+2. **调试叠加层颜色 alpha 不宜过低**：视口图像之上叠加的线框，alpha < 150 会被背景淹没，建议连接边至少 180+。
+
+---
+
+## 十三、视锥体色相区分（2026-08-01 已执行）
+
+> 反馈：视锥体远近裁剪面与锥角连接边应使用不同颜色，便于快速观察投影面。
+
+### 方案
+
+近/远裁剪面与锥角连接边改用**不同色相**（此前三者均为蓝色系，区分度不足）：
+
+| 元素 | 颜色 | 说明 |
+|:-----|:-----|:-----|
+| 近裁剪面 | `(0, 230, 255, 255)` 亮青 | 投影面入口，最醒目 |
+| 远裁剪面 | `(255, 170, 50, 220)` 橙黄 | 投影面出口，与近平面色相对立 |
+| 锥角连接边 | `(190, 215, 255, 170)` 中性白 | 不干扰投影面识别 |
+
+线宽保持 2.0f。改动位于 `EditorGizmoSystem.cpp` 视锥体分支的颜色常量，`DrawBoxWireframe` 的三色参数机制无需改动。
+
+---
+
+## 十四、相机 FOV 语义决策：单垂直 FOV + aspect 推导（2026-08-02 记录）
+
+> 讨论：相机从垂直和水平看应存在不同夹角，但属性卡只显示一个 FOV——这是行业标准做法，非遗漏。
+
+### 决策
+
+**相机只有一个 FOV（垂直视野角），水平 FOV 由宽高比推导，不设独立参数。**
+
+- 属性卡 `CameraEditor.cpp` 编辑的 FOV = 垂直视野角（度），与 `CameraManager::CalculateMatrices` 中 `XMMatrixPerspectiveFovLH(camera.FOV, camera.AspectRatio, ...)` 的 `fovAngleY` 完全一致。
+- 垂直/水平 FOV 数学关联（非独立变量）：
+  ```
+  tan(hFov/2) = tan(vFov/2) × aspect
+  ```
+  给定垂直角 + aspect，水平角唯一确定；独立可设两者仅适用于变形镜头（anamorphic），游戏引擎基本不使用。
+
+### 与大型引擎对齐
+
+| 引擎 | FOV 语义 | 另一方向 |
+|:-----|:---------|:---------|
+| **Unity** | 垂直 FOV（`fieldOfView`） | aspect 推导 |
+| **Unreal** | 水平 FOV（默认 90°） | aspect 推导 |
+| **本项目** | 垂直 FOV（同 Unity） | aspect 推导 |
+
+### 关键边界
+
+- **aspect 来自运行时视口宽高比**（`CameraManager::OnResize` 更新），不是相机组件字段——因此相机属性卡中没有"宽高比"一项。
+- 若未来对齐 Unreal 的"水平 FOV"操作习惯：仅需属性卡存水平角、`CalculateMatrices` 由 aspect 反推垂直角喂给 `PerspectiveFovLH`，不涉及结构变更。

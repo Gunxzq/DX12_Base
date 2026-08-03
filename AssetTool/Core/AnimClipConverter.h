@@ -13,7 +13,7 @@
 //     保证动画采样矩阵与骨架层级相乘自洽；不额外翻转 Z——
 //     若蒙皮验证发现坐标系不一致，.bone/.anim/顶点三处统一修正）
 //
-// 格式规范见 Docs/architecture/AnimationAsset.md §二/§四
+// 格式规范见 Docs/architecture/animation/AnimationAsset.md §二/§四
 // ========================================================================
 
 #include <string>

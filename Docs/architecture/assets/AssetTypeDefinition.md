@@ -22,7 +22,7 @@ enum class AssetType : uint8_t {
 }
 ```
 
-> 枚举顺序说明：`Mesh`/`Texture`/`Material`/`Terrain`/`Scene` 保持原有顺序不变（二进制兼容）；`Skeleton`/`Animation` 为原子资产新增；`Character` 为复合资产新增；`Prefab`/`ParticleSystem`/`Audio` 为预留。详见 `Docs/architecture/CharacterAsset.md`。
+> 枚举顺序说明：`Mesh`/`Texture`/`Material`/`Terrain`/`Scene` 保持原有顺序不变（二进制兼容）；`Skeleton`/`Animation` 为原子资产新增；`Character` 为复合资产新增；`Prefab`/`ParticleSystem`/`Audio` 为预留。详见 `Docs/architecture/assets/CharacterAsset.md`。
 
 ## 新增资产类型时需同步修改的部分
 
@@ -41,7 +41,7 @@ enum class AssetType : uint8_t {
 | `Animation` | `AnimLoader`（`.anim`） | `ClipHandle` |
 | `Character` | `CharacterLoader`（`.character`） | `CharacterHandle` |
 
-`Character` 是复合资产：`CharacterLoader` 先递归加载依赖的原子资产（`.dxmesh` / `.bone` / `.material` / `.anim`），全部就绪后才创建 Handle。依赖收集逻辑见 `Docs/architecture/CharacterAsset.md` §6.2。
+`Character` 是复合资产：`CharacterLoader` 先递归加载依赖的原子资产（`.dxmesh` / `.bone` / `.material` / `.anim`），全部就绪后才创建 Handle。依赖收集逻辑见 `Docs/architecture/assets/CharacterAsset.md` §6.2。
 
 ### 3. 文件图标
 **文件**: `Editor/EditorLib/FileIconProvider.cpp`
@@ -55,14 +55,14 @@ enum class AssetType : uint8_t {
 
 `Character` 以场景组件形式被引用（`character: { asset, startClip }`），`SceneConstructor` 需：
 - 依赖收集时把 `.character` 的依赖（`.dxmesh` / `.bone` / `.material` / `.anim`）递归加入；
-- 装配时创建 `MeshComponent`（材质槽）+ `SkinnedComponent`（skeletonHandle + currentClip），见 `Docs/architecture/CharacterAsset.md` §七。
+- 装配时创建 `MeshComponent`（材质槽）+ `SkinnedComponent`（skeletonHandle + currentClip），见 `Docs/architecture/assets/CharacterAsset.md` §七。
 
 ### 5. 资产预览
 **文件**: `Editor/EditorLib/Editor.cpp`
 双击回调中的扩展名白名单判断（`.dxmesh` / `.obj`）可能需要扩展。
 
 ### 6. 文档
-**文件**: `Docs/architecture/AssetLoaderImprovement.md`
+**文件**: `Docs/architecture/assets/AssetLoaderImprovement.md`
 如果加载逻辑有变更，同步更新该文档。
 
 ## 搜索参考

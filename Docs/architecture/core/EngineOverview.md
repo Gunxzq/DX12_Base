@@ -464,7 +464,7 @@ SceneManager（不再管理 ECS，只做场景序列化 + 环境状态管理）�
 4. **Game 端无分区概念**，所有实体都是游戏内容
 5. **World 和 SceneManager 是组合关系**，SceneManager 持有 World* 引用
 
-> 详细设计见 `Docs/architecture/World.md`。
+> 详细设计见 `Docs/architecture/scene/World.md`。
 
 ---
 

@@ -862,7 +862,7 @@ static void ConvertMapScene(const std::wstring &inputDir, const std::wstring &ou
             c["transform"]["rotation"] = {0, 0, 0, 1};
             c["transform"]["scale"] = {1, 1, 1};
             c["mesh"]["geometry"] = meshKey;
-            c["mesh"]["material"] = matKey;
+            c["mesh"]["materials"] = {matKey};
             if (isSkybox) {
                 c["skybox"] = nullptr;
                 c["transparent"] = nullptr;

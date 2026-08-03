@@ -256,7 +256,7 @@ ConfigManager 仍持有的单例状态：
 
 ## 6. FrameResourceManager 配置化设计
 
-参见 `Docs/architecture/FrameResourceManager.md`
+参见 `Docs/architecture/rendering/FrameResourceManager.md`
 
 ### RingBuffer 配置格式
 

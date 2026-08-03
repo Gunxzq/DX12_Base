@@ -194,10 +194,6 @@
                     "type": "string",
                     "description": "引用 dependencies.meshes 中的 key"
                 },
-                "material": {
-                    "type": "string",
-                    "description": "引用 materials 中的 key（向后兼容：等效于 materials: [key]）"
-                },
                 "materials": {
                     "type": "array",
                     "items": { "type": "string" },

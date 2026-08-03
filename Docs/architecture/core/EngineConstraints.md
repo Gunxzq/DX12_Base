@@ -27,7 +27,7 @@
 
 ## 渲染管线数据访问
 
-参阅 `Docs/architecture/RenderDataAccess.md`
+参阅 `Docs/architecture/rendering/RenderDataAccess.md`
 
 | 资源 | 可读 | 可写 | 写入者 |
 |:----:|:----:|:----:|--------|
@@ -49,7 +49,7 @@
 
 ## 蒙皮骨骼动画
 
-参阅 `Docs/architecture/SkinnedAnimation.md`
+参阅 `Docs/architecture/animation/SkinnedAnimation.md`
 
 - `SkinnedComponent` 持有动画状态（timePos、currentClip、boneBufferIndex）
 - `AnimationAdvancer`（常驻 System）每帧推进时间 → 插值矩阵 → 写入 GPU

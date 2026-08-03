@@ -57,7 +57,7 @@ ECS MeshComponent
 .bone / SkeletonManager
   └─ 骨骼树（命名、父子关系、rest pose 矩阵） → 不依赖子网格
 
-> **骨架资产定位**：正式骨架资产为 `.bone`（`AssetType::Skeleton`），由 AssetTool 从 HOD 解析导出。`hod.json` 只是 AssetTool 用于**预览 HOD 解析结果**的中间格式，**不进入资产体系**（详见 `Docs/architecture/CharacterAsset.md` §四）。
+> **骨架资产定位**：正式骨架资产为 `.bone`（`AssetType::Skeleton`），由 AssetTool 从 HOD 解析导出。`hod.json` 只是 AssetTool 用于**预览 HOD 解析结果**的中间格式，**不进入资产体系**（详见 `Docs/architecture/assets/CharacterAsset.md` §四）。
 
 ECS RelationshipComponent (kind=socket)
   └─ socketName（挂点名称 = 骨骼名） → 指向骨骼树中的节点
@@ -175,7 +175,7 @@ Blender 中每个**材质槽（Material Slot）**对应导出一个 SubMesh。�
 | `KD-03.bone` | 骨骼树 + 每骨骼 rest pose 矩阵（HOD 解析导出） | SkeletonManager 加载 |
 | `KD-03.character` | 角色复合资产：引用 dxmesh + bone + 材质槽 + 动画剪辑 | CharacterLoader / SceneConstructor |
 
-当前 AssetTool 输出的是**原子资产**（单一 `dxmesh` + 独立 `.bone`）。角色复合资产 `.character`（含动画剪辑、材质槽）为后续方向，详见 `Docs/architecture/CharacterAsset.md`。
+当前 AssetTool 输出的是**原子资产**（单一 `dxmesh` + 独立 `.bone`）。角色复合资产 `.character`（含动画剪辑、材质槽）为后续方向，详见 `Docs/architecture/assets/CharacterAsset.md`。
 
 ---
 
@@ -297,8 +297,8 @@ Muzzle       →  无子网格（纯挂点）     —    ← 开火特效附着
 
 ## 八、相关文档
 
-- `Docs/architecture/SubMeshMaterialSlots.md` — 材质槽系统详细设计（Step 0→3）
-- `Docs/architecture/RelationshipModel.md` — 实体关系模型（含 socket 挂载）
+- `Docs/architecture/rendering/SubMeshMaterialSlots.md` — 材质槽系统详细设计（Step 0→3）
+- `Docs/architecture/scene/RelationshipModel.md` — 实体关系模型（含 socket 挂载）
 - `Docs/targets/UKW_PowerUpKit/06_SubMeshPipeline.md` — UKW 部件合并管线
 - `Docs/targets/UKW_PowerUpKit/02_RobotAndAnimation.md` — AssetTool 导出结论（快照已并入删除）
-- `Docs/architecture/SkinnedAnimation.md` — 蒙皮动画系统设计
+- `Docs/architecture/animation/SkinnedAnimation.md` — 蒙皮动画系统设计

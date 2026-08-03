@@ -136,8 +136,8 @@ Engine/ThirdParty/
 
 ## 相关文档
 
-- `Docs/architecture/ComponentEditorSystem.md` — 架构设计文档
-- `Docs/architecture/ViewportToolbar.md` — 工具栏与 Gizmo 集成设计
+- `Docs/architecture/editor/ComponentEditorSystem.md` — 架构设计文档
+- `Docs/architecture/editor/ViewportToolbar.md` — 工具栏与 Gizmo 集成设计
 - `Docs/bugs/BugFix_ImGuizmo_ImGuiAPIVersionMismatch.md` — ImGuizmo 版本兼容记录
 - `Docs/todos/remaining_issues.md` — 全局待办清单
 - `Engine/ThirdParty/imguizmo/` — ImGuizmo 源码

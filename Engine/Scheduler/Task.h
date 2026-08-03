@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
-#include <vector>
+#include <utility> // std::move（TaskFactory 使用）
 
 namespace DX12Engine {
 namespace Scheduler {
@@ -62,8 +62,9 @@ struct Task {
     TaskPhase phase = TaskPhase::Update;
     ThreadType thread = ThreadType::Any;
     std::function<void()> execute;
-    std::vector<TaskId> dependencies; // 依赖的任务 ID
-    uint32_t priority = 100;          // 优先级（数字越小越优先）
+    // 注意：Task 结构不持有依赖关系——依赖由 TaskGraph::Node 承载（dependencies/dependents 双边集合），
+    // 通过 TaskGraph::AddDependency 建立、TaskGraph::GetDependencies 查询
+    uint32_t priority = 100; // 优先级（数字越小越优先）
 
     bool operator<(const Task &other) const {
         return priority > other.priority; // 优先级队列：小数字先出

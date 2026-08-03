@@ -516,7 +516,7 @@ WindomXP 有多个衍生 MOD，各自使用不同的 XOR key：
 
 ## 九、实际管线映射（2026-07-29 定案）
 
-根据 SubMesh 材质槽系统（`Docs/architecture/SubMeshMaterialSlots.md`）与实际资产结构，管线映射如下：
+根据 SubMesh 材质槽系统（`Docs/architecture/rendering/SubMeshMaterialSlots.md`）与实际资产结构，管线映射如下：
 
 ### 9.1 网格资产：部件合并
 

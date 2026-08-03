@@ -2,6 +2,7 @@
 
 > 日期：2026-07-25
 > 状态：设计方案，待实施
+> **合并声明（2026-08-03）**：`cull.md`（剔除并行化演进方向）与 `Raycaster.md`（阶段任务划分残留片段）已并入本文并**删除**，要点浓缩见 §八。关联演进：`cull.md` 的"方向一：每个构建器独立做剔除+LOD"已被 **RendererDataDriven.md §4.1b/c/d 缓存分桶**落地（集中粗筛选 + CulledSet 分发 + Builder 消费桶精筛）；"延迟一帧"与 FrameDriver 阶段分离一致（§7.4）。Raycaster 的"UI→Visible→Scene 三级分支"（原 Raycaster.md）已纳入 §7.6 抽象层设计。
 
 ---
 
@@ -317,3 +318,24 @@ Editor 端：传入 EditorViewport 的可见集（已按 sceneId 过滤）
 ```
 
 这样双端共享同一套射线检测逻辑，数据源由调用方（Game/Editor）各自提供。
+
+---
+
+## 八、废弃文档合并摘要（cull.md / Raycaster.md，2026-08-03）
+
+> 原 `cull.md`（剔除并行化演进方向，2026-07 讨论）与 `Raycaster.md`（阶段任务划分残留片段）已合并入本文并删除，关键内容浓缩如下：
+
+### 8.1 cull.md 要点（剔除并行化演进方向）
+
+| 方向 | 内容 | 去向 |
+|:---|:---|:---|
+| **方向一：Builder 独立剔除+LOD（完全自包含）** | 取消全局 CullingSystem/LODSystem，各 Builder 内部同时完成剔除+LOD → 最大并行度，但剔除/LOD 计算重复 | ✅ 已被 `RendererDataDriven.md §4.1b/c/d` 缓存分桶落地（集中粗筛选 + CulledSet 分发 + Builder 消费桶精筛，避免重复剔除） |
+| **方向二：剔除/LOD 结果按需计算+缓存（Lazy+Cache）** | 每实体可见性/LOD 结果缓存于"每帧临时结构"，Builder 首次访问时计算并缓存 | ⚠️ 未采纳——`RenderSlotCache` 缓存表（CRUD 驱动驻留）已覆盖该意图，且无每帧临时结构 |
+| **方向三：Job 化 + 结果广播** | 保持独立 Culling/LODSystem 并行执行，结果合并为按实体索引的紧凑数组，Builder 屏障等待就绪 | ✅ 对应本文 §7 线程化方案（后台构建 + atomic 交换 + 延迟一帧） |
+| **方向四：构建器流水线 + 帧延迟容忍** | 本帧剔除结果用上一帧，剔除与构建完全并行 | ✅ 对应本文 §7.4（FrameDriver 阶段分离天然延迟一帧） |
+
+**演进路径（cull.md 原表）**：`CullingResult` 扁平位集 → CullingSystem 内部并行 → 空间划分（网格/八叉树）→ 静态场景 PVS → GPU 剔除（Compute+Indirect Draw）。现状：空间划分已由 OctreeSystem（本文）落地；PVS 见 `Docs/architecture/core/EngineOverview.md`（场景级缓存）与 `GPU-Drive.md`；扁平位集/GPU 剔除为远期（规模未到，§7.10 缓行结论一致）。
+
+### 8.2 Raycaster.md 要点（阶段任务划分）
+
+**"UI→Visible→Scene 三级分支"**：PostCulling 阶段按优先级分层检测——UI 命中即停（0.01ms）、Visible 命中即停（0.5ms）、都未命中才做全场景 Scene 检测（2ms）；OcclusionSystem/LODSystem 独立可并行。已纳入本文 §7.6 Raycaster 抽象层设计（数据源 = CulledSet，可见集驱动，不做场景过滤/输入检测）。

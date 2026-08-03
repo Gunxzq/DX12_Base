@@ -82,7 +82,7 @@ PatchMesh     // 曲面细分面片（控制点）
 
 ### Character
 
-角色复合资产（`.character`）：引用 `.dxmesh` + `.bone` + `.material[]` + `.anim` 剪辑表，场景只放实例引用（`character: { asset, startClip }`）。详见 `Docs/architecture/CharacterAsset.md`。
+角色复合资产（`.character`）：引用 `.dxmesh` + `.bone` + `.material[]` + `.anim` 剪辑表，场景只放实例引用（`character: { asset, startClip }`）。详见 `Docs/architecture/assets/CharacterAsset.md`。
 
 **加载器**：`CharacterLoader`
 

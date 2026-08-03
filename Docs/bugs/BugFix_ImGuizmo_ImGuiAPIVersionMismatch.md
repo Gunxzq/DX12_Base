@@ -39,4 +39,4 @@ Expression: ((flags & ImDrawFlags_InvalidMask_) == 0) && "Incorrect parameter. D
 
 - `Engine/ThirdParty/imguizmo/` — 从源码编译的 ImGuizmo
 - `CMakeLists.txt` — 已将 `imguizmo::imguizmo` 替换为源码编译
-- `Docs/architecture/ComponentEditorSystem.md` — ImGuizmo 集成设计
+- `Docs/architecture/editor/ComponentEditorSystem.md` — ImGuizmo 集成设计

@@ -48,16 +48,21 @@ void TaskExecutor::Execute(const TaskGraph &graph) {
         }
 
         // 建立依赖关系
+        // 注意：Main/Render 任务走专用线程队列（不在 taskflow 图中），无法参与依赖建立；
+        // Any/Worker 任务都在 taskflow 图中，都应具备依赖能力（修复：仅对 Any 建依赖导致
+        // Worker 任务 DependsOn 失效 → 分发/构建并行读空桶，见 RendererDataDriven.md §4.1d 频闪修复）
+        // 依赖来源：TaskGraph::GetDependencies（Node.dependencies，AddDependency 写入处）——
+        // Task 结构本身不持有依赖字段（旧设计 Task::dependencies 已移除），依赖由图节点 Node 承载
         for (TaskId id : taskIds) {
             const Task *task = graph.GetTask(id);
-            if (!task || task->thread != ThreadType::Any)
+            if (!task || task->thread == ThreadType::Main || task->thread == ThreadType::Render)
                 continue;
 
             auto flowTaskIt = flowTasks.find(id);
             if (flowTaskIt == flowTasks.end())
                 continue;
 
-            for (TaskId depId : task->dependencies) {
+            for (TaskId depId : graph.GetDependencies(id)) {
                 auto depIt = flowTasks.find(depId);
                 if (depIt != flowTasks.end()) {
                     flowTaskIt->second.succeed(depIt->second);
@@ -111,16 +116,21 @@ void TaskExecutor::ExecutePhase(const TaskGraph &graph, TaskPhase phase) {
     }
 
     // 建立阶段内依赖
+    // 注意：Main/Render 任务走专用线程队列（不在 taskflow 图中）；Any/Worker 都在图中，
+    // 都应具备依赖能力（修复：仅对 Any 建依赖导致 Worker 任务 DependsOn 失效 → 分发/构建
+    // 并行读空桶频闪，见 RendererDataDriven.md §4.1d）
+    // 依赖来源：TaskGraph::GetDependencies（Node.dependencies，AddDependency 写入处）——
+    // Task 结构本身不持有依赖字段（旧设计 Task::dependencies 已移除），依赖由图节点 Node 承载
     for (TaskId id : taskIds) {
         const Task *task = graph.GetTask(id);
-        if (!task || task->thread != ThreadType::Any)
+        if (!task || task->thread == ThreadType::Main || task->thread == ThreadType::Render)
             continue;
 
         auto flowTaskIt = flowTasks.find(id);
         if (flowTaskIt == flowTasks.end())
             continue;
 
-        for (TaskId depId : task->dependencies) {
+        for (TaskId depId : graph.GetDependencies(id)) {
             // 只建立同阶段内的依赖
             const Task *depTask = graph.GetTask(depId);
             if (!depTask || depTask->phase != phase)

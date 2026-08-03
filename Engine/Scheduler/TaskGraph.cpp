@@ -101,6 +101,13 @@ Task *TaskGraph::GetTask(TaskId id) {
     return (it != m_tasks.end()) ? &it->second.task : nullptr;
 }
 
+const std::unordered_set<TaskId> &TaskGraph::GetDependencies(TaskId id) const {
+    // 依赖存储于 Node.dependencies（AddDependency 写入处），Task 结构本身不持有依赖字段
+    static const std::unordered_set<TaskId> kEmpty;
+    auto it = m_tasks.find(id);
+    return (it != m_tasks.end()) ? it->second.dependencies : kEmpty;
+}
+
 bool TaskGraph::HasCycle() const { return !GetCyclePath().empty(); }
 
 std::vector<TaskId> TaskGraph::GetCyclePath() const {

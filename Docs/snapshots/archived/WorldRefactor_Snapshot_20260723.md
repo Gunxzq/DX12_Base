@@ -44,9 +44,9 @@
 
 | 文档 | 内容 |
 |:-----|:------|
-| `Docs/architecture/World.md` | **新增** — World 架构设计文档 |
-| `Docs/architecture/SceneManager.md` | 新增 §12（World 提取 + SceneManager 降级） |
-| `Docs/architecture/EngineOverview.md` | 修正 §8.7（消除多 World 矛盾，对齐单一 World 方向） |
+| `Docs/architecture/scene/World.md` | **新增** — World 架构设计文档 |
+| `Docs/architecture/scene/SceneManager.md` | 新增 §12（World 提取 + SceneManager 降级） |
+| `Docs/architecture/core/EngineOverview.md` | 修正 §8.7（消除多 World 矛盾，对齐单一 World 方向） |
 
 ---
 

@@ -4,6 +4,7 @@
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace DX12Engine {
 namespace Scheduler {
@@ -57,6 +58,11 @@ public:
     /// 获取任务（用于执行器查询）
     const Task *GetTask(TaskId id) const;
     Task *GetTask(TaskId id);
+
+    /// 获取任务的依赖集合（我依赖谁）
+    /// @param id 任务 ID
+    /// @return 依赖任务 ID 集合（不存在返回空集）
+    const std::unordered_set<TaskId> &GetDependencies(TaskId id) const;
 
     /// 检查是否存在循环依赖（DFS 算法）
     /// @return 如果存在循环依赖，返回 true

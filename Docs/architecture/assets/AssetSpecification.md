@@ -22,7 +22,7 @@
 .dxmesh  → "顶点受哪些骨骼影响"（boneIndices 序号约定）
 .bone    → "骨骼树长什么样"（命名 + 层级 + rest pose）
 .anim    → "骨骼怎么动"（通道名命名约定）
-三者零引用，只共享命名/序号约定。详见 Docs/architecture/CharacterAsset.md
+三者零引用，只共享命名/序号约定。详见 Docs/architecture/assets/CharacterAsset.md
 ```
 
 ### 复合资产
