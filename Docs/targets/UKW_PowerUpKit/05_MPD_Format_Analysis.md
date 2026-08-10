@@ -1,14 +1,125 @@
 # MPD 格式逆向分析记录
 
-> 日期: 2026-07-10 (最后更新: 2026-07-11)
+> 日期: 2026-07-10 (最后更新: 2026-08-03)
 > 来源: UKW PowerUp Kit map/*.mpd
-> 工具: HxD hex editor, AssetTool MPDParser
-> 状态: ✅ 名字表解析完成，✅ 配置段解析完成，⚠️ 坐标段部分解析
-> 
-> **⚠️ 2026-07-11 决策：放弃完全解析 MPD 生成场景。**
-> MPD 坐标段格式各地图差异过大，无法找到通用解析方案。
-> 改为编辑器手动布景，MPDParser 仅提取纹理/材质/MPD 布局信息作为参考。
-> 详见 `SNAPSHOT.md`。
+> 工具: HxD hex editor, AssetTool MPDParser, WindomXP-Map-Editor（社区开源编辑器）
+> 状态: ✅ **权威结构已确认（2026-08-03，社区编辑器源码 mpd.cs 逐行对照 + City/map.mpd 实测闭环）**
+
+---
+
+## 〇、权威结构定案（2026-08-03）——本文件旧逆向章节全部作废
+
+> 2026-07-11 曾"放弃完全解析 MPD 生成场景"，原因是坐标段格式各地图差异过大。
+> **2026-08-03 获取社区开源地图编辑器（[MugenAttack/WindomXP-Map-Editor](https://github.com/MugenAttack/WindomXP-Map-Editor)，C#/Unity，已 clone 至 `.atomcode/tmp/WindomXP-Map-Editor/`），其 `Assets/Scripts/mpd.cs` 是 MPD 格式的权威读写实现。**
+> 已用真实 City/map.mpd（1,480,417 字节）按该结构逐字节解析：**7623 对象、604 非空格子、解析偏移恰好等于文件大小（剩余 0）**，结构 100% 闭环。
+> 下面所有"名字表 FFFF0001 / Type A-B 标记 / 16-16-16 间隔"等章节均为旧逆向猜测，**仅作历史参考，禁止用于实现**。
+
+### 0.1 权威结构（来自 mpd.cs load/save，与真实文件实测一致）
+
+```
+[头部]
+  "MPD"           3B  ASCII 魔数
+  WorldParts      int32 LE  固定 20000（0x00004E20；旧逆向把 0x20 0x4E 误读为版本标志）
+  PiecesCount     int16 LE  固定 200（0xC8 00）
+
+[Pieces 表] PiecesCount 条，每条：
+  256B  visualMesh 名（Shift-JIS，\0 截断，定长槽）
+  256B  collisionMesh 名（Shift-JIS，\0 截断，定长槽）
+  3B    填充（FF FF 00）
+  int32 scriptText 长度 N
+  N B   scriptText（Shift-JIS；条级脚本，如空则 N=0）
+  → 200 条 × 521B 定长起点 + 变长脚本；City 实测 43 个非空 visual
+
+[WorldGrid 区]
+  int16 x  格数（固定 100）
+  int16 y  格数（固定 100）
+  float unk 格尺寸（固定 30.0f = 0x0000F041；旧逆向的"结束标记"）
+  然后 x×y 个格子（City 100×100），每格：
+    int32 对象数 count
+    count 个对象，每个：
+      16 × float 矩阵（列主序！m00,m10,m20,m30 | m01,m11,m21,m31 | m02,m12,m22,m32 | m03,m13,m23,m33）
+      int16 pieceID（索引 Pieces 表，0-based；198=Sky.x、199=Hit.x）
+      int32 脚本长度 R
+      R B   脚本（Shift-JIS，对象级渲染参数：@CullFar/@ShadowFlag/@AlphaTestFlag/#WaterY 等）
+```
+
+**要点**：
+- **对象矩阵 = 完整世界变换**，平移列（m03,m13,m23 = 数组下标 12,13,14）即世界坐标 X/Y/Z（实测 City mapChip06 在 (1080, -2, 1170)，格步长 30 与 unk 吻合；旧逆向"矩阵≈单位阵"是解析错位导致的误判）
+- **格子只是桶**：格子坐标 = 世界坐标 / 30 归桶（编辑器 addWorldObject: `x=Floor(pos.x/unk), y=Floor(pos.z/unk), WorldGrid[y,x]`），对象真身在矩阵里
+- **`00 00 80 3F`(1.0f) 是矩阵对角线元素**（m00/m11/m22/m33，20B 间隔），不是段分隔符
+- **MPD 存在明文与 XOR 加密两种变体**（2026-08-03 实测）：City/City2/City3/City_tac/In/In2/moon 头部明文 `"MPD"`；**City4/City5/skyland 头部为密文**，需 XOR 0x0B7E7759 解密后才是 `"MPD"` 开头（ParseFile 已实现"先明文 → XOR 兜底"自动处理）。`.x`/`.spt` 明文（实测 Road.x 头 `xof 0303bin` 明文）；`.dds`/`.png`/`.hod`/`.ani` 走 XOR 0x0B7E7759
+- 编辑器的 CypherTranscoder（0x0B7E7759）对 .x/.png 的 XOR 是冗余防御，游戏侧 .x 明文
+
+### 0.2 社区编辑器源码关键信息（C# 语义 → 引擎实现映射）
+
+| 编辑器源码（mpd.cs） | 引擎侧含义 |
+|:---|:---|
+| `mpd_Piece{visualMesh, collisionMesh, scriptText}` | 地图 piece = 网格名对 + 条级脚本 |
+| `mpd_Object{Matrix4x4 transform, short pieceID, int scriptIndex}` | 对象实例 = 世界矩阵 + piece 引用 |
+| `Matrix4x4` 列主序存储，`GetColumn(3)` 取平移 | 世界坐标 = m03,m13,m23 |
+| `addWorldObject` 按 pos/30 归桶 | 格子仅用于加载/剔除分块 |
+| `scripts` 全局表去重 + scriptIndex | 对象脚本可去重（City 7623 对象仅 27 种脚本） |
+| piece 198=Sky.x（scale 3000）、199=Hit.x | 与旧逆向"Sky.x/Hit.x 固定排除"一致 |
+| Save 用 `Matrix4x4.TRS(pos,rot,scale)` 写矩阵 | 矩阵支持任意旋转/缩放（City 部分对象非单位阵） |
+
+### 0.3 验证数据（City/map.mpd，2026-08-03 实测）
+
+```
+[头部] WorldParts=20000 PiecesCount=200
+[Pieces] 200 条，43 非空 visual（mapChip03.x / mapKABE.x / mapChip04.x / ... / buildingHigh01.x）
+[Grid] 100×100 unk=30
+[对象] 7623 个，604 非空格子，27 种去重脚本
+[范围] X:[1080,1890] Z:[1170,1920]
+[闭环] 解析结束偏移 = 文件大小，剩余 0
+```
+
+> 验证脚本：`.atomcode/tmp/mpd_verify.js`（权威结构解析 + dump）、`mpd_final.js`（统计 + 平移验证）、`mpd_xor_scan.js`（XOR 解密 + 全图扫描）。
+
+### 0.4 Hit/Sky 固定位置机制（MPD 不摆放，SPT 层注入）
+
+**实测结论（2026-08-03，10 张地图 XOR 解密直读）**：所有地图 MPD 的 WorldGrid 中 **pieceID 198(Sky)/199(Hit) 实例全部为 0**：
+
+```
+City: Sky=0 Hit=0   City2: Sky=0 Hit=0   City3: Sky=0 Hit=0
+City4: Sky=0 Hit=0  City5: Sky=0 Hit=0   City_tac: Sky=0 Hit=0
+In: Sky=0 Hit=0     In2: Sky=0 Hit=0     moon: Sky=0 Hit=0    skyland: Sky=0 Hit=0
+```
+
+Hit/Sky **不由 MPD 摆放**。MPD 名字表中有 Hit.x/Sky.x 条目（作 piece 198/199 占位），但 WorldGrid 里没有实例。实际放置链路：
+
+```
+SPT 指令 LoadHitXFile(Hit.x) / LoadSkyXFile(Sky.x,...)
+  → 引擎加载 Hit/Sky 网格 → 固定位置 (1500, 0, 1500)
+  （社区编辑器源码 loadmpd 硬编码：HitArea/SkyMap localPosition = (1500,0,1500)；
+    Sky scale=3000，Hit 无缩放）
+```
+
+**资产化含义**：
+- MPD → scene.json 时普通对象照常导出；**Hit/Sky 从 SPT 层注入**（读 `LoadHitXFile`/`LoadSkyXFile` 指令 + 固定位置 (1500,1500)），不依赖 MPD 对象表
+- Hit 网格 = 战斗边界（作战范围），可作为引擎"战斗区域"组件（碰撞边界/相机限制）
+- **Hit 尺寸因图而异**：City_tac 的 Hit.x 为 724×804（非统一 200×200），其余图多为 200×200——每个地图的 Hit.x 文件内容独立
+
+### 0.5 全地图实测表（2026-08-03，10 图 mpd2x + assimp 回读双确认）
+
+| 地图 | 对象数 | piece 数 | MPD 加密 | 对象范围尺寸 | Hit 尺寸 | 作战范围占比 |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|
+| City | 7623 | 40 | 明文 | 810×750 | 200×200 | 6.6% |
+| City2 | 7594 | 40 | XOR | 810×750 | 200×200 | 6.6% |
+| City3 | 3369 | 33 | XOR | 763×763 | 200×200 | 6.9% |
+| City4 | 15618 | 28 | XOR | 1050×859 | 200×200 | 4.4% |
+| City5 | 9850 | 30 | XOR | 834×720 | 200×200 | 6.7% |
+| City_tac | 9191 | 29 | 明文 | 2100×2070 | 724×804 | 13.4% |
+| In | 896 | 15 | 明文 | 510×510 | 200×200 | 15.4% |
+| In2 | 350 | 19 | XOR | 210×210 | 200×200 | 90.7% |
+| moon | 291 | 109 | 明文 | 270×270 | 200×200 | 54.9% |
+| skyland | 6552 | 72 | XOR | 750×884 | 200×200 | 6.0% |
+
+**要点**：
+- 全部地图 mpd2x 输出与 assimp 回读顶点/三角形数**精确一致**（格式合法，DE 可识别）
+- **所有地图对象范围中心均在 (1485~1500, 1470~1545)**，Hit 固定 (1500,1500)——全图以同一世界原点为中心，Hit 框住地图中央战场
+- **作战范围占比因图而异**（In2 90.7% ~ City4 4.4%）：对象分布范围 ≠ 地图可玩范围——装饰对象（树/广告牌/栅栏）散布广，Hit 才是实际战斗边界；格斗游戏设计即战斗区集中在中央
+- 产出文件：各图 `{Map}_merged.x`（xof 0303txt 单 Mesh），可用 DE 打开确认布局
+- 校验脚本：`mpd_hit_check.js`（198/199 实例扫描）、`mpd_ratio_full2.js`（占比统计）、`mpd_xor_scan.js`（XOR 解密全图扫描）
 
 ---
 

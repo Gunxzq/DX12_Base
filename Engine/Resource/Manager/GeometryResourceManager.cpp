@@ -59,6 +59,25 @@ GeometryHandle GeometryResourceManager::RegisterGeometryVariant(const GeometryVa
     entry.refCount = 1; // 首次注册引用计数为 1
     entry.inUse = true;
 
+    // 统一语义兜底：所有图元无子网格表时视为 1 个子网格（整个索引区间）
+    // 消费方（Builder 等）不再判空（见 SubMeshMaterialSlots.md §2.3）
+    auto fillSubMesh = [](GeometryBase &base) {
+        if (base.subMeshes.empty()) {
+            SubMeshInfo whole;
+            whole.startIndex = 0;
+            whole.indexCount = base.indexCount;
+            whole.startVertex = 0; // 索引已绝对化，BaseVertexLocation 恒 0
+            base.subMeshes.push_back(whole);
+        }
+    };
+    if (auto *mesh = std::get_if<TriangleMesh>(&entry.geometry)) {
+        fillSubMesh(*mesh);
+    } else if (auto *grid = std::get_if<GridGeometry>(&entry.geometry)) {
+        fillSubMesh(*grid);
+    } else if (auto *patch = std::get_if<PatchMesh>(&entry.geometry)) {
+        fillSubMesh(*patch);
+    }
+
     GeometryHandle handle;
     handle.index = index;
     // BugFix: handle.generation 是 10 位字段，需要取模避免截断导致 IsValid 失败
@@ -81,6 +100,20 @@ GeometryVariant *GeometryResourceManager::GetGeometryVariant(GeometryHandle hand
     if (!IsValid(handle))
         return nullptr;
     return &m_entries[handle.index].geometry;
+}
+
+const GeometryBase *GeometryResourceManager::GetGeometryBase(GeometryHandle handle) const {
+    const auto *variant = GetGeometryVariant(handle);
+    if (!variant)
+        return nullptr;
+    return std::visit([](const auto &geom) -> const GeometryBase * { return &geom; }, *variant);
+}
+
+GeometryBase *GeometryResourceManager::GetGeometryBase(GeometryHandle handle) {
+    auto *variant = GetGeometryVariant(handle);
+    if (!variant)
+        return nullptr;
+    return std::visit([](auto &geom) -> GeometryBase * { return &geom; }, *variant);
 }
 
 size_t GeometryResourceManager::GetGeometryTypeIndex(GeometryHandle handle) const {
@@ -129,16 +162,10 @@ const Math::BoundingVolumeVariant *GeometryResourceManager::GetBounds(GeometryHa
 }
 
 const std::vector<SubMeshInfo> *GeometryResourceManager::GetSubMeshInfo(GeometryHandle handle) const {
-    const auto *variant = GetGeometryVariant(handle);
-    if (!variant)
+    const auto *base = GetGeometryBase(handle);
+    if (!base)
         return nullptr;
-
-    // 仅 TriangleMesh 有 SubMesh 信息
-    const auto *mesh = std::get_if<TriangleMesh>(variant);
-    if (!mesh)
-        return nullptr;
-
-    return &mesh->subMeshes;
+    return &base->subMeshes;
 }
 
 // ============================================================================

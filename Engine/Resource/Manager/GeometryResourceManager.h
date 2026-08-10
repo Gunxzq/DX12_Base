@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Math/BoundingVolume.h"
+#include "Resource/Geometry/GeometryBase.h"
 #include "Resource/Geometry/GridGeometry.h"
 #include "Resource/Geometry/PatchMesh.h"
 #include "Resource/Geometry/TriangleMesh.h"
@@ -47,7 +48,7 @@ public:
     }
 
     // ========================================================================
-    // 统一查询接口（类型安全）
+    // 统一查询接口（类型安全 + 基类统一访问）
     // ========================================================================
     template <typename T> const T *GetGeometry(GeometryHandle handle) const {
         const auto *variant = GetGeometryVariant(handle);
@@ -63,6 +64,10 @@ public:
         return std::get_if<T>(variant);
     }
 
+    /// 获取几何体基类指针（所有图元通用，取 VB/IB 地址 + 子网格用）
+    const GeometryBase *GetGeometryBase(GeometryHandle handle) const;
+    GeometryBase *GetGeometryBase(GeometryHandle handle);
+
     // ========================================================================
     // 类型信息查询
     // ========================================================================
@@ -75,7 +80,7 @@ public:
     bool IsValid(GeometryHandle handle) const;
     const Math::BoundingVolumeVariant *GetBounds(GeometryHandle handle) const;
 
-    /// 获取网格的 SubMesh 信息（仅 TriangleMesh 有效，其他类型返回 nullptr）
+    /// 获取几何体子网格信息（所有图元通用，材质槽驱动）
     const std::vector<SubMeshInfo> *GetSubMeshInfo(GeometryHandle handle) const;
 
     // ========================================================================

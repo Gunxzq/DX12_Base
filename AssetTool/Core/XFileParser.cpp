@@ -316,7 +316,8 @@ bool XFileMesh::WriteDxMesh(const std::string &outputPath) const {
 
         if (HasTexcoords()) {
             vertices[i].texC[0] = texcoords[i * 2 + 0];
-            vertices[i].texC[1] = texcoords[i * 2 + 1];
+            // BugFix: UV V 轴翻转（与 MapSceneConverter/FbxMeshConverter 一致，v' = 1 - v）
+            vertices[i].texC[1] = 1.0f - texcoords[i * 2 + 1];
         } else {
             vertices[i].texC[0] = 0.0f;
             vertices[i].texC[1] = 0.0f;

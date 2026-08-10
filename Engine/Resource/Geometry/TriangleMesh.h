@@ -2,10 +2,12 @@
 
 #include "Common/Common.h"
 #include "Math/BoundingVolume.h"
-#include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Core/GpuHandlePool.h"
+#include "Resource/Geometry/GeometryBase.h"
+#include "Resource/Struct/GeometryHandle.h"
 #include <cstdint>
 #include <variant>
+#include <vector>
 
 namespace DX12Engine {
 
@@ -13,22 +15,12 @@ namespace Math {
 using BoundingVolumeVariant = Math::BoundingVolumeVariant;
 }
 namespace Resource {
-// 三角形网格定义
-struct TriangleMesh {
-    // GPU 资源句柄
-    GpuResourceHandle vertexBufferHandle;
-    GpuResourceHandle indexBufferHandle;
 
-    // 几何信息
-    uint32_t vertexCount = 0;
-    uint32_t indexCount = 0;
-    uint32_t vertexStride = 0;
-    DXGI_FORMAT indexFormat = DXGI_FORMAT_R32_UINT;
-    D3D_PRIMITIVE_TOPOLOGY topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+// 三角形网格定义（标准三角形网格，.dxmesh 文件加载）
+struct TriangleMesh : GeometryBase {
+    uint32_t flags = 0; // DxMeshFlags (Skinned, Index16 等)
 
-    Math::BoundingVolumeVariant localBounds;
-
-    bool isGpuReady = false;
+    bool IsSkinned() const { return (flags & 1) != 0; } // DxMeshFlag_Skinned = 1
 };
 
 } // namespace Resource

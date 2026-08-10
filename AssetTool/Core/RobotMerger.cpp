@@ -216,7 +216,8 @@ RobotMergeResult RobotMerger::MergeWithCallback(const std::string &hodPath, cons
             v.tangentU[2] = 0;
             if (ms.HasTexcoords()) {
                 v.texC[0] = ms.texcoords[i * 2 + 0];
-                v.texC[1] = ms.texcoords[i * 2 + 1];
+                // BugFix: UV V 轴翻转（与 MapSceneConverter/FbxMeshConverter 一致，v' = 1 - v）
+                v.texC[1] = 1.0f - ms.texcoords[i * 2 + 1];
             }
             // 刚性绑定：1 根骨骼，weight=1.0
             v.boneWeights[0] = 1.0f;
@@ -428,8 +429,8 @@ RobotMergeResult RobotMerger::MergeWithCallback(const std::string &hodPath, cons
         jm["params"]["metallic"] = matDesc.params.metallic;
         jm["params"]["roughness"] = matDesc.params.roughness;
         jm["params"]["ao"] = matDesc.params.ao;
-        jm["params"]["emissive"] = {matDesc.params.emissive[0], matDesc.params.emissive[1],
-                                    matDesc.params.emissive[2], matDesc.params.emissive[3]};
+        jm["params"]["emissive"] = {matDesc.params.emissive[0], matDesc.params.emissive[1], matDesc.params.emissive[2],
+                                    matDesc.params.emissive[3]};
         if (!texRef.empty()) {
             jm["textures"]["baseColor"] = fs::path(texRef).stem().string();
         }

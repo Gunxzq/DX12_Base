@@ -359,7 +359,9 @@ FbxConvertResult FbxMeshConverter::Convert(const std::string &fbxPath, const std
             v.tangentU[2] = 0.0f;
             if (m->HasTextureCoords(0)) {
                 v.texC[0] = m->mTextureCoords[0][vi].x;
-                v.texC[1] = m->mTextureCoords[0][vi].y;
+                // BugFix: UV V 轴翻转（assimp 读 FBX 的 V 为向上为正，引擎采样约定 V 向下为正，
+                // 与 MapSceneConverter 的 .x 处理一致，v' = 1 - v）
+                v.texC[1] = 1.0f - m->mTextureCoords[0][vi].y;
             }
 
             // 刚性绑定：取权重最大的骨骼（FBX 每网格通常只有 1 根有权重）

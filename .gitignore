@@ -1,10 +1,11 @@
 # --- 构建产物 (Build Artifacts) ---
 # 忽略我们之前配置的 Build 目录
 Build/
-# 忽略旧的或默认的 x64/Debug 目录（以防万一）
-x64/
-Debug/
-Release/
+# 忽略根目录的 VS 默认输出目录（x64/Debug/Release，仅根目录限定，
+# 避免误伤 Engine/Renderer/Debug 等源码目录）
+/x64/
+/Debug/
+/Release/
 
 # --- Visual Studio 特定文件 ---
 # 忽略用户特定的文件（每个人可能不同，不应提交）
@@ -48,3 +49,6 @@ Content/
 
 # 但场景 JSON 文件需要被 Git 追踪
 !Content/Scenes/*.scene.json
+
+# --- 临时分析脚本（.atomcode/tmp——一次性排查脚本，不入库） ---
+.atomcode/tmp/

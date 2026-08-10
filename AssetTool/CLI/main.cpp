@@ -13,34 +13,40 @@
 //   AssetTool batch <input_dir> <output_dir>            — 批量处理目录
 // ========================================================================
 
-#include "Core/RobotMerger.h"
-#include "Core/HODParser.h"
-#include "Core/ANIParser.h"
-#include "Core/IKSolver.h"
-#include "Core/MPDParser.h"
-#include "Core/ScriptSPTParser.h"
-#include "Core/TextureConverter.h"
-#include "Core/XFileParser.h"
-#include "Core/XORCipher.h"
-#include "Core/FbxMeshConverter.h"
-#include "Core/AnimClipConverter.h"
 #include "Asset/Definitions/Mesh/DxMeshFormat.h"
 #include "Asset/IO/Writer/DxMeshWriter.h"
+#include "Core/ANIParser.h"
+#include "Core/AnimClipConverter.h"
+#include "Core/FbxMeshConverter.h"
+#include "Core/HODParser.h"
+#include "Core/IKSolver.h"
+#include "Core/MPDParser.h"
+#include "Core/MPDSceneParser.h"
+#include "Core/MapSceneConverter.h"
+#include "Core/RobotMerger.h"
+#include "Core/ScriptSPTParser.h"
+#include "Core/TextureConverter.h"
+#include "Core/XFileDirectReader.h"
+#include "Core/XFileParser.h"
+#include "Core/XORCipher.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
+#include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
-#include <cmath>
-#include <cctype>
 
 namespace fs = std::filesystem;
 
@@ -67,13 +73,12 @@ static std::string ReplaceExtension(const std::string &path, const std::string &
     return p.replace_extension(newExt).string();
 }
 
-static std::string GetStem(const std::string &path) {
-    return fs::path(path).stem().string();
-}
+static std::string GetStem(const std::string &path) { return fs::path(path).stem().string(); }
 
 static bool ReadFile(const std::string &path, std::vector<uint8_t> &outData) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return false;
+    if (!file)
+        return false;
     size_t size = static_cast<size_t>(file.tellg());
     file.seekg(0, std::ios::beg);
     outData.resize(size);
@@ -83,7 +88,8 @@ static bool ReadFile(const std::string &path, std::vector<uint8_t> &outData) {
 
 static bool WriteFile(const std::string &path, const void *data, size_t size) {
     std::ofstream file(path, std::ios::binary);
-    if (!file) return false;
+    if (!file)
+        return false;
     file.write(reinterpret_cast<const char *>(data), size);
     return true;
 }
@@ -128,9 +134,8 @@ static int CommandX2Mesh(const std::vector<std::string> &args) {
             meshOutputPath = p.parent_path().string() + "/" + stem + "_" + std::to_string(i) + ".dxmesh";
         }
 
-        std::cout << "[x2mesh]   Mesh " << i << ": "
-                  << mesh.VertexCount() << " verts, "
-                  << (mesh.indices.size() / 3) << " faces, "
+        std::cout << "[x2mesh]   Mesh " << i << ": " << mesh.VertexCount() << " verts, " << (mesh.indices.size() / 3)
+                  << " faces, "
                   << "1 material\n";
 
         if (!mesh.WriteDxMesh(meshOutputPath)) {
@@ -212,7 +217,7 @@ static int CommandX2Scene(const std::vector<std::string> &args) {
 
             auto &jParams = jMat["params"];
             jParams["baseColor"] = {matDesc.params.baseColor[0], matDesc.params.baseColor[1],
-                                     matDesc.params.baseColor[2], matDesc.params.baseColor[3]};
+                                    matDesc.params.baseColor[2], matDesc.params.baseColor[3]};
             jParams["metallic"] = matDesc.params.metallic;
             jParams["roughness"] = matDesc.params.roughness;
             jParams["ao"] = matDesc.params.ao;
@@ -378,9 +383,164 @@ static int CommandMPD2Txt(const std::vector<std::string> &args) {
         return 1;
     }
 
-    std::cout << "[mpd2txt] Written: " << outputPath
-              << " (" << mpd.TileCount() << " tiles, "
-              << mpd.tileNames.size() << " tile names)\n";
+    std::cout << "[mpd2txt] Written: " << outputPath << " (" << mpd.TileCount() << " tiles, " << mpd.tileNames.size()
+              << " tile names)\n";
+    return 0;
+}
+
+// ==========================================================================
+// 命令：mpd2x — .mpd → 拼接导出合并 .x 文件（供 DE 确认地图布局）
+//
+// 按权威结构解析 MPD（MPDSceneParser，社区编辑器 mpd.cs 对照），
+// 对每个对象加载对应 piece 的 .x，用对象矩阵（列主序，平移列 = 世界坐标）
+// 变换顶点，合并为一个 xof 0303txt .x 文件输出。
+// ==========================================================================
+
+static int CommandMPD2X(const std::vector<std::string> &args) {
+    if (args.size() < 3) {
+        std::cerr << "Usage: AssetTool mpd2x <input.mpd> <asset_dir> <output.x>\n"
+                  << "       asset_dir: 包含 piece .x 文件的目录（如 map/City）\n"
+                  << "       输出: 合并所有对象（矩阵变换后）的 xof 0303txt .x 文件\n";
+        return 1;
+    }
+    std::string inputPath = args[0];
+    std::string assetDir = args[1];
+    std::string outputPath = args[2];
+
+    AssetTool::MPDSceneParser parser;
+    if (!parser.ParseFile(inputPath)) {
+        std::cerr << "[mpd2x] Error: " << parser.GetError() << "\n";
+        return 1;
+    }
+    const auto &scene = parser.GetResult();
+    std::cout << "[mpd2x] pieces=" << scene.PieceCount() << " objects=" << scene.ObjectCount()
+              << " grid=" << scene.gridX << "x" << scene.gridY << " unk=" << scene.unk << "\n";
+
+    // 缓存 piece → 网格（文件名 → XFileMesh 列表），避免重复加载
+    std::map<std::string, std::vector<AssetTool::XFileMesh>> meshCache;
+
+    // 合并缓冲
+    std::vector<float> outPos; // float3
+    std::vector<float> outNrm; // float3（可选）
+    std::vector<float> outUv;  // float2（可选）
+    std::vector<uint32_t> outIdx;
+    size_t vertBase = 0;
+    size_t loadedPieces = 0, skipped = 0;
+
+    for (const auto &obj : scene.objects) {
+        if (obj.pieceID < 0 || obj.pieceID >= static_cast<int>(scene.pieces.size())) {
+            skipped++;
+            continue;
+        }
+        const std::string &name = scene.pieces[obj.pieceID].visualMesh;
+        if (name.empty()) {
+            skipped++;
+            continue;
+        }
+
+        // 过滤出生点/物品放置标记（point_* / item）——非场景几何，不合并进输出 .x
+        {
+            std::string stem = fs::path(name).stem().string();
+            std::string lower = stem;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (lower.rfind("point_", 0) == 0 || lower == "item") {
+                skipped++;
+                continue;
+            }
+        }
+
+        // 加载 piece .x（带缓存；优先 XFileParser/assimp，弃用 XFileDirectReader——
+        // DirectReader 会把模板定义区的 Mesh GUID 误当实例解析，顶点数据错乱）
+        std::vector<AssetTool::XFileMesh> *meshes = nullptr;
+        auto it = meshCache.find(name);
+        if (it == meshCache.end()) {
+            std::string xPath = (fs::path(assetDir) / name).string();
+            std::vector<AssetTool::XFileMesh> parsed;
+            AssetTool::XFileParser parser;
+            if (parser.ParseFile(xPath) && !parser.GetMeshes().empty()) {
+                parsed = parser.GetMeshes();
+            }
+            if (parsed.empty()) {
+                std::cerr << "[mpd2x] 警告: 无法加载 " << name << "\n";
+                skipped++;
+                continue;
+            }
+            it = meshCache.emplace(name, std::move(parsed)).first;
+            loadedPieces++;
+        }
+        meshes = &it->second;
+
+        // 对象矩阵列主序变换：world = M · local，平移列 m[12..14] = (X,Y,Z)
+        const float *m = obj.matrix;
+        for (const auto &mesh : *meshes) {
+            size_t vCount = mesh.VertexCount();
+            for (size_t i = 0; i < vCount; ++i) {
+                float lx = mesh.positions[i * 3 + 0];
+                float ly = mesh.positions[i * 3 + 1];
+                float lz = mesh.positions[i * 3 + 2];
+                outPos.push_back(m[0] * lx + m[4] * ly + m[8] * lz + m[12]);
+                outPos.push_back(m[1] * lx + m[5] * ly + m[9] * lz + m[13]);
+                outPos.push_back(m[2] * lx + m[6] * ly + m[10] * lz + m[14]);
+            }
+            if (mesh.HasNormals()) {
+                for (size_t i = 0; i < vCount; ++i) {
+                    float nx = mesh.normals[i * 3 + 0], ny = mesh.normals[i * 3 + 1], nz = mesh.normals[i * 3 + 2];
+                    outNrm.push_back(m[0] * nx + m[4] * ny + m[8] * nz);
+                    outNrm.push_back(m[1] * nx + m[5] * ny + m[9] * nz);
+                    outNrm.push_back(m[2] * nx + m[6] * ny + m[10] * nz);
+                }
+            }
+            if (mesh.HasTexcoords())
+                outUv.insert(outUv.end(), mesh.texcoords.begin(), mesh.texcoords.end());
+            for (uint32_t idx : mesh.indices)
+                outIdx.push_back(idx + static_cast<uint32_t>(vertBase));
+            vertBase += vCount;
+        }
+    }
+
+    std::cout << "[mpd2x] 加载 piece: " << loadedPieces << "，跳过: " << skipped << "，顶点: " << outPos.size() / 3
+              << "，三角形: " << outIdx.size() / 3 << "\n";
+    if (outIdx.empty()) {
+        std::cerr << "[mpd2x] 无输出几何\n";
+        return 1;
+    }
+
+    // 写出 xof 0303txt（合并单 Mesh；DE 确认几何布局用）
+    std::ofstream out(outputPath);
+    if (!out) {
+        std::cerr << "[mpd2x] 无法写入: " << outputPath << "\n";
+        return 1;
+    }
+    size_t numVerts = outPos.size() / 3;
+    size_t numFaces = outIdx.size() / 3;
+    out << "xof 0303txt 0032\n";
+    out << "Header {\n  1;\n  0;\n  1;\n}\n";
+    out << "Mesh {\n  " << numVerts << ";\n";
+    for (size_t i = 0; i < numVerts; ++i) {
+        out << "  " << outPos[i * 3] << ";" << outPos[i * 3 + 1] << ";" << outPos[i * 3 + 2] << ";"
+            << (i + 1 < numVerts ? "," : ";") << "\n"; // 数组以 ; 结束（最后元素双分号）
+    }
+    out << "  " << numFaces << ";\n";
+    for (size_t i = 0; i < numFaces; ++i) {
+        out << "  3;" << outIdx[i * 3] << ";" << outIdx[i * 3 + 1] << ";" << outIdx[i * 3 + 2] << ";"
+            << (i + 1 < numFaces ? "," : ";") << "\n";
+    }
+    out << "}\n";
+    if (!outNrm.empty() && outNrm.size() == outPos.size()) {
+        out << "MeshNormals {\n  " << numVerts << ";\n";
+        for (size_t i = 0; i < numVerts; ++i) {
+            out << "  " << outNrm[i * 3] << ";" << outNrm[i * 3 + 1] << ";" << outNrm[i * 3 + 2] << ";"
+                << (i + 1 < numVerts ? "," : ";") << "\n";
+        }
+        out << "  " << numFaces << ";\n";
+        for (size_t i = 0; i < numFaces; ++i) {
+            out << "  3;" << outIdx[i * 3] << ";" << outIdx[i * 3 + 1] << ";" << outIdx[i * 3 + 2] << ";"
+                << (i + 1 < numFaces ? "," : ";") << "\n";
+        }
+        out << "}\n";
+    }
+    out.close();
+    std::cout << "[mpd2x] 已导出: " << outputPath << "\n";
     return 0;
 }
 
@@ -406,8 +566,7 @@ static int CommandSPT2JSON(const std::vector<std::string> &args) {
         return 1;
     }
 
-    std::cout << "[spt2json] Written: " << args[1]
-              << " (" << scene.mapTiles.size() << " tiles, "
+    std::cout << "[spt2json] Written: " << args[1] << " (" << scene.mapTiles.size() << " tiles, "
               << scene.buildings.size() << " buildings)\n";
     return 0;
 }
@@ -523,7 +682,8 @@ static int CommandBatch(const std::vector<std::string> &args) {
     int totalFiles = 0, successCount = 0, errorCount = 0;
 
     for (const auto &entry : fs::recursive_directory_iterator(inputDir)) {
-        if (!entry.is_regular_file()) continue;
+        if (!entry.is_regular_file())
+            continue;
 
         std::string path = entry.path().string();
         std::string ext = GetExtension(path);
@@ -545,7 +705,8 @@ static int CommandBatch(const std::vector<std::string> &args) {
             const auto &meshes = parser.GetMeshes();
             for (size_t mi = 0; mi < meshes.size(); ++mi) {
                 std::string meshName = stem;
-                if (meshes.size() > 1) meshName += "_" + std::to_string(mi);
+                if (meshes.size() > 1)
+                    meshName += "_" + std::to_string(mi);
 
                 std::string dxmeshPath = outputDir + "/" + meshName + ".dxmesh";
                 if (meshes[mi].WriteDxMesh(dxmeshPath)) {
@@ -634,8 +795,8 @@ static int CommandBatch(const std::vector<std::string> &args) {
         totalFiles++;
     }
 
-    std::cout << "\n[batch] Done: " << totalFiles << " files, "
-              << successCount << " success, " << errorCount << " errors\n";
+    std::cout << "\n[batch] Done: " << totalFiles << " files, " << successCount << " success, " << errorCount
+              << " errors\n";
     return errorCount > 0 ? 1 : 0;
 }
 
@@ -663,7 +824,8 @@ static bool ScanMapDirectory(const std::string &inputDir, MapScanResult &result)
     }
 
     for (const auto &entry : fs::recursive_directory_iterator(inputDir)) {
-        if (!entry.is_regular_file()) continue;
+        if (!entry.is_regular_file())
+            continue;
         std::string path = entry.path().string();
         std::string filename = entry.path().filename().string();
         std::string ext = GetExtension(path);
@@ -678,8 +840,10 @@ static bool ScanMapDirectory(const std::string &inputDir, MapScanResult &result)
     }
 
     std::cout << "[scan] " << result.mapName << ": " << result.xFiles.size() << " .x files";
-    if (!result.sptPath.empty()) std::cout << ", SPT found";
-    if (!result.mpdPath.empty()) std::cout << ", MPD found";
+    if (!result.sptPath.empty())
+        std::cout << ", SPT found";
+    if (!result.mpdPath.empty())
+        std::cout << ", MPD found";
     std::cout << "\n";
 
     // 必须有 SPT，否则场景数据不完整；MPD 已弃用，不做要求
@@ -710,8 +874,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
 
     fs::create_directories(outDir);
     fs::path meshesDir = fs::path(outDir) / "Meshes";
-    fs::path matsDir   = fs::path(outDir) / "Materials";
-    fs::path texDir    = fs::path(outDir) / "Textures";
+    fs::path matsDir = fs::path(outDir) / "Materials";
+    fs::path texDir = fs::path(outDir) / "Textures";
     fs::create_directories(meshesDir);
     fs::create_directories(matsDir);
     fs::create_directories(texDir);
@@ -725,8 +889,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
             return 1;
         }
         sceneData = sptParser.GetResult();
-        std::cout << "[map]   SPT: " << sceneData.buildings.size() << " buildings, "
-                  << sceneData.mapTiles.size() << " tile mappings\n";
+        std::cout << "[map]   SPT: " << sceneData.buildings.size() << " buildings, " << sceneData.mapTiles.size()
+                  << " tile mappings\n";
     }
 
     // 3. 解析 MPD（瓦片名称、坐标）— MPD 已弃用，仅做参考，不阻塞流程
@@ -735,8 +899,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
         AssetTool::MPDParser mpdParser;
         if (mpdParser.ParseFile(mpdPath)) {
             mpdData = mpdParser.GetResult();
-            std::cout << "[map]   MPD: " << mpdData.TileCount() << " tiles, "
-                      << mpdData.tileNames.size() << " tile names (reference only)\n";
+            std::cout << "[map]   MPD: " << mpdData.TileCount() << " tiles, " << mpdData.tileNames.size()
+                      << " tile names (reference only)\n";
         } else {
             std::cout << "[map]   MPD: parse failed (" << mpdParser.GetError() << ") — will sample from SPT\n";
         }
@@ -745,7 +909,10 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
     }
 
     // ---- 4. 转换所有 .x → .dxmesh + 提取材质 ----
-    struct MeshRef { std::string stem; std::string matKey; };
+    struct MeshRef {
+        std::string stem;
+        std::string matKey;
+    };
     std::map<std::string, std::vector<MeshRef>> xMeshMap; // 原始 .x 路径 → meshes
     nlohmann::json allMaterials = nlohmann::json::object();
     nlohmann::json allMeshDeps = nlohmann::json::object();
@@ -754,12 +921,14 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
 
     // 纹理处理辅助：在同一目录下查找纹理并转换
     auto processTexture = [&](const std::string &texFile, const fs::path &xDir) -> std::string {
-        if (texFile.empty()) return {};
+        if (texFile.empty())
+            return {};
         fs::path texPath = xDir / texFile;
         if (!fs::exists(texPath)) {
             // 尝试仅文件名（可能 xDir 搜索不到）
             texPath = fs::path(inputDir) / fs::path(texFile).filename();
-            if (!fs::exists(texPath)) return {};
+            if (!fs::exists(texPath))
+                return {};
         }
         std::string texExt = texPath.extension().string();
         std::transform(texExt.begin(), texExt.end(), texExt.begin(), ::tolower);
@@ -806,7 +975,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
         for (size_t mi = 0; mi < meshes.size(); ++mi) {
             const auto &mesh = meshes[mi];
             std::string ms = stem;
-            if (meshes.size() > 1) ms += "_" + std::to_string(mi);
+            if (meshes.size() > 1)
+                ms += "_" + std::to_string(mi);
 
             // 写出 .dxmesh
             mesh.WriteDxMesh((meshesDir / (ms + ".dxmesh")).string());
@@ -832,7 +1002,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
 
             // 写独立 .mat 文件
             std::ofstream matFile((matsDir / (mk + ".mat")).string());
-            if (matFile) matFile << jm.dump(2);
+            if (matFile)
+                matFile << jm.dump(2);
 
             // 收集
             allMaterials[mk] = jm;
@@ -845,8 +1016,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
         xSuccess++;
     }
 
-    std::cout << "[map]   Converted: " << xSuccess << " .x files, "
-              << matCount << " materials, " << texDeps.size() << " textures\n";
+    std::cout << "[map]   Converted: " << xSuccess << " .x files, " << matCount << " materials, " << texDeps.size()
+              << " textures\n";
 
     // ---- 5. 构建 scene.json ----
     nlohmann::json scene;
@@ -857,16 +1028,14 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
     scene["baseURL"] = "Content/" + mapName;
 
     // 环境光照
-    scene["environment"]["ambientLight"] = {
-        sceneData.lightR / 255.0f * 0.4f,
-        sceneData.lightG / 255.0f * 0.4f,
-        sceneData.lightB / 255.0f * 0.4f,
-        1.0f
-    };
+    scene["environment"]["ambientLight"] = {sceneData.lightR / 255.0f * 0.4f, sceneData.lightG / 255.0f * 0.4f,
+                                            sceneData.lightB / 255.0f * 0.4f, 1.0f};
 
     // 依赖
-    if (!allMeshDeps.empty()) scene["dependencies"]["meshes"] = allMeshDeps;
-    if (!texDeps.empty()) scene["dependencies"]["textures"] = texDeps;
+    if (!allMeshDeps.empty())
+        scene["dependencies"]["meshes"] = allMeshDeps;
+    if (!texDeps.empty())
+        scene["dependencies"]["textures"] = texDeps;
 
     // 材质
     scene["materials"] = allMaterials;
@@ -875,10 +1044,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
     auto &entities = scene["entities"] = nlohmann::json::array();
     int entityIdx = 0;
 
-    auto addEntity = [&](const std::string &name,
-                         float px, float py, float pz,
-                         const std::string &meshKey, const std::string &matKey,
-                         bool isTransparent, bool isSkybox) {
+    auto addEntity = [&](const std::string &name, float px, float py, float pz, const std::string &meshKey,
+                         const std::string &matKey, bool isTransparent, bool isSkybox) {
         nlohmann::json e;
         e["name"] = name;
         auto &c = e["components"];
@@ -913,7 +1080,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
         // 前缀匹配：MPD tile stem 是 mesh key 前缀（如 "map00" 匹配 "map00_0"）
         for (const auto &[xf, refs] : xMeshMap) {
             std::string xstem = fs::path(xf).stem().string();
-            if (xstem.size() > stem.size() && xstem.substr(0, stem.size()) == stem && xstem[stem.size()] == '_' && !refs.empty())
+            if (xstem.size() > stem.size() && xstem.substr(0, stem.size()) == stem && xstem[stem.size()] == '_' &&
+                !refs.empty())
                 return refs[0];
         }
         return {};
@@ -924,16 +1092,19 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
     if (!mpdData.tiles.empty()) {
         for (size_t i = 0; i < mpdData.tiles.size(); ++i) {
             const auto &t = mpdData.tiles[i];
-            if (t.name.empty()) continue; // 跳过无名字的条目
+            if (t.name.empty())
+                continue; // 跳过无名字的条目
             std::string xname = t.name;
-            if (!xname.ends_with(".x")) xname += ".x";
+            if (!xname.ends_with(".x"))
+                xname += ".x";
             // 如果 name 是纯数字（索引编号），尝试用 name table 还原文件名
             auto ref = findFirstRef(xname);
             if (ref.stem.empty() && t.tileIndex < mpdData.tileNames.size()) {
                 std::string altName = mpdData.tileNames[t.tileIndex];
                 ref = findFirstRef(altName);
             }
-            if (ref.stem.empty()) continue;
+            if (ref.stem.empty())
+                continue;
             addEntity(t.name, t.posX, 0, t.posZ, ref.stem, ref.matKey, false, false);
             mpdEntityCount++;
         }
@@ -950,18 +1121,26 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
             mapMinX = mapMaxX = sceneData.buildings[0].posX;
             mapMinZ = mapMaxZ = sceneData.buildings[0].posZ;
             for (const auto &b : sceneData.buildings) {
-                if (b.posX < mapMinX) mapMinX = b.posX;
-                if (b.posX > mapMaxX) mapMaxX = b.posX;
-                if (b.posZ < mapMinZ) mapMinZ = b.posZ;
-                if (b.posZ > mapMaxZ) mapMaxZ = b.posZ;
+                if (b.posX < mapMinX)
+                    mapMinX = b.posX;
+                if (b.posX > mapMaxX)
+                    mapMaxX = b.posX;
+                if (b.posZ < mapMinZ)
+                    mapMinZ = b.posZ;
+                if (b.posZ > mapMaxZ)
+                    mapMaxZ = b.posZ;
             }
             // 向外扩展 20% 作为瓦片区缓冲
             float ex = (mapMaxX - mapMinX) * 0.2f;
             float ez = (mapMaxZ - mapMinZ) * 0.2f;
-            if (ex < 50.0f) ex = 50.0f;
-            if (ez < 50.0f) ez = 50.0f;
-            mapMinX -= ex; mapMaxX += ex;
-            mapMinZ -= ez; mapMaxZ += ez;
+            if (ex < 50.0f)
+                ex = 50.0f;
+            if (ez < 50.0f)
+                ez = 50.0f;
+            mapMinX -= ex;
+            mapMaxX += ex;
+            mapMinZ -= ez;
+            mapMaxZ += ez;
         }
 
         float tileSize = 20.0f;
@@ -973,8 +1152,10 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
             float ratio = (float)gridCols / gridRows;
             gridCols = static_cast<int>(std::sqrt((float)maxTiles * ratio));
             gridRows = static_cast<int>((float)maxTiles / gridCols);
-            if (gridCols < 1) gridCols = 1;
-            if (gridRows < 1) gridRows = 1;
+            if (gridCols < 1)
+                gridCols = 1;
+            if (gridRows < 1)
+                gridRows = 1;
         }
 
         size_t tileTypeCount = sceneData.mapTiles.size();
@@ -986,7 +1167,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
                 const auto &t = sceneData.mapTiles[ti];
                 std::string xname = t.modelFile;
                 auto ref = findFirstRef(xname);
-                if (ref.stem.empty()) continue;
+                if (ref.stem.empty())
+                    continue;
 
                 // 网格基准位置
                 float baseX = mapMinX + (c + 0.5f) * tileSize;
@@ -999,14 +1181,13 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
                 float px = baseX + jitterX;
                 float pz = baseZ + jitterZ;
 
-                addEntity(fs::path(xname).stem().string() + "_" + std::to_string(added),
-                          px, 0, pz, ref.stem, ref.matKey, false, false);
+                addEntity(fs::path(xname).stem().string() + "_" + std::to_string(added), px, 0, pz, ref.stem,
+                          ref.matKey, false, false);
                 added++;
             }
         }
-        std::cout << "[map]   Entities (SPT sampled tiles): " << added
-                  << "  map area: (" << mapMinX << "," << mapMinZ << ")~("
-                  << mapMaxX << "," << mapMaxZ << ")\n";
+        std::cout << "[map]   Entities (SPT sampled tiles): " << added << "  map area: (" << mapMinX << "," << mapMinZ
+                  << ")~(" << mapMaxX << "," << mapMaxZ << ")\n";
     }
 
     // B) 建筑实体（SPT SetBuilding 位置）
@@ -1016,17 +1197,18 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
             std::string mf;
             if (b.buildNo >= 0 && (size_t)b.buildNo < sceneData.buildingFiles.size())
                 mf = sceneData.buildingFiles[b.buildNo];
-            if (mf.empty()) continue;
+            if (mf.empty())
+                continue;
 
             auto ref = findFirstRef(mf);
             if (ref.stem.empty()) {
-                if (bCount < 5) std::cout << "[map]   WARN: building '" << mf << "' no match in meshes\n";
+                if (bCount < 5)
+                    std::cout << "[map]   WARN: building '" << mf << "' no match in meshes\n";
                 continue;
             }
 
-            addEntity(fs::path(mf).stem().string() + "_" + std::to_string(entityIdx),
-                      b.posX, b.posY, b.posZ,
-                      ref.stem, ref.matKey, false, false);
+            addEntity(fs::path(mf).stem().string() + "_" + std::to_string(entityIdx), b.posX, b.posY, b.posZ, ref.stem,
+                      ref.matKey, false, false);
             bCount++;
         }
         std::cout << "[map]   Entities (buildings): " << bCount << "\n";
@@ -1087,8 +1269,8 @@ static int BuildMapScene(const MapScanResult &scan, const std::string &outDir) {
     mpdData.WriteText(mpdTxtPath);
     std::cout << "[map]   MPD debug: " << mpdTxtPath << " (" << mpdData.TileCount() << " tiles)\n";
 
-    std::cout << "\n[map] Done: " << xSuccess << " .x files, "
-              << matCount << " materials, " << entityIdx << " entities";
+    std::cout << "\n[map] Done: " << xSuccess << " .x files, " << matCount << " materials, " << entityIdx
+              << " entities";
     if (xErrors > 0)
         std::cout << ", " << xErrors << " ERRORS";
     std::cout << "\n";
@@ -1116,45 +1298,56 @@ static int CommandMapAnalysis(const std::vector<std::string> &args) {
         return 1;
     }
     auto cMeshes = combinedParser.GetMeshes();
-    if (cMeshes.empty()) { std::cerr << "[x2mapanalysis] No meshes\n"; return 1; }
+    if (cMeshes.empty()) {
+        std::cerr << "[x2mapanalysis] No meshes\n";
+        return 1;
+    }
     size_t mainIdx = 0;
     for (size_t i = 0; i < cMeshes.size(); ++i)
-        if (cMeshes[i].VertexCount() > cMeshes[mainIdx].VertexCount()) mainIdx = i;
+        if (cMeshes[i].VertexCount() > cMeshes[mainIdx].VertexCount())
+            mainIdx = i;
     auto &cm = cMeshes[mainIdx];
     cm.ComputeBounds();
-    std::cout << "[x2mapanalysis] Combined: " << cm.VertexCount() << " verts, bounds: "
-              << cm.boundsMin[0] << "," << cm.boundsMin[2] << " ~ "
-              << cm.boundsMax[0] << "," << cm.boundsMax[2] << "\n";
+    std::cout << "[x2mapanalysis] Combined: " << cm.VertexCount() << " verts, bounds: " << cm.boundsMin[0] << ","
+              << cm.boundsMin[2] << " ~ " << cm.boundsMax[0] << "," << cm.boundsMax[2] << "\n";
 
     // 2. 扫描 tiles 目录中的 .x 文件
     std::vector<std::string> tileFiles;
     for (const auto &entry : fs::recursive_directory_iterator(tilesDir)) {
-        if (!entry.is_regular_file()) continue;
+        if (!entry.is_regular_file())
+            continue;
         std::string ext = entry.path().extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".x") tileFiles.push_back(entry.path().string());
+        if (ext == ".x")
+            tileFiles.push_back(entry.path().string());
     }
     std::cout << "[x2mapanalysis] Found " << tileFiles.size() << " .x files\n";
 
     // 3. 解析每个 tile 获取局部包围盒和顶点数
     struct TileInfo {
-        std::string name; float bmin[3], bmax[3], dims[3]; size_t verts;
+        std::string name;
+        float bmin[3], bmax[3], dims[3];
+        size_t verts;
     };
     std::vector<TileInfo> infos;
     for (const auto &tf : tileFiles) {
         AssetTool::XFileParser p;
-        if (!p.ParseFile(tf)) continue;
+        if (!p.ParseFile(tf))
+            continue;
         auto ms = p.GetMeshes();
-        if (ms.empty()) continue;
+        if (ms.empty())
+            continue;
         size_t bi = 0;
         for (size_t i = 0; i < ms.size(); ++i)
-            if (ms[i].VertexCount() > ms[bi].VertexCount()) bi = i;
+            if (ms[i].VertexCount() > ms[bi].VertexCount())
+                bi = i;
         ms[bi].ComputeBounds();
         TileInfo ti;
         ti.name = fs::path(tf).stem().string();
         ti.verts = ms[bi].VertexCount();
         for (int d = 0; d < 3; ++d) {
-            ti.bmin[d] = ms[bi].boundsMin[d]; ti.bmax[d] = ms[bi].boundsMax[d];
+            ti.bmin[d] = ms[bi].boundsMin[d];
+            ti.bmax[d] = ms[bi].boundsMax[d];
             ti.dims[d] = ti.bmax[d] - ti.bmin[d];
         }
         infos.push_back(ti);
@@ -1166,58 +1359,78 @@ static int CommandMapAnalysis(const std::vector<std::string> &args) {
     float originX = std::floor(cm.boundsMin[0] / gridSize) * gridSize;
     float originZ = std::floor(cm.boundsMin[2] / gridSize) * gridSize;
     struct CellInfo {
-        int gx, gz; float cx, cz;
+        int gx, gz;
+        float cx, cz;
         float minX = 1e9f, maxX = -1e9f, minZ = 1e9f, maxZ = -1e9f;
         int count = 0;
     };
-    std::map<std::pair<int,int>, CellInfo> cells;
+    std::map<std::pair<int, int>, CellInfo> cells;
     for (size_t vi = 0; vi + 2 < cm.positions.size(); vi += 3) {
         float px = cm.positions[vi], pz = cm.positions[vi + 2];
         int gx = static_cast<int>(std::floor((px - originX) / gridSize));
         int gz = static_cast<int>(std::floor((pz - originZ) / gridSize));
         auto &c = cells[std::make_pair(gx, gz)];
-        c.gx = gx; c.gz = gz;
+        c.gx = gx;
+        c.gz = gz;
         c.cx = originX + (gx + 0.5f) * gridSize;
         c.cz = originZ + (gz + 0.5f) * gridSize;
-        if (px < c.minX) c.minX = px; if (px > c.maxX) c.maxX = px;
-        if (pz < c.minZ) c.minZ = pz; if (pz > c.maxZ) c.maxZ = pz;
+        if (px < c.minX)
+            c.minX = px;
+        if (px > c.maxX)
+            c.maxX = px;
+        if (pz < c.minZ)
+            c.minZ = pz;
+        if (pz > c.maxZ)
+            c.maxZ = pz;
         c.count++;
     }
     std::cout << "[x2mapanalysis] Found " << cells.size() << " occupied grid cells\n";
 
     // 5. 匹配每个 grid cell 到 tile 模型
     struct Result {
-        std::string tileName; float worldX, worldZ;
+        std::string tileName;
+        float worldX, worldZ;
         float cellMinX, cellMaxX, cellMinZ, cellMaxZ;
-        int vertCount; float matchScore;
+        int vertCount;
+        float matchScore;
     };
     std::vector<Result> results;
     for (auto &[key, cell] : cells) {
         float cw = cell.maxX - cell.minX, cd = cell.maxZ - cell.minZ;
-        float bestScore = 1e9f; std::string bestName;
+        float bestScore = 1e9f;
+        std::string bestName;
         for (const auto &ti : infos) {
-            if (ti.verts == 0) continue;
+            if (ti.verts == 0)
+                continue;
             float vDiff = std::abs(static_cast<float>(ti.verts) - cell.count) / std::max(ti.verts, (size_t)1);
             float wDiff = std::abs(ti.dims[0] - cw) / std::max(ti.dims[0], 0.001f);
             float dDiff = std::abs(ti.dims[2] - cd) / std::max(ti.dims[2], 0.001f);
             float score = vDiff * 0.5f + wDiff * 0.25f + dDiff * 0.25f;
-            if (score < bestScore) { bestScore = score; bestName = ti.name; }
+            if (score < bestScore) {
+                bestScore = score;
+                bestName = ti.name;
+            }
         }
         if (bestScore < 0.5f)
-            results.push_back({bestName, cell.cx, cell.cz, cell.minX, cell.maxX, cell.minZ, cell.maxZ, cell.count, bestScore});
+            results.push_back(
+                {bestName, cell.cx, cell.cz, cell.minX, cell.maxX, cell.minZ, cell.maxZ, cell.count, bestScore});
     }
     std::cout << "[x2mapanalysis] Matched " << results.size() << " tiles (score<0.5)\n";
 
     // 6. 输出
     std::ostream *out = &std::cout;
     std::ofstream outFile;
-    if (!outputPath.empty()) { outFile.open(outputPath); if (outFile) out = &outFile; }
+    if (!outputPath.empty()) {
+        outFile.open(outputPath);
+        if (outFile)
+            out = &outFile;
+    }
     *out << "TileName\tWorldX\tWorldZ\tCellMinX\tCellMaxX\tCellMinZ\tCellMaxZ\tVerts\tScore\n";
     for (const auto &r : results)
-        *out << r.tileName << "\t" << r.worldX << "\t" << r.worldZ << "\t"
-             << r.cellMinX << "\t" << r.cellMaxX << "\t" << r.cellMinZ << "\t" << r.cellMaxZ << "\t"
-             << r.vertCount << "\t" << r.matchScore << "\n";
-    if (!outputPath.empty()) std::cout << "[x2mapanalysis] Written: " << outputPath << "\n";
+        *out << r.tileName << "\t" << r.worldX << "\t" << r.worldZ << "\t" << r.cellMinX << "\t" << r.cellMaxX << "\t"
+             << r.cellMinZ << "\t" << r.cellMaxZ << "\t" << r.vertCount << "\t" << r.matchScore << "\n";
+    if (!outputPath.empty())
+        std::cout << "[x2mapanalysis] Written: " << outputPath << "\n";
     return 0;
 }
 
@@ -1231,8 +1444,40 @@ static int CommandMap(const std::vector<std::string> &args) {
         return 1;
     }
     MapScanResult scan;
-    if (!ScanMapDirectory(args[0], scan)) return 1;
+    if (!ScanMapDirectory(args[0], scan))
+        return 1;
     return BuildMapScene(scan, args[1]);
+}
+
+// ==========================================================================
+// 命令：mpd2scene — MPD 权威解析 → piece 拆解（dxmesh + 材质去重 + 纹理解密）
+//                   → SPT 环境合成 → scene.json（符合 Schemas/scene.schema.json）
+// 依据 Docs/targets/UKW_PowerUpKit/08_MapScenePipeline.md（2026-08-03 定案）
+// ==========================================================================
+
+static int CommandMPD2Scene(const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        std::cerr << "Usage: AssetTool mpd2scene <map_dir> <out_dir>\n"
+                  << "       map_dir: 含 map.mpd + *.x + *.dds + Script.spt（如 map/City）\n"
+                  << "       out_dir: 输出 Content/City/{Meshes,Textures,Scenes/City.scene.json}\n";
+        return 1;
+    }
+
+    AssetTool::MapSceneOptions opts;
+    opts.mapDir = args[0];
+    opts.outDir = args[1];
+
+    AssetTool::MapSceneConverter converter;
+    AssetTool::MapSceneResult result;
+    if (!converter.Convert(opts, result)) {
+        std::cerr << "[mpd2scene] ERROR: " << result.error << "\n";
+        return 1;
+    }
+
+    std::cout << "[mpd2scene] pieces: " << result.pieceCount << ", instances: " << result.instanceCount
+              << ", materials: " << result.materialCount << ", textures: " << result.textureCount << "\n";
+    std::cout << "[mpd2scene] scene: " << result.scenePath << "\n";
+    return 0;
 }
 
 // ==========================================================================
@@ -1267,8 +1512,7 @@ static int CommandANI2Output(const std::vector<std::string> &args) {
     size_t totalFrames = 0;
     for (const auto &g : groups) {
         totalFrames += g.frames.size();
-        std::cout << "  组 " << g.index << ": " << g.frames.size() << " 帧"
-                  << (g.tail.script.empty() ? "" : " + Tail")
+        std::cout << "  组 " << g.index << ": " << g.frames.size() << " 帧" << (g.tail.script.empty() ? "" : " + Tail")
                   << (g.tail.scriptText.empty() ? "" : " (脚本)") << "\n";
     }
     std::cout << "[ani2output] 总帧数: " << totalFrames << "\n";
@@ -1380,16 +1624,15 @@ static int CommandANI2IK(const std::vector<std::string> &args) {
             lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         float target[3] = {last.position[0], last.position[1], last.position[2]};
         if (lower.find("leg") != std::string::npos)
-            target[1] = 0.0f;      // 脚贴地
+            target[1] = 0.0f; // 脚贴地
         else
-            target[0] += 0.2f;     // 手瞄准（前移）
+            target[0] += 0.2f; // 手瞄准（前移）
 
         // FABRIK 求解
         auto res = AssetTool::IKSolver::SolveFABRIK(chain.joints, target);
         AssetTool::IKSolver::ApplyPositionsToLocal(chain, hod);
 
-        ofs << "== 链 " << chainIdx << ": " << chain.name
-            << " (" << chain.joints.size() << " 关节) ==";
+        ofs << "== 链 " << chainIdx << ": " << chain.name << " (" << chain.joints.size() << " 关节) ==";
         ofs << (res.success ? " [收敛]" : " [未收敛]") << "\n";
         ofs << "  关节: ";
         for (const auto &j : chain.joints)
@@ -1398,8 +1641,8 @@ static int CommandANI2IK(const std::vector<std::string> &args) {
         ofs << "  目标: (" << target[0] << ", " << target[1] << ", " << target[2] << ")\n";
         for (size_t i = 0; i < chain.joints.size(); ++i) {
             const auto &j = chain.joints[i];
-            ofs << "    位置[" << i << "] " << j.name << " = ("
-                << j.position[0] << ", " << j.position[1] << ", " << j.position[2] << ")\n";
+            ofs << "    位置[" << i << "] " << j.name << " = (" << j.position[0] << ", " << j.position[1] << ", "
+                << j.position[2] << ")\n";
         }
         ofs << "    误差: " << res.error << "  迭代: " << res.iterations << "\n";
         for (size_t i = 0; i < chain.solvedLocalMats.size(); ++i) {
@@ -1411,16 +1654,14 @@ static int CommandANI2IK(const std::vector<std::string> &args) {
         }
         ofs << "\n";
 
-        std::cout << "  [链 " << chainIdx << "] " << chain.name
-                  << (res.success ? " OK" : " 未收敛")
+        std::cout << "  [链 " << chainIdx << "] " << chain.name << (res.success ? " OK" : " 未收敛")
                   << " 误差=" << res.error << "\n";
         if (res.success)
             ++okCount;
     }
 
     ofs.close();
-    std::cout << "[ani2ik] DONE — " << okCount << "/" << chains.size()
-              << " 链收敛 → " << reportPath << "\n";
+    std::cout << "[ani2ik] DONE — " << okCount << "/" << chains.size() << " 链收敛 → " << reportPath << "\n";
     return 0;
 }
 
@@ -1436,7 +1677,8 @@ static int CommandImportRobot(const std::vector<std::string> &args) {
 
     // 解析可选参数
     for (size_t i = 2; i < args.size(); ++i) {
-        if (args[i] == "--no-lrswap") lrSwap = false;
+        if (args[i] == "--no-lrswap")
+            lrSwap = false;
     }
 
     std::cout << "[importrobot] " << hodPath << " → " << outDir << "\n";
@@ -1450,8 +1692,8 @@ static int CommandImportRobot(const std::vector<std::string> &args) {
         return 1;
     }
 
-    std::cout << "[importrobot] DONE: " << result.partCount << " parts, "
-              << result.vertexCount << " verts, " << result.indexCount << " indices\n";
+    std::cout << "[importrobot] DONE: " << result.partCount << " parts, " << result.vertexCount << " verts, "
+              << result.indexCount << " indices\n";
     for (const auto &f : result.outputFiles)
         std::cout << "  → " << f << "\n";
     return 0;
@@ -1482,9 +1724,9 @@ static int CommandFbx2DxMesh(const std::vector<std::string> &args) {
         return 1;
     }
 
-    std::cout << "[fbxs2dxmesh] DONE: " << result.meshCount << " meshes, "
-              << result.vertexCount << " verts, " << result.indexCount << " indices, "
-              << result.boneCount << " bones, " << result.materialKeys.size() << " materials\n";
+    std::cout << "[fbxs2dxmesh] DONE: " << result.meshCount << " meshes, " << result.vertexCount << " verts, "
+              << result.indexCount << " indices, " << result.boneCount << " bones, " << result.materialKeys.size()
+              << " materials\n";
     for (const auto &f : result.outputFiles)
         std::cout << "  → " << f << "\n";
     return 0;
@@ -1515,8 +1757,8 @@ static int CommandAnim2Clip(const std::vector<std::string> &args) {
         return 1;
     }
 
-    std::cout << "[anim2clip] DONE: " << result.clipCount << " clips, "
-              << result.channelCount << " channels, " << result.totalKeyframes << " keyframes\n";
+    std::cout << "[anim2clip] DONE: " << result.clipCount << " clips, " << result.channelCount << " channels, "
+              << result.totalKeyframes << " keyframes\n";
     for (const auto &f : result.outputFiles)
         std::cout << "  → " << f << "\n";
     return 0;
@@ -1527,9 +1769,11 @@ static int CommandAnim2Clip(const std::vector<std::string> &args) {
 // ==========================================================================
 
 static void DumpAINode(const aiNode *node, int depth) {
-    for (int i = 0; i < depth; ++i) std::cout << "  ";
+    for (int i = 0; i < depth; ++i)
+        std::cout << "  ";
     std::cout << "Node: " << (node->mName.length ? node->mName.C_Str() : "(unnamed)");
-    if (node->mNumMeshes > 0) std::cout << " [meshes: " << node->mNumMeshes << "]";
+    if (node->mNumMeshes > 0)
+        std::cout << " [meshes: " << node->mNumMeshes << "]";
     std::cout << "\n";
     for (unsigned int i = 0; i < node->mNumChildren; ++i)
         DumpAINode(node->mChildren[i], depth + 1);
@@ -1550,30 +1794,27 @@ static int CommandVerifyFBX(const std::vector<std::string> &args) {
         return 1;
     }
 
-    std::cout << "[verifyfbx] OK — " << scene->mNumMeshes << " meshes, "
-              << scene->mNumMaterials << " materials, "
+    std::cout << "[verifyfbx] OK — " << scene->mNumMeshes << " meshes, " << scene->mNumMaterials << " materials, "
               << scene->mNumAnimations << " animations\n";
 
     unsigned int totalVerts = 0, totalFaces = 0;
     for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi) {
         const aiMesh *m = scene->mMeshes[mi];
-        std::cout << "  Mesh[" << mi << "] \"" << (m->mName.length ? m->mName.C_Str() : "?") << "\": "
-                  << m->mNumVertices << " verts, " << m->mNumFaces << " faces"
-                  << (m->HasNormals() ? ", normals" : "")
-                  << (m->HasTextureCoords(0) ? ", UV" : "")
-                  << (m->mNumBones > 0 ? (", " + std::to_string(m->mNumBones) + " bones") : "")
-                  << "\n";
+        std::cout << "  Mesh[" << mi << "] \"" << (m->mName.length ? m->mName.C_Str() : "?")
+                  << "\": " << m->mNumVertices << " verts, " << m->mNumFaces << " faces"
+                  << (m->HasNormals() ? ", normals" : "") << (m->HasTextureCoords(0) ? ", UV" : "")
+                  << (m->mNumBones > 0 ? (", " + std::to_string(m->mNumBones) + " bones") : "") << "\n";
         totalVerts += m->mNumVertices;
         totalFaces += m->mNumFaces;
         for (unsigned int bi = 0; bi < m->mNumBones; ++bi) {
             const aiBone *b = m->mBones[bi];
-            std::cout << "    Bone[" << bi << "] \"" << b->mName.C_Str() << "\": "
-                      << b->mNumWeights << " weights\n";
+            std::cout << "    Bone[" << bi << "] \"" << b->mName.C_Str() << "\": " << b->mNumWeights << " weights\n";
         }
     }
     std::cout << "[verifyfbx] Total: " << totalVerts << " verts, " << totalFaces << " faces\n";
     std::cout << "[verifyfbx] Node hierarchy:\n";
-    if (scene->mRootNode) DumpAINode(scene->mRootNode, 0);
+    if (scene->mRootNode)
+        DumpAINode(scene->mRootNode, 0);
     return 0;
 }
 
@@ -1595,6 +1836,9 @@ static void PrintUsage(const char *progName) {
     std::cout << "  " << progName << " mpd2txt <input.mpd> <output.txt> [asset_dir]\n";
     std::cout << "      Parse .mpd map tile data to readable text\n";
     std::cout << "      asset_dir: optional, filter names against actual .x files\n\n";
+    std::cout << "  " << progName << " mpd2x <input.mpd> <asset_dir> <output.x>\n";
+    std::cout << "      Stitch map: parse MPD (authoritative structure) → load piece .x →\n";
+    std::cout << "      transform by object matrix → merge into one .x file (DE check)\n\n";
     std::cout << "  " << progName << " spt2json <Script.spt> <scene.json>\n";
     std::cout << "      Parse scene script to JSON format\n\n";
     std::cout << "  " << progName << " decrypt <input> <output> [key_hex]\n";
@@ -1624,6 +1868,8 @@ static void PrintUsage(const char *progName) {
     std::cout << "      solve foot-ground / hand-aim demo targets, write {stem}_ik_report.txt\n\n";
     std::cout << "  " << progName << " map <input_map_dir> <output_dir>\n";
     std::cout << "      Map pipeline: scan all .x + parse MPD/SPT → complete scene.json\n\n";
+    std::cout << "  " << progName << " mpd2scene <map_dir> <out_dir>\n";
+    std::cout << "      MPD 权威管线: piece 拆解（dxmesh+材质去重+纹理解密）+ SPT 环境 → scene.json\n";
     std::cout << "  " << progName << " x2mapanalysis <combined.map.x> <tiles_dir> [output.txt]\n";
     std::cout << "      Analyze combined map.x against individual tiles to extract tile positions\n\n";
     std::cout << "  " << progName << " verifyfbx <file.fbx>\n";
@@ -1655,6 +1901,8 @@ int main(int argc, char *argv[]) {
         return CommandHOD2Txt(args);
     } else if (command == "mpd2txt") {
         return CommandMPD2Txt(args);
+    } else if (command == "mpd2x") {
+        return CommandMPD2X(args);
     } else if (command == "spt2json") {
         return CommandSPT2JSON(args);
     } else if (command == "decrypt") {
@@ -1679,6 +1927,8 @@ int main(int argc, char *argv[]) {
         return CommandANI2IK(args);
     } else if (command == "map") {
         return CommandMap(args);
+    } else if (command == "mpd2scene") {
+        return CommandMPD2Scene(args);
     } else if (command == "x2mapanalysis") {
         return CommandMapAnalysis(args);
     } else if (command == "verifyfbx") {

@@ -102,6 +102,8 @@ bool DxMeshLoader::LoadFromFile(const std::wstring &filePath, ID3D12Device *devi
     outMesh.localBounds = aabb;
 
     // 读取 SubMesh 表
+    // 统一语义：所有网格按子网格处理；无子网格表时视为 1 个子网格（整个索引区间）
+    // （见 SubMeshMaterialSlots.md §2.3，消费方不再判空）
     if (header->subMeshCount > 0) {
         const auto *subTable = DxMesh_GetSubMeshTable(header);
         outMesh.subMeshes.reserve(header->subMeshCount);
@@ -112,6 +114,12 @@ bool DxMeshLoader::LoadFromFile(const std::wstring &filePath, ID3D12Device *devi
             info.startVertex = static_cast<int32_t>(subTable[i].vertexOffset);
             outMesh.subMeshes.push_back(info);
         }
+    } else {
+        SubMeshInfo whole;
+        whole.startIndex = 0;
+        whole.indexCount = header->indexCount;
+        whole.startVertex = 0; // 索引已绝对化，BaseVertexLocation 恒 0
+        outMesh.subMeshes.push_back(whole);
     }
 
     return true;

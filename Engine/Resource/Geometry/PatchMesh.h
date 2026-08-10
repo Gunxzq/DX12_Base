@@ -1,8 +1,8 @@
-// PatchMesh.h
 #pragma once
 
 #include "Math/BoundingVolume.h"
 #include "Resource/Core/GpuHandlePool.h"
+#include "Resource/Geometry/GeometryBase.h"
 #include <DirectXMath.h>
 #include <d3d12.h>
 
@@ -13,32 +13,16 @@ enum class PatchType : uint8_t {
     Triangle // 三角形面片，3个控制点
 };
 
-struct PatchMesh {
-    // GPU 资源句柄
-    GpuResourceHandle vertexBufferHandle;
-    GpuResourceHandle indexBufferHandle;
-
-    // 几何数据
-    uint32_t vertexCount = 0;
-    uint32_t indexCount = 0; // 面片索引数量
+// 曲面细分面片（地形用，控制点网格）
+struct PatchMesh : GeometryBase {
     uint32_t patchCount = 0; // 面片数量
-    uint32_t vertexStride = 0;
-    DXGI_FORMAT indexFormat = DXGI_FORMAT_R32_UINT;
-
-    // 拓扑类型
     PatchType patchType = PatchType::Quad;
 
-    // 获取 D3D12 图元类型
-    D3D12_PRIMITIVE_TOPOLOGY GetPrimitiveTopology() const {
+    // 获取 D3D12 图元类型（覆盖基类默认值）
+    D3D_PRIMITIVE_TOPOLOGY GetPrimitiveTopology() const {
         return (patchType == PatchType::Quad) ? D3D_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST
                                               : D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
     }
-
-    // 包围盒
-    Math::BoundingVolumeVariant localBounds;
-
-    // 状态
-    bool isGpuReady = false;
 
     bool IsValid() const { return vertexBufferHandle.IsValid() && indexBufferHandle.IsValid(); }
 };
