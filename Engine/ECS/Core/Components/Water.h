@@ -23,11 +23,13 @@ struct WaterComponent {
     float speed = 0.5f;
     float direction = 0.0f; // 风向（弧度）
 
-    // 运行时状态（由 WaterManager 填充）
+    // 运行时状态（waveParamIndex 已废弃——CollectFromECS 按 ECS 顺序重建
+    // m_waveParams，不再回写组件索引，见 WaterManager::CollectFromECS 注释）
     uint32_t waveParamIndex = UINT32_MAX;
-    D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress = 0;
 
-    bool IsValid() const { return materialHandle.IsValid() && waveParamIndex != UINT32_MAX && objectCBAddress != 0; }
+    // objectCBAddress 已移除（§10.5 数据上传铁律：不建持久 CB，由 FrameSync 每帧上传）
+
+    bool IsValid() const { return materialHandle.IsValid(); }
 };
 
 } // namespace DX12Engine::ECS

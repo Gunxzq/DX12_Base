@@ -24,7 +24,6 @@ public:
     void SetDeviceContext(D3D12DeviceContext *context);
     void SetGeometryResourceManager(Resource::GeometryResourceManager *mgr) { m_geometryManager = mgr; }
     void SetMaterialManager(Resource::MaterialManager *mgr) { m_materialManager = mgr; }
-    void SetWaterTextureSRV(D3D12_GPU_DESCRIPTOR_HANDLE srv) { m_waterTextureSRV = srv; }
     void Initialize();
     void OnResize(uint32_t width, uint32_t height);
     void Update(float deltaTime);
@@ -32,11 +31,11 @@ public:
 
     void BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                     D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
-                    D3D12_GPU_VIRTUAL_ADDRESS waterCBAddress);
+                    D3D12_GPU_VIRTUAL_ADDRESS waterCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart,
+                    D3D12_GPU_DESCRIPTOR_HANDLE depthSRV = D3D12_GPU_DESCRIPTOR_HANDLE{});
 
     void DrawWater(CommandList &cmdList, Resource::GeometryHandle geometryHandle, const DirectX::XMMATRIX &worldMatrix,
-                   D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress,
-                   D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV);
+                   D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE envMapSRV);
 
 private:
     void CreateRootSignature();
@@ -51,7 +50,6 @@ private:
 
     Resource::GeometryResourceManager *m_geometryManager = nullptr;
     Resource::MaterialManager *m_materialManager = nullptr;
-    D3D12_GPU_DESCRIPTOR_HANDLE m_waterTextureSRV = {};
 };
 
 } // namespace DX12Engine::Renderer

@@ -1,4 +1,7 @@
 #include "WaterManager.h"
+#include "ECS/Core/Components/Water.h"
+#include "ECS/Core/Registry.h"
+#include "Logger/Logger.h"
 #include "Resource/GpuResourceManager.h"
 #include <cmath>
 
@@ -45,12 +48,45 @@ const WaveParams &WaterManager::GetWaveParams(uint32_t index) const {
     return m_waveParams[index];
 }
 
+void WaterManager::CollectFromECS(ECS::Registry *registry) {
+    if (!registry)
+        return;
+
+    // 重建 m_waveParams（清空后逐个从 ECS WaterComponent 收集）
+    m_waveParams.clear();
+
+    auto view = registry->view<ECS::WaterComponent>();
+    for (auto entity : view) {
+        const auto &wc = view.get<ECS::WaterComponent>(entity);
+
+        WaveParams wp;
+        wp.amplitude = wc.amplitude;
+        wp.frequency = wc.frequency;
+        wp.speed = wc.speed;
+        wp.direction = wc.direction;
+
+        uint32_t idx = static_cast<uint32_t>(m_waveParams.size());
+        m_waveParams.push_back(wp);
+    }
+
+    // 调试日志：输出收集到的波浪参数
+    if (m_waveParams.size() > 0) {
+        auto *logger = Logger::Logger::GetInstance();
+        logger->Info("[WaterManager] CollectFromECS: {} water bodies", m_waveParams.size());
+        for (size_t i = 0; i < m_waveParams.size(); ++i) {
+            const auto &wp = m_waveParams[i];
+            logger->Info("[WaterManager]  water[{}]: amplitude={:.2f} frequency={:.2f} speed={:.2f} direction={:.2f}",
+                         i, wp.amplitude, wp.frequency, wp.speed, wp.direction);
+        }
+    }
+}
+
 void WaterManager::UpdateAndUpload(uint64_t fence) {
     if (!m_initialized)
         return;
 
     // 更新波浪偏移
-    float deltaTime = 1.0f / 60.0f; // 近似值，后续从 GameTimer 传入更精确值
+    float deltaTime = 1.0f / 60.0f;
     for (auto &wp : m_waveParams) {
         float dx = cosf(wp.direction) * wp.speed * deltaTime;
         float dy = sinf(wp.direction) * wp.speed * deltaTime;
@@ -58,20 +94,28 @@ void WaterManager::UpdateAndUpload(uint64_t fence) {
         wp.waveOffset.y += dy;
     }
 
-    // 填充 WaterConstants
+    // 填充 WaterConstants（使用第一个水体的波浪参数，或默认值）
     WaterConstants waterCB = {};
-    waterCB.Time = 0; // TODO: 从外部传入精确时间
-    waterCB.WaveAmplitude = 0.5f;
-    waterCB.WaveSpeed = 1.5f;
-    waterCB.WaveFrequency = 2.0f;
+    waterCB.Time = 0;
+    if (!m_waveParams.empty()) {
+        const auto &wp = m_waveParams[0];
+        waterCB.WaveAmplitude = wp.amplitude;
+        waterCB.WaveSpeed = wp.speed;
+        waterCB.WaveFrequency = wp.frequency;
+    } else {
+        waterCB.WaveAmplitude = 0.5f;
+        waterCB.WaveSpeed = 1.5f;
+        waterCB.WaveFrequency = 2.0f;
+    }
     waterCB.RefractionStrength = 0.3f;
     waterCB.FresnelPower = 2.0f;
     waterCB.FoamIntensity = 0.5f;
+    waterCB.FadeRange = m_fadeRange; // 岸线渐隐距离（water.hlsl gFadeRange；0=禁用降级）
+    waterCB.UVTiling = m_uvTiling;   // 世界 UV 平铺（water.hlsl gUVTiling；纹理跨块连续）
 
     // 上传到 RingBuffer
     m_waterCBAddress = m_waterBuffer.AllocateUpload(&waterCB, sizeof(WaterConstants), fence);
     if (m_waterCBAddress == 0) {
-        // 分配失败，扩张 RingBuffer
         m_waterBuffer.Initialize(m_device, WATER_BUFFER_SIZE * 2, L"WaterManager_Buffer");
         m_waterCBAddress = m_waterBuffer.AllocateUpload(&waterCB, sizeof(WaterConstants), fence);
     }

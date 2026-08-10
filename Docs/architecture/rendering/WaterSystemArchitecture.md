@@ -104,17 +104,19 @@ struct WaterRenderItem {
 ### WaterRenderItemBuilder — 构建器
 
 ```
-BuildTyped 扫描 ECS Registry:
-  view<WaterComponent, MeshComponent, TransformComponent, TransparentTag>
-    → 计算深度（到相机距离）
-    → 填充 WaterRenderItem { geoHandle, cbAddr, waveParamIndex, depth }
+BuildTyped 消费 "water" 桶（桶模式，非 ECS view 遍历——见 RenderPipelineSpecification.md §10.1）:
+  m_cache->ForEachBucket("water", ...)
+    → 精确视锥筛选
+    → LOD 解析 GeometryHandle
+    → 填充 WaterRenderItem { geoHandle, worldMatrix, materialIndex, depth }
     → 推入 TRenderQueue<WaterRenderItem>
 ```
 
 注意：
-- Builder **不分配 CB**（沿用 `FrameSync` 统一分配模式）
-- `objectCBAddress` 在 FrameSync 回调中从 RingBuffer 分配
+- Builder **不分配 CB**（沿用 `FrameSync` 统一分配模式，**铁律见 `RenderPipelineSpecification.md` §10.5**）
+- `objectCBAddress` 在 FrameSync 回调中从 RingBuffer 分配（`FrameResourceManager::Allocate`），`worldMatrix`/`materialIndex` 由 Builder 填 CPU 侧数据、上传时写入 `ObjectConstants`
 - 构建器运行在 Worker 线程（只读 ECS，不修改）
+- ❌ 禁止在 `ConstructEntity` 中创建持久 CB 承载 World 矩阵（`WaterObjCB_Persistent` 旁路，见 §11 缺陷 #6）
 
 ### WaterRenderSystem — 渲染系统
 

@@ -7,6 +7,10 @@
 #include <d3d12.h>
 #include <vector>
 
+namespace DX12Engine::ECS {
+class Registry; // Registry.h 中声明为 class DX12ECS_API Registry（前向声明须与定义一致）
+} // namespace DX12Engine::ECS
+
 namespace DX12Engine::Renderer {
 
 // ========================================================================
@@ -49,11 +53,24 @@ public:
     // ========================================================================
     // 波浪参数管理
     // ========================================================================
+    /// 注册波浪参数（保留旧接口兼容；后续由 CollectFromECS 替代）
     uint32_t RegisterWaveParams(const WaveParams &params);
     const WaveParams &GetWaveParams(uint32_t index) const;
 
+    /// 从 ECS Registry 收集水体数据，重建 m_waveParams
+    /// 遍历所有 WaterComponent 实体，从组件字段提取波浪参数
+    /// 调用时机：每帧 UpdateAndUpload 之前
+    void CollectFromECS(DX12Engine::ECS::Registry *registry);
+
     /// 更新波浪偏移 + 上传 WaterConstants CB（Immediate 回调调用）
     void UpdateAndUpload(uint64_t fence);
+
+    /// 设置岸线渐隐距离（深度空间，>0 时 water.hlsl 采样场景深度做岸线渐隐）
+    /// Game 端未绑定深度 SRV，保持默认 0 自动降级为纯色水
+    void SetFadeRange(float range) { m_fadeRange = range; }
+
+    /// 设置世界 UV 平铺（worldPos.xz * UVTiling——纹理跨块连续，对齐波形世界坐标）
+    void SetUVTiling(float tiling) { m_uvTiling = tiling; }
 
     // ========================================================================
     // 环境贴图（来自 SkyboxManager，SceneConstructor 注入）
@@ -77,6 +94,12 @@ private:
     // 自管 RingBuffer（每帧上传 WaterConstants）
     RingBuffer m_waterBuffer;
     D3D12_GPU_VIRTUAL_ADDRESS m_waterCBAddress = 0;
+
+    // 岸线渐隐距离（深度空间，0=禁用降级；Editor 端设置，Game 端保持 0）
+    float m_fadeRange = 0.0f;
+
+    // 世界 UV 平铺（water.hlsl worldPos.xz * gUVTiling；默认 1.0 = 每世界单位一个纹理周期）
+    float m_uvTiling = 1.0f;
 };
 
 } // namespace DX12Engine::Renderer

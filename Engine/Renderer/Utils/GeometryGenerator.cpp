@@ -557,6 +557,12 @@ GeometryGenerator::MeshData GeometryGenerator::CreateGrid(float width, float dep
     float du = 1.0f / (n - 1);
     float dv = 1.0f / (m - 1);
 
+    // UV 每段平铺：TexC = 顶点索引（0,1,2,...），每个 quad 内 UV 0~1（WRAP 平铺）
+    // 效果：每 1 段（widthSegments/depthSegments 划分的单位）一个纹理周期——
+    // 对齐地面 mapChip 的 30 单位/格平铺密度，避免整块拉伸成一片。
+    // 注意：水面网格不使用此 UV（water.hlsl VS 用 worldPos.xz * gUVTiling 覆盖），
+    // 天空盒用 cube UV——本函数仅程序化网格（含地面合并块）依赖此平铺语义。
+
     meshData.Vertices.resize(vertexCount);
     for (uint32 i = 0; i < m; ++i) {
         float z = halfDepth - i * dz;
@@ -567,9 +573,12 @@ GeometryGenerator::MeshData GeometryGenerator::CreateGrid(float width, float dep
             meshData.Vertices[i * n + j].Normal = XMFLOAT3(0.0f, 1.0f, 0.0f);
             meshData.Vertices[i * n + j].TangentU = XMFLOAT3(1.0f, 0.0f, 0.0f);
 
-            // Stretch texture over grid.
-            meshData.Vertices[i * n + j].TexC.x = j * du;
-            meshData.Vertices[i * n + j].TexC.y = i * dv;
+            // 每段平铺（每 quad 一个纹理周期）
+            meshData.Vertices[i * n + j].TexC.x = static_cast<float>(j);
+            meshData.Vertices[i * n + j].TexC.y = static_cast<float>(i);
+
+            // meshData.Vertices[i * n + j].TexC.x = j * du;
+            // meshData.Vertices[i * n + j].TexC.y = i * dv;
         }
     }
 

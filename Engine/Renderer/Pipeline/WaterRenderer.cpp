@@ -2,10 +2,10 @@
 #include "WaterRenderer.h"
 #include "Common/d3dUtil.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
+#include "Renderer/Utils/ShaderUtils.h"
 #include "Resource/Geometry/GridGeometry.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
-#include "Renderer/Utils/ShaderUtils.h"
 
 using namespace DX12Engine::Renderer;
 using namespace DX12Engine::Resource;
@@ -53,7 +53,8 @@ void WaterRenderer::EndFrame() {
 
 void WaterRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS passConstantsAddress,
                                D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE materialBufferSRV,
-                               D3D12_GPU_VIRTUAL_ADDRESS waterCBAddress) {
+                               D3D12_GPU_VIRTUAL_ADDRESS waterCBAddress, D3D12_GPU_DESCRIPTOR_HANDLE textureHeapStart,
+                               D3D12_GPU_DESCRIPTOR_HANDLE depthSRV) {
     if (!m_pso || !m_rootSignature)
         return;
 
@@ -63,9 +64,19 @@ void WaterRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRESS p
     cmdList.Get()->SetGraphicsRootConstantBufferView(2, lightCBAddress);
     cmdList.Get()->SetGraphicsRootConstantBufferView(3, waterCBAddress);
 
-    // 绑定材质数组 SRV (slot 3)
+    // 绑定材质数组 SRV (slot 4, t0,space1)
     if (materialBufferSRV.ptr != 0) {
         cmdList.Get()->SetGraphicsRootDescriptorTable(4, materialBufferSRV);
+    }
+
+    // 绑定纹理堆 SRV (slot 5, t0,space2 — gTextureMaps[])
+    if (textureHeapStart.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(5, textureHeapStart);
+    }
+
+    // 绑定场景深度 SRV (slot 7, t11,space0 — 岸线深度渐隐)
+    if (depthSRV.ptr != 0) {
+        cmdList.Get()->SetGraphicsRootDescriptorTable(7, depthSRV);
     }
 }
 
@@ -77,14 +88,14 @@ void WaterRenderer::DrawWater(CommandList &cmdList, Resource::GeometryHandle geo
         return;
     }
 
-    const GridGeometry *mesh = m_geometryManager->GetGeometry<GridGeometry>(geometryHandle);
-    if (!mesh || !mesh->isGpuReady) {
+    const auto *base = m_geometryManager->GetGeometryBase(geometryHandle);
+    if (!base || !base->isGpuReady) {
         return;
     }
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
-    ID3D12Resource *vbResource = gpuMgr.GetResource(mesh->vertexBufferHandle);
-    ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
+    ID3D12Resource *vbResource = gpuMgr.GetResource(base->vertexBufferHandle);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(base->indexBufferHandle);
 
     if (!vbResource || !ibResource) {
         ErrorReporter::Report("WaterRenderer::DrawWater - Invalid vertex or index buffer");
@@ -93,28 +104,25 @@ void WaterRenderer::DrawWater(CommandList &cmdList, Resource::GeometryHandle geo
 
     D3D12_VERTEX_BUFFER_VIEW vbView;
     vbView.BufferLocation = vbResource->GetGPUVirtualAddress();
-    vbView.StrideInBytes = mesh->vertexStride;
-    vbView.SizeInBytes = static_cast<UINT>(mesh->vertexCount * mesh->vertexStride);
+    vbView.StrideInBytes = base->vertexStride;
+    vbView.SizeInBytes = static_cast<UINT>(base->vertexCount * base->vertexStride);
 
     D3D12_INDEX_BUFFER_VIEW ibView;
     ibView.BufferLocation = ibResource->GetGPUVirtualAddress();
-    ibView.Format = mesh->indexFormat;
-    ibView.SizeInBytes = static_cast<UINT>(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2));
+    ibView.Format = base->indexFormat;
+    ibView.SizeInBytes = static_cast<UINT>(base->indexCount * (base->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2));
 
     cmdList.Get()->IASetVertexBuffers(0, 1, &vbView);
     cmdList.Get()->IASetIndexBuffer(&ibView);
-    cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
+    cmdList.Get()->IASetPrimitiveTopology(base->topology);
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objectCBAddress);
-
-    // 纹理 SRV (slot 5)
-    cmdList.Get()->SetGraphicsRootDescriptorTable(5, m_waterTextureSRV);
 
     // 环境贴图 SRV (slot 6, t10)
     if (envMapSRV.ptr != 0) {
         cmdList.Get()->SetGraphicsRootDescriptorTable(6, envMapSRV);
     }
 
-    cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
+    cmdList.Get()->DrawIndexedInstanced(base->indexCount, 1, 0, 0, 0);
 }
 
 // ========================================================================
@@ -166,27 +174,32 @@ void WaterRenderer::CreateRootSignature() {
     //   slot 2: b2 cbLights         (CBV)
     //   slot 3: b3 cbWater          (CBV)
     //   slot 4: t0,space1           StructuredBuffer<MaterialData> (SRV 描述符表)
-    //   slot 5: t0                  纹理 SRV (描述符表)
-    //   slot 6: t10                 环境贴图 SRV (描述符表)
+    //   slot 5: t0,space2           Texture2D gTextureMaps[] (SRV 描述符表——纹理堆)
+    //   slot 6: t10,space0          环境贴图 SRV (描述符表)
+    //   slot 7: t11,space0          场景深度 SRV (描述符表——岸线渐隐用)
     // ========================================================================
-    CD3DX12_ROOT_PARAMETER slotRootParameter[7];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[8];
 
     CD3DX12_DESCRIPTOR_RANGE materialBufferRange;
     materialBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
-    CD3DX12_DESCRIPTOR_RANGE texTable;
-    texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+    CD3DX12_DESCRIPTOR_RANGE textureHeapRange;
+    textureHeapRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 2, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
     CD3DX12_DESCRIPTOR_RANGE envMapTable;
     envMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
+
+    CD3DX12_DESCRIPTOR_RANGE depthTable;
+    depthTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 11, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND);
 
     slotRootParameter[0].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL);                   // b0
     slotRootParameter[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);                   // b1
     slotRootParameter[2].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_ALL);                   // b2
     slotRootParameter[3].InitAsConstantBufferView(3, 0, D3D12_SHADER_VISIBILITY_ALL);                   // b3
     slotRootParameter[4].InitAsDescriptorTable(1, &materialBufferRange, D3D12_SHADER_VISIBILITY_PIXEL); // t0,space1
-    slotRootParameter[5].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);            // t0
+    slotRootParameter[5].InitAsDescriptorTable(1, &textureHeapRange, D3D12_SHADER_VISIBILITY_PIXEL);    // t0,space2
     slotRootParameter[6].InitAsDescriptorTable(1, &envMapTable, D3D12_SHADER_VISIBILITY_PIXEL);         // t10
+    slotRootParameter[7].InitAsDescriptorTable(1, &depthTable, D3D12_SHADER_VISIBILITY_PIXEL);          // t11
 
     // ========================================================================
     // 静态采样器 (与 OpaqueRenderer 一致)
@@ -208,7 +221,7 @@ void WaterRenderer::CreateRootSignature() {
     staticSamplers[6].Init(10, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                            D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(7, slotRootParameter, 7, staticSamplers,
+    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(8, slotRootParameter, 7, staticSamplers,
                                             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSig = nullptr;
