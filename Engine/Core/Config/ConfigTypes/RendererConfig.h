@@ -70,9 +70,10 @@ struct SwapChainConfig {
     std::string swapEffect = "FLIP_DISCARD";
     std::vector<std::string> flags;
     bool windowed = true;
+    bool enableVsync = true; // 2026-08-10：Present(syncInterval)——false 时 Present(0,0) 打破 Vsync 60 锁（帧率上限）
 
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(SwapChainConfig, bufferCount, refreshRateNumerator, refreshRateDenominator,
-                                   swapEffect, flags, windowed)
+                                   swapEffect, flags, windowed, enableVsync)
 };
 
 // ========================================================================

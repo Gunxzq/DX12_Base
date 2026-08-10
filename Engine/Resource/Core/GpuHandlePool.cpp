@@ -96,9 +96,19 @@ GpuResourceHandle GpuHandlePool::AllocateSlot(uint8_t poolId, GpuResourceState i
 }
 
 void GpuHandlePool::FreeSlot(GpuResourceHandle handle) {
-    if (!Validate(handle)) {
+    // [CullDiag] 修复：允许回收 PendingRelease 槽位（原 Validate 拒绝 PendingRelease →
+    // GpuResourceManager::Update 释放路径（Release 置 PendingRelease → resource->Release() →
+    // FreeSlot）槽位永不回收：dataPtr 悬垂 + generation 不变 + 槽位不进 freeIndices → 句柄池泄漏）
+    // 校验：generation 匹配（防句柄失效/槽位复用）且非 Empty（防重复释放）
+    auto generations = m_generations;
+    auto states = m_states;
+    uint32_t cap = m_capacity.load(std::memory_order_relaxed);
+    if (!m_initialized || !generations || !states || handle.index >= cap)
         return;
-    }
+    if (generations[handle.index].load(std::memory_order_acquire) != handle.generation)
+        return;
+    if (states[handle.index].load(std::memory_order_acquire) == GpuResourceState::Empty)
+        return;
 
     uint32_t index = handle.index;
 

@@ -39,7 +39,8 @@ void GpuResourceManager::Shutdown() {
 }
 
 GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t size, const std::wstring &name,
-                                                   D3D12_HEAP_TYPE heapType, D3D12_RESOURCE_STATES initialState) {
+                                                   D3D12_HEAP_TYPE heapType, D3D12_RESOURCE_STATES initialState,
+                                                   D3D12_RESOURCE_FLAGS flags) {
     if (!m_initialized || !device) {
         return GpuResourceHandle::Invalid();
     }
@@ -49,7 +50,7 @@ GpuResourceHandle GpuResourceManager::CreateBuffer(ID3D12Device *device, size_t 
 
     // 2. 创建 D3D12 资源
     CD3DX12_HEAP_PROPERTIES heapProps(heapType);
-    auto desc = CD3DX12_RESOURCE_DESC::Buffer(size);
+    auto desc = CD3DX12_RESOURCE_DESC::Buffer(size, flags);
 
     ID3D12Resource *resource = nullptr;
     HRESULT hr = device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc, initialState, nullptr,

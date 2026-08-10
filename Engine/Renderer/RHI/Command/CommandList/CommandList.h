@@ -59,6 +59,16 @@ public:
         }
     }
 
+    // 间接绘制统一走 ExecuteIndirect + 命令签名（D3D12_DRAW_INDEXED_ARGUMENTS，基础接口即有）
+    void ExecuteIndirect(ID3D12CommandSignature *pCommandSignature, UINT MaxCommandCount,
+                         ID3D12Resource *pArgumentBuffer, UINT64 ArgumentBufferOffset, ID3D12Resource *pCountBuffer,
+                         UINT64 CountBufferOffset) {
+        if (m_cmdList) {
+            m_cmdList->ExecuteIndirect(pCommandSignature, MaxCommandCount, pArgumentBuffer, ArgumentBufferOffset,
+                                       pCountBuffer, CountBufferOffset);
+        }
+    }
+
     void SetPipelineState(ID3D12PipelineState *pPipelineState) {
         if (m_cmdList) {
             m_cmdList->SetPipelineState(pPipelineState);
@@ -68,6 +78,26 @@ public:
     void SetComputeRootSignature(ID3D12RootSignature *pRootSignature) {
         if (m_cmdList) {
             m_cmdList->SetComputeRootSignature(pRootSignature);
+        }
+    }
+
+    // ── Compute 根参数绑定（L2b：GPU 实例剔除 pass 用） ──
+
+    void SetComputeRootDescriptorTable(UINT RootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE BaseDescriptor) {
+        if (m_cmdList) {
+            m_cmdList->SetComputeRootDescriptorTable(RootParameterIndex, BaseDescriptor);
+        }
+    }
+
+    void SetComputeRootConstantBufferView(UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) {
+        if (m_cmdList) {
+            m_cmdList->SetComputeRootConstantBufferView(RootParameterIndex, BufferLocation);
+        }
+    }
+
+    void SetComputeRootUnorderedAccessView(UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) {
+        if (m_cmdList) {
+            m_cmdList->SetComputeRootUnorderedAccessView(RootParameterIndex, BufferLocation);
         }
     }
 
