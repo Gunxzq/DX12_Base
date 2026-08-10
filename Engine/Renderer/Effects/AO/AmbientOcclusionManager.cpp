@@ -31,13 +31,14 @@ void AmbientOcclusionManager::SetDeviceContext(D3D12DeviceContext *context) {
 }
 
 void AmbientOcclusionManager::Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps,
-                                         uint32_t renderWidth, uint32_t renderHeight) {
+                                         uint32_t renderWidth, uint32_t renderHeight, Resource::HeapTag heapTag) {
     if (m_initialized) {
         Shutdown();
     }
 
     m_device = device;
     m_descriptorHeaps = descriptorHeaps;
+    m_heapTag = heapTag;
 
     if (!m_device || !m_descriptorHeaps) {
         return;
@@ -60,6 +61,7 @@ void AmbientOcclusionManager::Initialize(ID3D12Device *device, Resource::Descrip
 
     // 初始化 SSAO 渲染器
     m_ssaoRenderer.SetDescriptorHeaps(m_descriptorHeaps);
+    m_ssaoRenderer.SetHeapTag(m_heapTag); // 规则 17：SSAO pass 绑定与 AO RT 同域的描述符堆
     m_ssaoRenderer.Initialize();
 
     // 注册 SSAO PSO（由 SsaoRenderer 内部创建）
@@ -111,7 +113,7 @@ void AmbientOcclusionManager::BuildResources(uint32_t width, uint32_t height) {
         desc.flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
         desc.clearValue = {kAmbientMapFormat, {1.0f, 0.0f, 0.0f, 0.0f}};
         desc.name = L"SSAO_Ambient0";
-        m_ambientRT0 = rtvPool.Allocate(desc);
+        m_ambientRT0 = rtvPool.Allocate(desc, m_heapTag);
         if (m_ambientRT0.IsValid()) {
             m_ambientSRV = rtvPool.GetSrvHandle(m_ambientRT0);
             m_ambientRTV = rtvPool.GetRtvHandle(m_ambientRT0);
@@ -127,7 +129,7 @@ void AmbientOcclusionManager::BuildResources(uint32_t width, uint32_t height) {
         desc.flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
         desc.clearValue = {kAmbientMapFormat, {1.0f, 0.0f, 0.0f, 0.0f}};
         desc.name = L"SSAO_Ambient1";
-        m_ambientRT1 = rtvPool.Allocate(desc);
+        m_ambientRT1 = rtvPool.Allocate(desc, m_heapTag);
         if (m_ambientRT1.IsValid()) {
             m_ambient1SRV = rtvPool.GetSrvHandle(m_ambientRT1);
             m_ambient1RTV = rtvPool.GetRtvHandle(m_ambientRT1);
@@ -234,7 +236,7 @@ void AmbientOcclusionManager::BuildRandomVectorTexture() {
 
     // 创建 SRV 并注入 SsaoRenderer
     if (m_descriptorHeaps) {
-        uint32_t slot = m_descriptorHeaps->Allocate(PartitionType::Texture);
+        uint32_t slot = m_descriptorHeaps->Allocate(m_heapTag, PartitionType::Texture);
         char buf[128];
         if (slot == UINT32_MAX) {
             sprintf_s(buf,
@@ -244,9 +246,9 @@ void AmbientOcclusionManager::BuildRandomVectorTexture() {
             sprintf_s(buf, "[SSAO] BuildRandomVectorTexture: SRV slot=%u\n", slot);
             OutputDebugStringA(buf);
             D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
-                m_descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, slot);
+                m_descriptorHeaps->GetPartitionCpuHandle(PartitionType::Texture, slot, m_heapTag);
             D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle =
-                m_descriptorHeaps->GetPartitionGpuHandle(PartitionType::Texture, slot);
+                m_descriptorHeaps->GetPartitionGpuHandle(PartitionType::Texture, slot, m_heapTag);
 
             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
             srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -270,13 +272,16 @@ D3D12_GPU_DESCRIPTOR_HANDLE AmbientOcclusionManager::CpuSrvToGpu(D3D12_CPU_DESCR
     if (cpuHandle.ptr == 0 || !m_descriptorHeaps)
         return {};
 
-    ID3D12DescriptorHeap *heap = m_descriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    // 注意：必须显式传 m_heapTag（规则 17）——AO 资源在 Editor 多堆模式下位于
+    // EditorViewport 堆，若用默认 Default 堆基址计算偏移，会得到跨堆垃圾句柄
+    // （LightingRenderer 绑定 ssaoSrv 时 GBV #646 INVALID_DESCRIPTOR_HANDLE，句柄 0x8000...）。
+    ID3D12DescriptorHeap *heap = m_descriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, m_heapTag);
     if (!heap)
         return {};
 
     D3D12_CPU_DESCRIPTOR_HANDLE cpuBase = heap->GetCPUDescriptorHandleForHeapStart();
     D3D12_GPU_DESCRIPTOR_HANDLE gpuBase = heap->GetGPUDescriptorHandleForHeapStart();
-    UINT descSize = m_descriptorHeaps->GetDescriptorSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    UINT descSize = m_descriptorHeaps->GetDescriptorSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, m_heapTag);
 
     UINT offset = static_cast<UINT>((cpuHandle.ptr - cpuBase.ptr) / descSize);
     D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle;

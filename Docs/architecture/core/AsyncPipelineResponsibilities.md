@@ -91,6 +91,7 @@ Step 5: 收集所有材质的 GPU 数据 → 提交材质 buffer COPY 上传 Loa
   - Phase 5: 执行延后的主线程回调（无 GPU 工作的纯 CPU 任务）
 - **唯一任务提交入口**：`SubmitTask` / `SubmitGraph` / `SubmitLoadTask`
 - SceneConstructor 和 AssetManager 都通过 `SubmitLoadTask` 提交工作，不绕过此引擎
+- **`SubmitGraph`（任务图依赖提交）为预留能力，当前无调用者**：磁盘资源加载（LoadTask）之间无依赖，天然并行（每个 LoadTask 包装为独立单任务 taskflow，并发跑在线程池上）；依赖只存在于加载完成后的句柄层。`TaskGraph` 为 move-only（拷贝已 delete），未来接入时调用方须 `std::move`
 
 ### SceneConstructSystem — ECS 构造器
 
@@ -117,6 +118,7 @@ Step 5: 收集所有材质的 GPU 数据 → 提交材质 buffer COPY 上传 Loa
 4. **主线程安全**：所有 Manager 注册操作在 onComplete（主线程）中执行
 5. **COPY 队列上传**：Mesh VB/IB 和材质 buffer 都通过 COPY 队列上传到 DEFAULT 堆，不直接在 UPLOAD 堆使用
 6. **对称 Barrier**：后台线程录制 gpuWork 命令时，必须完成资源状态的完整转换并恢复到初始状态
+7. **加载图并行、依赖建在句柄层**：磁盘资源加载之间无依赖关系，应全并行——并行来自 `tf::Executor` 线程池对多个独立单任务 taskflow 的并发调度，不来自任务图依赖。依赖只存在于加载完成之后的句柄层（Mesh/Material/Texture 三系统、ECS 组件引用 handle）。复合资产的"依赖"用**计数聚合**表达（`AssetBatch::completedCount` / CharacterLoader pending 计数），不用任务图依赖。单任务内部（cpuWork → gpuWork → onComplete）为线性串联，不构建复杂图
 
 ## 数据流（完整链路）
 
@@ -177,3 +179,7 @@ SceneConstructor::LoadScene
 ### 流式加载
 
 后续扩展流式加载时，SceneConstructor 可复用同一套编排逻辑，仅入口改为"相机接近→触发局部场景加载"，不阻塞主线程。
+
+**依赖图建设时机**（2026-08-03 定案）：磁盘资源本身无依赖，加载阶段应全并行；依赖建立在加载完成后的句柄层（几何-材质-纹理三系统、ECS 组件）。流式加载若出现**批次内强序**需求（如"高度图 → 地形生成 → 材质上传"必须按序），优先评估两条路：
+1. **沿用计数聚合**（现状范式）：N 个并行 LoadTask + 计数回调归零触发下一步——地形等复合资产单 task 内部本就线性（cpuWork → gpuWork → onComplete），无需复杂图
+2. **`SubmitGraph`**（任务图依赖，预留）：仅在确实存在跨 task 强序时启用，当前无调用者

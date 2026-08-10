@@ -32,7 +32,10 @@ cbuffer cbLights : register(b2)
     uint gNumDirLights;
     uint gNumPointLights;
     uint gNumSpotLights;
-    uint gLightsPad[5];
+    //   gHasShadow >0.5 → 采样 gShadowParams/gShadowMaps（无阴影系统时跳过，避免根参数未绑定 → GBV #935）
+    // 默认纹理（SSAO→white2D 采样 .r=1、EnvMap→blackCube 采样=0），着色器直采，无需标志分支
+    float gHasShadow;
+    uint gLightsPad[4];
 }
 
 Texture2D gAlbedoRT : register(t20);
@@ -58,7 +61,7 @@ float3 ComputeEnvironmentReflectionDeferred(float3 reflectDir, float3 albedo, fl
     if (probeIndex > 0)
         reflection = gReflectionCubemapArray.Sample(gEnvSampler, float4(reflectDir, probeIndex - 1)).rgb;
     else
-        reflection = gEnvMap.Sample(gEnvSampler, reflectDir).rgb;
+        reflection = gEnvMap.Sample(gEnvSampler, reflectDir).rgb; // 2026-08-10：直采——无天空盒时 gEnvMap 为 blackCube fallback（采样=0 无反射）
     float3 F0 = lerp(0.04f, albedo, metallic);
     float NdotV = max(dot(N, V), 0.0f);
     float3 fresnel = F0 + (1.0f - F0) * pow(1.0f - NdotV, 5.0f);
@@ -88,7 +91,7 @@ float4 PS(QuadOut pin) : SV_Target
     float metallic = mat.r, roughness = mat.g, ao = mat.b;
     float3 worldPos = gWorldPosRT.Sample(gSamplerPointClamp, pin.UV).xyz;
     float3 V = normalize(gCameraPos - worldPos);
-    float ssao = gSsaoMap.SampleLevel(gSamplerPointClamp, pin.UV, 0.0f).r;
+    float ssao = gSsaoMap.SampleLevel(gSamplerPointClamp, pin.UV, 0.0f).r; // 2026-08-10：直采——未启用 SSAO 时 gSsaoMap 为 white2D fallback（采样 .r=1 无影响）
     float3 ambient = gAmbientLight.xyz * gAmbientLight.w * albedo * ao * ssao;
     float3 direct = 0;
 
@@ -101,19 +104,19 @@ float4 PS(QuadOut pin) : SV_Target
         [branch] if (light.Type == 0) // Directional
         {
             lightContrib = ComputeDirectionalLightDeferred(light, albedo, metallic, roughness, N, V);
-            if (light.CastShadow > 0.5f)
+            if (light.CastShadow > 0.5f && gHasShadow > 0.5f)
                 lightContrib *= SampleShadow(light, worldPos, N);
         }
         else if (light.Type == 1) // Point
         {
             lightContrib = ComputePointLightDeferred(light, albedo, metallic, roughness, N, V, worldPos);
-            if (light.CastShadow > 0.5f)
+            if (light.CastShadow > 0.5f && gHasShadow > 0.5f)
                 lightContrib *= SampleShadow(light, worldPos, N);
         }
         else // Spot
         {
             lightContrib = ComputeSpotLightDeferred(light, albedo, metallic, roughness, N, V, worldPos);
-            if (light.CastShadow > 0.5f)
+            if (light.CastShadow > 0.5f && gHasShadow > 0.5f)
                 lightContrib *= SampleShadow(light, worldPos, N);
         }
 

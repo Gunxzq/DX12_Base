@@ -60,6 +60,7 @@
 | 14 | **网格比例尺控件** | P2 | 当前水平滑条不符合习惯，改为垂直刻度尺样式 |
 | 15 | **RenderScene::OnScenePreUnload 驱动** | P2 | 场景切换时调用 LightManager::Clear() 等，当前为骨架实现 |
 | 16 | **Undo/Redo 系统** | P2 | EditorSceneManager 的 EntityDesc 编辑历史（菜单项已注册，实现为空壳） |
+| 17 | **BackBuffer barrier StateBefore 写死 PRESENT（GBV #942，偶发）** | P3 | `EditorMainClearSystem`（Editor.cpp）barrier `StateBefore = D3D12_RESOURCE_STATE_PRESENT` 写死，但首帧/OnResize 后从未 Present 的 backbuffer 实际状态为 **COMMON**（数值同为 0x0 但 D3D12 区分逻辑状态）→ GBV #942 `Incompatible resource state`。**不总是触发**（仅首帧/回退 buffer 首次使用时）。2026-08-09 记录：暂不修复，**待 RDG（渲染依赖图）推进后由 RDG 统一管理资源状态转换自然消除**——手写状态假设正是 RDG 要消除的模式 |
 
 ### 新设计方向（2026-07-27 讨论定案）
 
@@ -263,7 +264,236 @@ Game/Game/
 
 ---
 
-## 四、相关文档
+## 三、水渲染管线重构（2026-08-04 定案）
+
+> 关联：`Docs/architecture/rendering/RenderPipelineSpecification.md`（渲染管线规范）、`Docs/snapshots/RenderPipeline_Snapshot_20260804.md`（当前状态快照）
+>
+> 目标：水渲染从"旧标记模式（TransparentTag）+ ECS view 遍历"迁移到"标准材质槽 + 桶模式"，
+> 同时修复 Editor 水误录 Opaque 阶段等已知缺陷。
+>
+> **当前范围：仅编辑器端。Game 端暂不处理，待编辑器端验证通过后再同步。**
+> 分阶段执行，每个阶段完成后再进入下一阶段。
+
+### 阶段 0：清理编辑器旧水渲染代码
+
+| 步骤 | 文件 | 改动 |
+|:--|:--|:--|
+| 0a | `Editor/EditorLib/Core/Editor.cpp` | 删除 `EditorOpaqueRenderSystem` 内联的水渲染（1155-1190 行） |
+| 0b | `Editor/EditorLib/Core/Editor.cpp` | 删除 `m_waterRenderer` 初始化（199-206 行） |
+| 0c | `Editor/EditorLib/Core/Editor.cpp` | 删除 `WaterManager::CollectFromECS` 调用（520-521 行） |
+| 0d | 编译验证：编辑器无水渲染，不崩溃 | 人工编译 |
+
+### 阶段 1：MPD .scene 二进制 → 水实体构建（编辑器验证）
+
+> 确保 `MapSceneConverter` 输出的 `.scene` 二进制（`waterBlocks` 数组）被 `SceneLoader` 解析后，
+> `SceneConstructor` 能构建出标准的水实体组件序列。此阶段只验证加载路径，不涉及渲染。
+
+| 步骤 | 文件 | 改动 |
+|:--|:--|:--|
+| 1a | `Engine/Asset/IO/Loader/SceneLoader.cpp` | 验证二进制 .scene 的 `waterBlocks` 解析（`LoadSceneBinary` 已有读 `waterBlocks`） |
+| 1b | `Engine/Asset/IO/Loader/SceneLoader.cpp` | 验证 JSON 场景的 `waterBlocks` 解析（`ParseSceneJSON` 读 `waterBlocks` 数组） |
+| 1c | `Engine/Asset/IO/Loader/SceneLoader.cpp` | 新增 `waterBlocks` 的 JSON 序列化（`to_json`）与 `ParseWaterBlock` 函数，支持 JSON 回写 |
+| 1d | `Engine/Scene/SceneConstructor.cpp` | `OnSceneConstructReady` 中，将 `waterBlocks[]` 依次转换为标准实体：<br>• TransformComponent（world 的 pos/scale → 世界矩阵 + cullDistance）<br>• MeshComponent（lodMeshHandle ← 程序化网格 GeometryProceduralTask 注册）<br>• RenderSlotComponent（materials[0] = Water 材质，subMeshRanges = [{0, indexCount}]，shaderType = Water）<br>• WaterComponent（波浪参数） |
+| 1e | 验证：编辑器加载 .scene 后水实体组件序列完整 | 人工编译 + 调试视图检查 |
+
+### 阶段 2：程序化网格 GeometryProceduralTask（编辑器验证）
+
+> 水面的 grid 程序化生成需要走 `GeometryProceduralTask`，注册到 `GeometryResourceManager`，
+> 返回 `GeometryHandle`，供 `MeshComponent` 引用。编辑器端先验证。
+
+| 步骤 | 文件 | 改动 |
+|:--|:--|:--|
+| 2a | 新建 `Engine/Resource/Procedural/GeometryProceduralTask.h/.cpp` | 实现 `type="grid"` 的程序化网格生成（顶点/索引/SubMeshInfo/localBounds） |
+| 2b | `Engine/Resource/Procedural/GeometryProceduralTask.h/.cpp` | 注册到 `GeometryResourceManager`，返回 `GeometryHandle` |
+| 2c | `Engine/Scene/SceneConstructor.cpp` | `ConstructEntity` 的 mesh 分支：`eDesc.mesh.procedural` 存在时触发 `GeometryProceduralTask`，替代 `geoMap.find(m.geometry)` |
+| 2d | 验证：编辑器加载水实体 JSON 后网格正确注册 + 组件完整 | 人工编译 + 调试视图检查 |
+
+### 阶段 3：水渲染器桶模式迁移 + 编辑器重新实现
+
+> `WaterRenderItemBuilder` 迁移到桶消费模式，编辑器端重新实现 `EditorWaterRenderSystem`。
+
+| 步骤 | 文件 | 改动 |
+|:--|:--|:--|
+| 3a | 新建 `Engine/Renderer/RenderItemBuilder/WaterRenderItemBuilder.cpp`（桶模式） | 实现 `ForEachBucket("water")` 消费，从 `WaterComponent` 读波浪参数 |
+| 3b | `Editor/EditorLib/Core/Editor.cpp` | 注册 `EditorWaterRenderSystem`（RenderPhase::Transparent），从 Editor 内联拆出 |
+| 3c | 验证：编辑器水正确渲染在 Transparent 阶段 | 人工编译 + 运行验证 |
+
+### 后期（Game 端同步，待编辑器端验证通过后）
+
+| # | 任务 | 说明 |
+|:--|:-----|:------|
+| G1 | Game 端删除旧 `RegisterWaterRenderSystem` | 同步阶段 0 |
+| G2 | Game 端注册桶模式 `WaterRenderSystem`（RenderPhase::Transparent） | 同步阶段 3 |
+| G3 | 实现 `TransparentRenderSystem` 消费 `m_transparentQueue` | 独立新增 |
+
+### 已知缺陷复盘（2026-08-05 更新）
+
+| # | 缺陷 | 解决阶段 | 状态 |
+|:--|:--|:--:|:--:|
+| #1 | Editor 水渲染误录 Opaque 阶段 | 阶段 3b | ✅ 已修复（删除 EditorOpaqueRenderSystem 内联水渲染块，水只走 Transparent 阶段 EditorWaterRenderSystem） |
+| #2 | Game 透明队列无消费系统 | 后期 G3 | ⏸ 暂缓 |
+| #3 | WaterRenderItemBuilder 未迁移桶模式 | 阶段 3a | ✅ 已修复（`ForEachBucket("water")` 桶消费） |
+| #4 | ProceduralGeometryDesc 未接入 SceneConstructor | 阶段 2c | ✅ 已修复（AssetManager 虚拟资产 `procedural://` URI + `LoadScene` 收集 + `ConstructEntity` 标准组装） |
+| #5 | Game/Editor 渲染阶段不一致 | 阶段 3b + 后期 G2 | ❌ 未开始 |
+
+### 水渲染管线重构（2026-08-05 更新）
+
+当前方案（GeometryProceduralTask + 异步组件组装）已被**未来方向替代**：
+
+| 维度 | 当前方案（已放弃） | 未来方向（AssetManager 虚拟资产） |
+|:--|:--|:--|
+| 程序化网格入口 | `GeometryProceduralTask::Create` 直接调用 | `AssetManager::Load("procedural://grid/...")` URI 引用 |
+| 组件组装 | `OnWaterTaskCallback` 手动添加 MeshComponent + RenderSlotComponent | `SceneConstructor::ConstructEntity` 统一走 mesh 分支 |
+| 桶分发 | 依赖八叉树粗筛集（`m_octreeCoarse`），异步创建的水实体不在八叉树中 | 标准实体创建流程，`CreateEntity` 自动更新八叉树 |
+| 复杂度 | 高：堆分配回调上下文 + MSVC lambda ICE 规避 + 手动组件组装 | 低：URI 引用 + 标准加载管线 + 自动组件组装 |
+
+### 已知缺陷（2026-08-05 更新）
+
+| # | 缺陷 | 说明 | 状态 |
+|:--|:--|:--|:--:|
+| W1 | AssetManager 虚拟资产管线已实现、水纹理未输入 | ✅ 已解决：水材质改为 `Water/Sim` + sea 纹理（根目录 City.scene.json 4 个 WaterBlock），`shaderType=Water` 路由正确，RenderDoc 确认水面带纹理 + 流动性 | ✅ |
+| W2 | Game 透明队列无消费系统 | 暂不处理 | ⏸ 暂缓 |
+| W3 | 已废弃（AssetManager 方案已解决八叉树问题） | ✅ | ✅ |
+| W4 | Transparent 阶段的 RT 状态紧挨天空盒 | 阶段顺序正确，barrier 已修复 | ✅ 已验证 |
+| W5 | 已废弃（AssetManager 方案已替代旧方案） | ✅ | ✅ |
+
+### 新增待办（2026-08-05 会话登记）
+
+| # | 任务 | 说明 | 优先级 |
+|:--|:--|:--|:--:|
+| N1 | **转换工具水块缝隙修复** | `MapSceneConverter.cpp:664-666` 四象限中心公式 Z 方向错位 1 格（间距 390 ≠ 网格 420，缝隙 30 单位）。⚠️ 2026-08-05 复核：四象限公式数学上无缝（中心公式与半宽对齐，奇数格也验证），city 缝隙是旧数据（早期 flood fill 时代输出），非当前转换器 bug——待重转验证 | P1 |
+| N2 | **水位基准高度从 MPD 获取** | ✅ 转换器已实现：`MapSceneConverter` 从 Sea 实例取**最低 Y** 填 `waterY`（JSON `world[1]` + `wbBin.posY`，替代硬编码 0）。实测输出 posY=-0.5（对齐 MPD `#WaterY`）；编辑器手动值 -1.0 为临时，重转后自动正确 | ✅ |
+| N3 | **水 UV 世界坐标化** | ✅ 已完成：`water.hlsl` VS `vout.TexCoord = worldPos.xz * gUVTiling`（跨块连续）；`WaterConstants` 加 `UVTiling` 字段（补 Pad4 对齐 64B）；`WaterManager::SetUVTiling(0.01)` | ✅ |
+| N4 | **Game 端接入岸线渐隐** | `GameRenderPipeline.cpp` WaterRenderSystem 未绑定 depthSRV（`BeginFrame` 不传，`SetFadeRange` 默认 0 降级）。接入：传 `GetDepthSRV()` + 补 `DEPTH_WRITE → DEPTH_READ → DEPTH_WRITE` 对称屏障（参照 Editor 端，见 `WaterRenderingTechniques.md §7.1`） | P2 |
+| N5 | **CrazyBump 水贴图生成** | 从无缝源图生成 Normal/Specular/Height/AO 贴图（清单见 `WaterRenderingTechniques.md §8.4`），接入材质槽 | P3 |
+| N6 | **水法线贴图 + TBN** | `water.hlsl` PS 采样法线贴图需 VS 输出完整 TBN（含 Bitangent），双层法线反向 panner（§8.2B） | P3 |
+| N7 | **P3 区域差异化** | WaterInfo 纹理 / Water Mask（R/G/B 频带），大水面内不同区块不同浪（Unity WaterMask 同款） | P3 |
+| N8 | **P4 焦散光斑** | Caustics 纹理斜向投影（Unity Caustics 同款） | P4 |
+| N9 | **地面合并程序化化** | ✅ 转换器已实现：`MapSceneConverter` 新增 `IsMergeableGround`（mapChip 单材质纯平面）+ 贪心最大矩形分解（直方图法）→ `procedural://grid/W/H/segX/segZ` 四边形块。已修复：覆盖格展开（世界矩阵变换角点，镜像/旋转不错位丢格）、CreateGrid UV 每段平铺（`TexC=j/i` 整数）、Water 材质补 `textures.baseColor="sea"`、waterBlocks 数组 → 标准水实体。**自适应分段**：解析原始 .x UV 平铺周期（`groundUVTiling[stem]`，如 mapChip06 UV∈[0,10] → 每 30 单位格平铺 10 次 → 每 3 单位一个纹理周期）→ 合并块分段 = 格数 × 平铺周期，纹素密度对齐原始 .x（256²/3 单位 ≈ 85 纹素/单位），处理其他地图自动适配；无 UV 数据回退 ×3（10 单位/quad）。**已验证**：CLI 重转 810×90 → `270×30`（×10 自适应），用户确认纹理密度正常、无拉伸 | ✅ 已完成 |
+| N10 | **体素型光照（VoxelShading）** | 根因：582 个 mapChip 全部 X 镜像但 precomputed 烘焙丢失 scale 负号（`world[0]/worldInvTranspose[0]=1` 应为 -1）→ 法线方向错 → 每块明暗不一致。修复：① 合并地面（N9）连带解决拼接块；② 烘焙端纳入负号；③ 风格化开关 `FlatShading`（`ddx/ddy` 面法线，体素游戏用）。详见 `Docs/effects/VoxelShadingLook.md` | P2 |
+
+### 2026-08-05 会话水渲染成果汇总
+
+| 成果 | 说明 |
+|:--|:--|
+| 图元继承重构 | `GeometryBase` 统一（VB/IB + subMeshes + topology），TriangleMesh/GridGeometry/PatchMesh 继承；`GetGeometryBase()` 统一访问；Opaque/Shadow/Skinned/Sky/Reflection/Terrain/Water 渲染器全部改用 |
+| 程序化网格接入 | `SceneConstructor::LoadScene` 收集 `procedural://` URI → AssetManager 虚拟资产 → `ConstructEntity` 标准组装；GridGeometry 显式填充 subMeshes |
+| 桶模式 + Editor 系统 | `WaterRenderItemBuilder` 桶消费（`ForEachBucket("water")`）；`EditorWaterRenderSystem`（Transparent 阶段）；删除 Editor 内联旧水渲染 |
+| §10.5 数据上传铁律 | Builder 不分配 CB / FrameSync 统一上传；删除 `WaterObjCB_Persistent` 持久 CB；`ObjectConstants`（World/WorldInvTranspose/MaterialIndex）FrameSync 每帧上传 |
+| P2 岸线深度渐隐 | 根签名 slot 7（t11 场景深度 SRV）；water.hlsl `LinearDepthFromNDC` 线性化水深 → `shoreFade`；Editor 端 `GetDepthSRV()` + `SetFadeRange(2.0)` 生效 |
+| 水位调整 | 4 个 WaterBlock y: 0 → -0.5 → **-1.0**（临时手动值，待 N2 从 MPD 获取） |
+| 波形世界坐标 | water.hlsl VS 波形 `vin.PosL` → `worldPos`（多块水面边界运动连续，消除运行时缝隙） |
+| 文档 | `WaterRenderingTechniques.md`：§8.4 CrazyBump 工具链、§8.3 现状更新、§7.1 P2 落地记录 |
+
+### 2026-08-05 地面合并转换验证记录（原始版 vs 处理版）
+
+**试运行**：`AssetTool.exe mpd2scene "D:/APP/.../map/City" → out_test/`（pieces 40, instances 7348, materials 37, textures 27）
+
+**差异对比**：
+
+| 维度 | 原始版（Content/City，手动改） | 处理版（out_test，重转） | 说明 |
+|:--|:--|:--|:--|
+| 实体数 | 7320 | 7020（-300） | mapChip06 合并 324→33（-291）；waterBlocks 数组化（-4 实体）等 |
+| 水面 | 4 个 `WaterBlock` 实体（`procedural://grid/420/420/32/32`，y=-1.0） | **waterBlocks 数组**（4 个，posY=-0.5），无实体 | 引擎加载时 `EditorSceneManager.cpp:1036` 自动转实体 ✅ 非断链 |
+| 水位基准 | -1.0（手动临时值） | **-0.5**（Sea 实例最低值，对齐 MPD `#WaterY`） | 处理版正确 |
+| 水块尺寸 | 4 × 420×420 | 2 × 420×420 + 2 × 420×360（tiling 14×14/14×12） | 2×2 划分 Z 方向不对称（海区非矩形） |
+| mapChip06 | 324 独立实体 | 33 程序化块（810×90/90×690/90×630/660×30 等）+ 253 多材质残余（mapChip03/04/05） | 合并成功 ✅ |
+
+**待确认异常**（需用户提供具体现象或加载 out_test 场景观察）：
+1. 水位 -0.5 vs -1.0（水面若浮出地面与此相关）
+2. 水块 420×360 不对称（Z 14+12 格）
+3. 合并块渲染（程序化块法线/纹理/UV 表现）
+
+**2026-08-05 第二轮排查（合并块纹理拉伸，用户反馈"一整块纹理图案，无平铺"）**：
+
+| 排查点 | 结论 |
+|:--|:--|
+| CreateGrid UV（`GeometryGenerator.cpp:577-578`） | ✅ 已改为每段平铺 `TexC = j/i` 整数（旧 `j*du` 已注释） |
+| 编译产物时间戳 | ✅ 源码/obj/lib/Editor 全部一致（18:58） |
+| GeometryProceduralTask UV 传递 | ✅ cpuWork 直接 memcpy CreateGrid 输出，无覆盖 |
+| **运行时 UV 日志**（DebugView `[ProcGeo][Diag]`） | ✅ **顶点 UV 确认为整数**（810×90@27/3 → `UV[0]=(0,0) UV[1]=(1,0) UV[2]=(2,0)`）——CreateGrid 修改**已生效** |
+| color.hlsl VS/PS | ✅ VS `vout.TexCoord = vin.TexCoord` 透传；PS 直接采样，无缩放/归一化 |
+| 采样器 s4（gSamplerAnisotropicWrap） | ✅ `PSOFactory.cpp:353-354` = `D3D12_FILTER_ANISOTROPIC + TEXTURE_ADDRESS_MODE_WRAP` |
+
+**矛盾点**：顶点 UV 整数 + 透传 + WRAP 采样，数据链路全部正确，但**视觉仍是一整块纹理图案（无平铺）**。
+**待查方向**：① 渲染项 VB 布局/stride 与 GridGeometry 实际布局是否一致；② 纹理资源本身（mat_b989dce8703d 引用的 DDS）；③ RenderDoc 旧捕获误导。
+
+**2026-08-05 第三轮（根因确定 + 自适应分段落地 ✅）**：
+
+| 环节 | 结论 |
+|:--|:--|
+| **原始 .x UV 解析**（mapChip06.dxmesh 保留） | UV 范围 **0~10**（非 0~1）——30 单位格内平铺 10 次 → **每 3 单位一个纹理周期** |
+| 纹素密度对比 | 原始 256²/3 单位 ≈ **85 纹素/单位**；合并块原 ×3（10 单位/quad）= 25.6 → **差 3.3 倍 = 视觉"拉伸/太小"根因** |
+| **自适应分段**（`MapSceneConverter`） | 拆解 piece .x 时统计 `uvMaxU/uvMaxV` → `groundUVTiling[stem]` → 合并块分段 = 格数 × 平铺周期；无 UV 数据回退 ×3 |
+| 验证 | CLI 重转 810×90 → `procedural://grid/810/90/270/30`（×10，每 3 单位一个 quad）——**用户确认纹理密度正常、无拉伸** |
+
+**结论**：合并块纹理"拉伸"根因是**分段不足导致纹素密度低**（非 UV 生成/透传/采样问题）——CreateGrid UV 整数平铺本身正确，但每 10 单位一个 256² 纹理周期密度不够；自适应分段（从 .x UV 平铺周期推导）对齐原始密度后解决。处理其他地图自动适配。
+
+**2026-08-05 第四轮（用户确认：水渲染正常 + 自适应分段多地图验证 ✅）**：
+
+| 验证点 | 结论 |
+|:--|:--|
+| **水渲染** | ✅ 水块纹理输入正常（08-05 快照 P1 已闭环）。根因确认为 `MaterialData::name` 被设为材质 key 而非 shader 字符串，`ParseShaderType` 返回 Unknown 影响纹理绑定；修复点为 `MaterialLoadTask.h:78`（name = .mat 的 shader 字段）+ `SceneConstructor.cpp:664`（`ParseShaderType(md->name)` 路由） |
+| **自适应分段** | ✅ 资产工具按 .x UV 平铺周期（`uvMaxU/uvMaxV` → `groundUVTiling[stem]`）自适应分段合并区块，用户确认其他地图上纹理密度正常、无拉伸 |
+
+**闭环确认**：合并块纹理"拉伸"与水面渲染两个 08-05 遗留问题均已解决。
+
+---
+
+## 四、GPU Driven 分层剔除（2026-08-06 定案 + 阶段 0 落地）
+
+> 关联：`Docs/architecture/rendering/GPU-Drive.md`（分层蓝图）、`Docs/snapshots/GPUDriven_Snapshot_20260806.md`（快照）、
+> `08_MapScenePipeline.md` §8.6/§8.7（区块化聚合 + 块配置化）
+>
+> 分层：**L1 CPU 块级粗筛（✅ 已有）→ L2 GPU 实例级剔除（📋 待建）→ L3 遮挡（🔭 远期）**。
+> 关键认知：ECS 实体数减少（15489→5 块），渲染实例数据量不减；**精细剔除从 Builder（CPU）下放 GPU**。
+> 集群（BlockComponent）= **纯剔除豁免器**（对抗远近裁剪面），forceVisible 只让块实体进候选集，块内实例 L2 剔除照常。
+
+| 阶段 | 任务 | 优先级 | 状态 |
+|:--|:--|:--|:--:|
+| 0a | `BlockConfigDesc` 结构体 + to_json/from_json（SceneDescription.h） | P1 | ✅ 2026-08-06 |
+| 0b | `ParseBlockConfig`（SceneLoader.cpp LoadFromJSON + SaveToJSON） | P1 | ✅ 2026-08-06 |
+| 0c | `SceneConstructor` 加载推导 cellSize = clamp(mapExtent/blocksPerAxis) + Phase C 消费 blockCellSize | P1 | ✅ 2026-08-06 |
+| 0d | `ExportToDescription` 保存固化 blockConfig（SceneSnapshot 缓存 + 写回） | P1 | ✅ 2026-08-06 |
+| 0e | `Schemas/scene.schema.json` 加 blockConfig 定义 | P1 | ✅ 2026-08-06（JSON 校验通过） |
+| 1a | 块实体入空间哈希 + SceneTag（OctreeSystem::AddEntity 存块而非实例实体，clusterBounds 修复） | P1 | ✅ 2026-08-06 |
+| 1b | RenderSlotCache 桶存块条目，Builder 消费块跳过逐实例视锥 | P1 | ✅ 2026-08-06 |
+| 2a | 集群豁免验证（forceVisible/clusterBounds 与 L2 正交性） | P1 | ✅/验证 |
+| 3 | L2a 实例矩阵 + 包围球半径 → StructuredBuffer（`InstanceCullingBuffer`） | P1 | ✅ 2026-08-06 |
+| 4 | L2b Compute 视锥剔除 + AppendBuffer + IndirectArgs（`InstanceCulling.cs.hlsl`） | P1 | ✅ 2026-08-06 |
+| 5 | L2c readback 验证链路（`ReadbackVisibleCount` 延迟 1 帧）；**完整间接绘制（DrawIndexedInstancedIndirect）⏸️ 延后至 GS 阶段** | P1 | ✅ 2026-08-07 / ⏸️ GS 阶段 |
+| 6 | L3 HZB 深度遮挡 / 保守化 PVS（只剔小物体，排除地块） | P3 | 🔭 远期 |
+
+**下一步**：人工编译验证（项目规则 AI 不编译）→ 阶段 5 完整间接绘制（GS 阶段）→ 阶段 6 L3。
+
+### 4.1 运行期修复（GBV 严格模式暴露，2026-08-07 全部落地）
+
+| # | 问题 | 修复 |
+|:--|:--|:--|
+| #935 | lighting.hlsl 根参数未绑定（ssao/envMap/shadow） | "着色器 if"方案：cbLights `gHasSsao/gHasEnvMap/gHasShadow` 标志，shader 无资源跳过采样；`SetHasSsao/SetHasEnvMap/SetHasShadow` 值变化置脏重传 |
+| #942 | COPY 列表资源状态 | CORE 上传模式统一：COPY_DEST → COMMON 创建 + DIRECT 转出（MeshLoadTask/GeometryProceduralTask/SceneConstructor/PreviewPBRRenderer/InstanceCullingBuffer） |
+| #646 | **LightingRenderer.cpp:198 崩溃（envMapSrv 无效描述符，句柄 0x8000...）** | **三层根治（✅ 08-07）**：① 引擎 CORE `BlankTextureProvider`（White2D/BlackCube，EditorViewport 堆域）注入 AO/Skybox/Water fallback；② **`LightManager.cpp` 38 处描述符堆调用补 `m_heapTag`**（shadowDataSRV/shadowMapSRV 原走默认 Default 堆，与 Editor 光照 pass 绑定的 EditorViewport 堆不匹配 → GBV #935/#646；规则 17 违规）；③ **`AO::CpuSrvToGpu`/`BuildRandomVectorTexture` 与 `SsaoRenderer::ComputeAO/BlurAO` 同模式缺 `m_heapTag`**——CpuSrvToGpu 用 Default 堆基址计算 EditorViewport 堆 CPU 句柄偏移 → 跨堆垃圾 GPU 句柄（恰为 0x8000... 特征）；SSAO pass 绑定 Default 堆却使用 EditorViewport 堆的 depth/normal/AO SRV。修复：AO.cpp 补 5 处、SsaoRenderer 新增 `SetHeapTag`+成员补 2 处、AO::Initialize 注入。`#646` 为执行期错误，断点停靠行≠出错绑定点。待人工编译验证 |
+
+### 4.2 InstanceCulling RingBuffer 内存增长 + GPU TDR（2026-08-08 调查，⚠️ 问题仍存）
+
+> 现象：`LightManager::UpdateAndUpload:207` 断言 `mapped != nullptr` 崩溃（ucrtbased.dll 栈），**不控制相机也复现**
+> 证据链：log.txt（fmt error ×2 → `std::bad_alloc` → **GPU TDR DEVICE_HUNG** → 设备移除 → Map 全失败 → 断言）+ VS2022 内存曲线（**逐步增长至 ~992MB/1GB 后跌落崩溃**）
+> 结论：LightManager 是**设备移除后第一个碰 GPU 的调用点（最后一环）**，非光源问题；真正的根因是每帧内存累积 + RingBuffer 扩容
+> 快照：`Docs/snapshots/InstanceCulling_MemoryGrowth_TDR_Snapshot_20260808.md`
+> 关联：`Docs/architecture/core/Frame.md`（扩容权威设计：1.5x 增长 + 硬上限 + 多段延迟回收）
+
+| # | 问题 | 修复/状态 |
+|:--|:--|:--|
+| M1 | `ApplyTabState:1299` fmt 格式串 5 占位符/4 参数（缺 lights）→ `fmt::v12::format_error` | ✅ 已修：补 `snap.lightDescs.size()` |
+| M2 | `GpuHandlePool::FreeSlot` 用 `Validate()`（拒绝 PendingRelease）→ Update 释放路径槽位永不回收、dataPtr 悬垂 → 句柄池泄漏 | ✅ 已修：改为 generation 匹配 + 非 Empty 校验，允许回收 PendingRelease |
+| M3 | `AllocateWithRetry` 扩容 ×2 无上限（16→1GB 指数膨胀）+ `Initialize` 内部销毁 GPU 在用旧资源（悬垂 → TDR） | ✅ **方案 B 已落地**：FrameResourceManager 多段缓冲池（1.5x 增长 + 256MB 上限 + 旧段 fence 延迟回收）；`InstanceCulling` 条目 16MB→64MB |
+| M4 | **方案 B 落地后问题仍存（用户确认）** | 📋 待查：① `CommandManager::EndFrame` 用 `GetCurrentSequence()`（不递增）signal vs `BeginFrame` 用 `GetNextFence()`（fetch_add 递增）——若全局序号未正确推进，`Reclaim` 永不回收 → 每帧分配累积；② `[InstanceCulling][Verify] visible=0 / total=6853 (0.0%)` 剔除链路异常；③ VS2022 曲线复查（扩容是否仍触发、Output 是否出现 `[WARN] new segment`）；④ 其他每帧累积物排查 |
+
+**下一步**：人工编译验证（项目规则 AI 不编译）→ 查 `CommandManager::EndFrame` signal 序号递增 → VS2022 曲线复查。
+
+---
+
+## 五、相关文档
 
 - `Docs/architecture/scene/SceneManager.md` — 完整架构设计（含 §10 多 Tab 架构 + 事件流）
 - `Docs/architecture/editor/ComponentEditorSystem.md` — 组件驱动属性卡与 ImGuizmo 集成设计

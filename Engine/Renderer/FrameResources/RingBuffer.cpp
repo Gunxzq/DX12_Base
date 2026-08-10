@@ -93,7 +93,9 @@ D3D12_GPU_VIRTUAL_ADDRESS RingBuffer::Allocate(uint32_t size, uint64_t fence, ui
     }
 
     // 对齐当前写指针
-    uint32_t alignedHead = (m_head + alignment - 1) & ~(alignment - 1);
+    // 注意：必须用算术对齐（除乘），不能用位运算 (x+align-1) & ~(align-1)——后者只对 2 的幂有效。
+    // 实例段按 sizeof(GPUInstanceData)=96B 对齐（96 非 2 幂），位运算会错位 → SRV FirstElement 错位（频闪根因）
+    uint32_t alignedHead = ((m_head + alignment - 1) / alignment) * alignment;
     uint32_t alignedSize = size + (alignedHead - m_head);
 
     // 检查是否需要回绕

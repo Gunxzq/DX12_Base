@@ -78,6 +78,13 @@ public:
     void SetDirectionalLight(const Light &light, uint32_t index = 0);
     void SetAmbientLight(const DirectX::XMFLOAT4 &light);
 
+    // ========================================================================
+    // 阴影标志（写入 LightConstants.Pad[0]，供 lighting.hlsl gHasShadow 分支判断）
+    // 2026-08-10 改造：SetHasSsao/SetHasEnvMap 已移除——SSAO/EnvMap 管理器 get 无实际时
+    // 返回 BlankTextureProvider 默认纹理（white2D/blackCube），着色器直采，无需标志
+    // ========================================================================
+    void SetHasShadow(bool hasShadow);
+
     uint32_t AddPointLight(const Light &light);
     void SetPointLight(uint32_t index, const Light &light);
     void RemovePointLight(uint32_t index);
@@ -159,6 +166,11 @@ private:
     // 脏标记
     bool m_lightDirty = true;
     bool m_shadowDirty = true;
+
+    // 阴影标志（写入 LightConstants.Pad[0]；由 Editor 光照 pass 前设置，
+    // 与 lighting.hlsl 的 gHasShadow 对应，值变化时置脏触发重建上传）
+    // 2026-08-10 改造：m_hasSsao/m_hasEnvMap 已移除（管理器 get 返回默认纹理替代标志）
+    bool m_hasShadow = false;
 
     // 设备
     ID3D12Device *m_device = nullptr;

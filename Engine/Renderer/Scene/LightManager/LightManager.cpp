@@ -4,6 +4,7 @@
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Struct/Descriptor.h"
+#include <cassert> // [CullDiag] 断言（堆损坏/越界写定位）
 #include <cstring>
 
 using namespace DX12Engine::Renderer;
@@ -39,8 +40,8 @@ void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *de
     m_heapTag = heapTag;
     Clear();
 
-    // 校验描述符堆有效性
-    if (!descriptorHeaps || !descriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) {
+    // 校验描述符堆有效性（显式传 m_heapTag——Editor 多堆模式下校验 EditorViewport 堆）
+    if (!descriptorHeaps || !descriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, m_heapTag)) {
         OutputDebugStringA("[LightManager] ERROR: DescriptorHeapCollection or CbvSrvUav heap is null!\n");
         return;
     }
@@ -66,7 +67,7 @@ void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *de
             device, paramsSize, L"ShadowParams_Buffer", D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
         // 分配 SRV 槽位：t11 (ShadowParams)
-        m_shadowDataSrvBaseSlot = descriptorHeaps->Allocate(PartitionType::Buffer);
+        m_shadowDataSrvBaseSlot = descriptorHeaps->Allocate(m_heapTag, PartitionType::Buffer);
         if (m_shadowDataSrvBaseSlot != UINT32_MAX) {
             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -80,18 +81,18 @@ void LightManager::Initialize(ID3D12Device *device, DescriptorHeapCollection *de
             srvDesc.Buffer.StructureByteStride = sizeof(ShadowParams);
             device->CreateShaderResourceView(
                 GpuResourceManager::GetInstance().GetResource(m_shadowParamsBufferHandle), &srvDesc,
-                descriptorHeaps->GetCpuHandle(PartitionType::Buffer, m_shadowDataSrvBaseSlot));
+                descriptorHeaps->GetCpuHandle(PartitionType::Buffer, m_shadowDataSrvBaseSlot, m_heapTag));
 
-            m_shadowDataSRV = descriptorHeaps->GetGpuHandle(PartitionType::Buffer, m_shadowDataSrvBaseSlot);
+            m_shadowDataSRV = descriptorHeaps->GetGpuHandle(PartitionType::Buffer, m_shadowDataSrvBaseSlot, m_heapTag);
         }
     }
 
     // 预分配阴影贴图纹理 SRV 槽位（Shadow 分区，gShadowMaps[] 无界数组）
     {
-        m_shadowMapSrvDirSlot = descriptorHeaps->Allocate(PartitionType::Shadow);
+        m_shadowMapSrvDirSlot = descriptorHeaps->Allocate(m_heapTag, PartitionType::Shadow);
         if (m_shadowMapSrvDirSlot != UINT32_MAX) {
             // GetShadowMapSRV 返回 Shadow 分区起始 GPU 句柄（无界数组基地址）
-            m_shadowMapSRV = descriptorHeaps->GetPartitionGpuHandle(PartitionType::Shadow, 0);
+            m_shadowMapSRV = descriptorHeaps->GetPartitionGpuHandle(PartitionType::Shadow, 0, m_heapTag);
             // 方向光阴影贴图 SRV 的具体内容在 CreateShadowMapForDirectionalLight 中创建
         }
     }
@@ -114,10 +115,10 @@ void LightManager::Shutdown() {
         if (res.isValid) {
             for (int f = 0; f < 6; ++f) {
                 if (res.dsvSlots[f] != UINT32_MAX)
-                    m_descriptorHeaps->Free(PartitionType::Dsv, res.dsvSlots[f], 0);
+                    m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, res.dsvSlots[f], 0);
             }
             if (res.srvBaseSlot != UINT32_MAX)
-                m_descriptorHeaps->Free(PartitionType::Shadow, res.srvBaseSlot, 0);
+                m_descriptorHeaps->Free(m_heapTag, PartitionType::Shadow, res.srvBaseSlot, 0);
             if (res.arrayHandle.IsValid())
                 DepthStencilPool::GetInstance().Free(res.arrayHandle, 0);
         }
@@ -133,18 +134,18 @@ void LightManager::Shutdown() {
 
     // 回收 GpuResourceManager 和 DescriptorHeap 的延迟释放
     if (m_descriptorHeaps) {
-        m_descriptorHeaps->Reclaim(PartitionType::Dsv, 0);
-        m_descriptorHeaps->Reclaim(PartitionType::Buffer, 0);
+        m_descriptorHeaps->Reclaim(m_heapTag, PartitionType::Dsv, 0);
+        m_descriptorHeaps->Reclaim(m_heapTag, PartitionType::Buffer, 0);
 
         // 释放阴影数据 SRV 槽
         if (m_shadowDataSrvBaseSlot != UINT32_MAX) {
-            m_descriptorHeaps->Free(PartitionType::Buffer, m_shadowDataSrvBaseSlot, 0);
+            m_descriptorHeaps->Free(m_heapTag, PartitionType::Buffer, m_shadowDataSrvBaseSlot, 0);
             m_shadowDataSrvBaseSlot = UINT32_MAX;
         }
 
         // 释放阴影贴图 SRV 槽
         if (m_shadowMapSrvDirSlot != UINT32_MAX) {
-            m_descriptorHeaps->Free(PartitionType::Shadow, m_shadowMapSrvDirSlot, 0);
+            m_descriptorHeaps->Free(m_heapTag, PartitionType::Shadow, m_shadowMapSrvDirSlot, 0);
             m_shadowMapSrvDirSlot = UINT32_MAX;
         }
     }
@@ -202,6 +203,8 @@ void LightManager::UpdateAndUpload(uint64_t fence, const Camera &camera) {
             if (resource) {
                 void *mapped = nullptr;
                 resource->Map(0, nullptr, &mapped);
+                // [CullDiag] 崩溃点防御：Map 失败/资源悬垂 → mapped 为 null → memcpy(nullptr) 即本崩溃栈
+                assert(mapped != nullptr && "[CullDiag] shadowParams Map failed (resource dangling?)");
                 memcpy(mapped, m_shadowParams.data(), m_shadowParams.size() * sizeof(ShadowParams));
                 resource->Unmap(0, nullptr);
             }
@@ -258,10 +261,10 @@ void LightManager::Clear() {
         if (res.isValid) {
             for (int f = 0; f < 6; ++f) {
                 if (res.dsvSlots[f] != UINT32_MAX)
-                    m_descriptorHeaps->Free(PartitionType::Dsv, res.dsvSlots[f], 0);
+                    m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, res.dsvSlots[f], 0);
             }
             if (res.srvBaseSlot != UINT32_MAX)
-                m_descriptorHeaps->Free(PartitionType::Shadow, res.srvBaseSlot, 0);
+                m_descriptorHeaps->Free(m_heapTag, PartitionType::Shadow, res.srvBaseSlot, 0);
             if (res.arrayHandle.IsValid())
                 DepthStencilPool::GetInstance().Free(res.arrayHandle, 0);
         }
@@ -313,6 +316,13 @@ void LightManager::SetDirectionalLight(const Light &light, uint32_t index) {
 void LightManager::SetAmbientLight(const DirectX::XMFLOAT4 &light) {
     m_lightConstants.AmbientLight = light;
     m_lightDirty = true;
+}
+
+void LightManager::SetHasShadow(bool hasShadow) {
+    if (m_hasShadow == hasShadow)
+        return;
+    m_hasShadow = hasShadow;
+    m_lightDirty = true; // 触发 RebuildLightConstants + 重传 cbLights（lighting.hlsl gHasShadow 分支）
 }
 
 uint32_t LightManager::AddPointLight(const Light &light) {
@@ -456,6 +466,13 @@ void LightManager::RebuildLightConstants() {
         m_lightConstants.Lights[offset++] = light;
     }
 
+    // 渲染标志写入 LightConstants.Pad（与 lighting.hlsl cbLights 布局对齐）：
+    //   Pad[0] = gHasShadow （>0.5 → 采样 gShadowParams/gShadowMaps；否则 shader 跳过，无阴影）
+    // 2026-08-10 改造：Pad[1]/Pad[2]（gHasSsao/gHasEnvMap）已移除——SSAO/EnvMap 管理器
+    // get 返回默认纹理（white2D/blackCube）直采，标志不再需要；Pad 布局与 cbLights 对齐
+    // （gHasShadow 4B + gLightsPad[4] 16B = 20B，LightConstants.Pad[5]）
+    m_lightConstants.Pad[0] = m_hasShadow ? 1.0f : 0.0f;
+
     // 注意：不在此处清除 m_lightDirty，由 UpdateAndUpload 在上传完成后统一清除
 }
 
@@ -532,6 +549,9 @@ void LightManager::RebuildShadowConstants(const Camera &camera) {
         m_pointLights[i].ShadowMapIndex = static_cast<float>(shadowIdx);
     for (size_t i = 0; i < m_spotLights.size(); ++i, ++shadowIdx)
         m_spotLights[i].ShadowMapIndex = static_cast<float>(shadowIdx);
+    // [CullDiag] 内容安全断言：阴影采样参数不得超过 UPLOAD buffer 容量（MAX_LIGHTS × ShadowParams）
+    // RebuildShadowConstants push_back 无显式上限，堆损坏/越界写会导致 size 异常 → memcpy 越界写 UPLOAD 堆
+    assert(m_shadowParams.size() <= MAX_LIGHTS && "[CullDiag] shadowParams size > MAX_LIGHTS (heap corruption?)");
     m_lightDirty = true;
 }
 
@@ -737,7 +757,7 @@ void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint3
     ID3D12Resource *depthTexture = dsPool.GetResource(m_dirShadow.handle);
 
     // 2. 分配 DSV 槽并创建 DSV
-    m_dirShadow.dsvSlot = m_descriptorHeaps->Allocate(PartitionType::Dsv);
+    m_dirShadow.dsvSlot = m_descriptorHeaps->Allocate(m_heapTag, PartitionType::Dsv);
     if (m_dirShadow.dsvSlot == UINT32_MAX) {
         dsPool.Free(m_dirShadow.handle, 0);
         m_dirShadow = {};
@@ -747,13 +767,13 @@ void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint3
     dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     dsvDesc.Texture2D.MipSlice = 0;
-    m_device->CreateDepthStencilView(depthTexture, &dsvDesc,
-                                     m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, m_dirShadow.dsvSlot));
+    m_device->CreateDepthStencilView(
+        depthTexture, &dsvDesc, m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, m_dirShadow.dsvSlot, m_heapTag));
 
     // 3. 分配 SRV 槽并创建 SRV（Shadow 分区，Texture2DArray 1 slice）
-    m_dirShadow.srvSlot = m_descriptorHeaps->Allocate(PartitionType::Shadow);
+    m_dirShadow.srvSlot = m_descriptorHeaps->Allocate(m_heapTag, PartitionType::Shadow);
     if (m_dirShadow.srvSlot == UINT32_MAX) {
-        m_descriptorHeaps->Free(PartitionType::Dsv, m_dirShadow.dsvSlot, 0);
+        m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, m_dirShadow.dsvSlot, 0);
         dsPool.Free(m_dirShadow.handle, 0);
         m_dirShadow = {};
         return;
@@ -765,13 +785,14 @@ void LightManager::CreateShadowMapForDirectionalLight(uint32_t lightIndex, uint3
     srvDesc.Texture2DArray.MipLevels = 1;
     srvDesc.Texture2DArray.FirstArraySlice = 0;
     srvDesc.Texture2DArray.ArraySize = 1;
-    m_device->CreateShaderResourceView(depthTexture, &srvDesc,
-                                       m_descriptorHeaps->GetCpuHandle(PartitionType::Shadow, m_dirShadow.srvSlot));
+    m_device->CreateShaderResourceView(
+        depthTexture, &srvDesc, m_descriptorHeaps->GetCpuHandle(PartitionType::Shadow, m_dirShadow.srvSlot, m_heapTag));
 
     // 如果 Shadow 分区已有预分配槽位，也创建该槽位的 SRV（供 gShadowMaps[] 无界数组索引）
     if (m_shadowMapSrvDirSlot != UINT32_MAX) {
         m_device->CreateShaderResourceView(
-            depthTexture, &srvDesc, m_descriptorHeaps->GetCpuHandle(PartitionType::Shadow, m_shadowMapSrvDirSlot));
+            depthTexture, &srvDesc,
+            m_descriptorHeaps->GetCpuHandle(PartitionType::Shadow, m_shadowMapSrvDirSlot, m_heapTag));
     }
 
     m_dirShadow.isValid = true;
@@ -819,7 +840,7 @@ void LightManager::CreateShadowMapForSpotLight(uint32_t lightIndex, uint32_t res
 
     ID3D12Resource *depthTexture = dsPool.GetResource(shadow.handle);
 
-    shadow.dsvSlot = m_descriptorHeaps->Allocate(PartitionType::Dsv);
+    shadow.dsvSlot = m_descriptorHeaps->Allocate(m_heapTag, PartitionType::Dsv);
     if (shadow.dsvSlot == UINT32_MAX) {
         dsPool.Free(shadow.handle, 0);
         shadow = {};
@@ -830,11 +851,11 @@ void LightManager::CreateShadowMapForSpotLight(uint32_t lightIndex, uint32_t res
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     dsvDesc.Texture2D.MipSlice = 0;
     m_device->CreateDepthStencilView(depthTexture, &dsvDesc,
-                                     m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadow.dsvSlot));
+                                     m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadow.dsvSlot, m_heapTag));
 
-    shadow.srvSlot = m_descriptorHeaps->Allocate(PartitionType::Shadow);
+    shadow.srvSlot = m_descriptorHeaps->Allocate(m_heapTag, PartitionType::Shadow);
     if (shadow.srvSlot == UINT32_MAX) {
-        m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlot, 0);
+        m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, shadow.dsvSlot, 0);
         dsPool.Free(shadow.handle, 0);
         shadow = {};
         return;
@@ -846,8 +867,8 @@ void LightManager::CreateShadowMapForSpotLight(uint32_t lightIndex, uint32_t res
     srvDesc.Texture2DArray.MipLevels = 1;
     srvDesc.Texture2DArray.FirstArraySlice = 0;
     srvDesc.Texture2DArray.ArraySize = 1;
-    m_device->CreateShaderResourceView(depthTexture, &srvDesc,
-                                       m_descriptorHeaps->GetCpuHandle(PartitionType::Shadow, shadow.srvSlot));
+    m_device->CreateShaderResourceView(
+        depthTexture, &srvDesc, m_descriptorHeaps->GetCpuHandle(PartitionType::Shadow, shadow.srvSlot, m_heapTag));
 
     shadow.isValid = true;
     m_shadowDirty = true;
@@ -868,14 +889,14 @@ void LightManager::CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t re
         // 释放逐 slice DSV 槽
         for (int f = 0; f < 6; ++f) {
             if (prev.dsvSlots[f] != UINT32_MAX)
-                m_descriptorHeaps->Free(PartitionType::Dsv, prev.dsvSlots[f], 0);
+                m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, prev.dsvSlots[f], 0);
             prev.dsvSlots[f] = UINT32_MAX;
         }
         // 释放数组纹理
         if (prev.arrayHandle.IsValid())
             DepthStencilPool::GetInstance().Free(prev.arrayHandle, completeFence);
         if (prev.srvBaseSlot != UINT32_MAX)
-            m_descriptorHeaps->Free(PartitionType::Shadow, prev.srvBaseSlot, 0);
+            m_descriptorHeaps->Free(m_heapTag, PartitionType::Shadow, prev.srvBaseSlot, 0);
     }
 
     auto &shadow = m_pointShadowResources[lightIndex];
@@ -916,11 +937,11 @@ void LightManager::CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t re
     // 创建逐 slice DSV
     ID3D12Resource *resource = dsPool.GetResource(shadow.arrayHandle);
     for (int face = 0; face < 6; ++face) {
-        shadow.dsvSlots[face] = m_descriptorHeaps->Allocate(PartitionType::Dsv);
+        shadow.dsvSlots[face] = m_descriptorHeaps->Allocate(m_heapTag, PartitionType::Dsv);
         if (shadow.dsvSlots[face] == UINT32_MAX) {
             // 失败时释放已创建的
             for (int f = 0; f < face; ++f) {
-                m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlots[f], 0);
+                m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, shadow.dsvSlots[f], 0);
                 shadow.dsvSlots[f] = UINT32_MAX;
             }
             dsPool.Free(shadow.arrayHandle, completeFence);
@@ -928,7 +949,7 @@ void LightManager::CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t re
             return;
         }
         D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
-            m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadow.dsvSlots[face]);
+            m_descriptorHeaps->GetCpuHandle(PartitionType::Dsv, shadow.dsvSlots[face], m_heapTag);
 
         D3D12_DEPTH_STENCIL_VIEW_DESC perSliceDesc = {};
         perSliceDesc.Format = DXGI_FORMAT_D32_FLOAT;
@@ -942,11 +963,11 @@ void LightManager::CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t re
 
     // 分配 SRV 槽并创建 Texture2DArray SRV（6 slice，供 gShadowMaps[] 索引）
     {
-        shadow.srvBaseSlot = m_descriptorHeaps->Allocate(PartitionType::Shadow);
+        shadow.srvBaseSlot = m_descriptorHeaps->Allocate(m_heapTag, PartitionType::Shadow);
         if (shadow.srvBaseSlot == UINT32_MAX) {
             // 失败回滚
             for (int f = 0; f < 6; ++f) {
-                m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlots[f], 0);
+                m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, shadow.dsvSlots[f], 0);
                 shadow.dsvSlots[f] = UINT32_MAX;
             }
             dsPool.Free(shadow.arrayHandle, completeFence);
@@ -960,8 +981,8 @@ void LightManager::CreateShadowMapForPointLight(uint32_t lightIndex, uint32_t re
         srvDesc.Texture2DArray.MipLevels = 1;
         srvDesc.Texture2DArray.FirstArraySlice = 0;
         srvDesc.Texture2DArray.ArraySize = 6;
-        m_device->CreateShaderResourceView(resource, &srvDesc,
-                                           m_descriptorHeaps->GetCpuHandle(PartitionType::Shadow, shadow.srvBaseSlot));
+        m_device->CreateShaderResourceView(
+            resource, &srvDesc, m_descriptorHeaps->GetCpuHandle(PartitionType::Shadow, shadow.srvBaseSlot, m_heapTag));
     }
 
     shadow.isValid = true;
@@ -984,10 +1005,10 @@ void LightManager::ReleaseShadowMap(DirShadowResources &shadow, uint64_t complet
         dsPool.Free(shadow.handle, completedFence);
     }
     if (shadow.dsvSlot != UINT32_MAX && m_descriptorHeaps) {
-        m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlot, completedFence);
+        m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, shadow.dsvSlot, completedFence);
     }
     if (shadow.srvSlot != UINT32_MAX && m_descriptorHeaps) {
-        m_descriptorHeaps->Free(PartitionType::Shadow, shadow.srvSlot, completedFence);
+        m_descriptorHeaps->Free(m_heapTag, PartitionType::Shadow, shadow.srvSlot, completedFence);
     }
 
     shadow = {};
@@ -1003,10 +1024,10 @@ void LightManager::ReleaseShadowMap(SpotShadowResources &shadow, uint64_t comple
         dsPool.Free(shadow.handle, completedFence);
     }
     if (shadow.dsvSlot != UINT32_MAX && m_descriptorHeaps) {
-        m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlot, completedFence);
+        m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, shadow.dsvSlot, completedFence);
     }
     if (shadow.srvSlot != UINT32_MAX && m_descriptorHeaps) {
-        m_descriptorHeaps->Free(PartitionType::Shadow, shadow.srvSlot, completedFence);
+        m_descriptorHeaps->Free(m_heapTag, PartitionType::Shadow, shadow.srvSlot, completedFence);
     }
 
     shadow = {};
@@ -1020,12 +1041,12 @@ void LightManager::ReleaseShadowMap(PointShadowResources &shadow, uint64_t compl
 
     for (int f = 0; f < 6; ++f) {
         if (shadow.dsvSlots[f] != UINT32_MAX && m_descriptorHeaps) {
-            m_descriptorHeaps->Free(PartitionType::Dsv, shadow.dsvSlots[f], completedFence);
+            m_descriptorHeaps->Free(m_heapTag, PartitionType::Dsv, shadow.dsvSlots[f], completedFence);
         }
         shadow.dsvSlots[f] = UINT32_MAX;
     }
     if (shadow.srvBaseSlot != UINT32_MAX && m_descriptorHeaps) {
-        m_descriptorHeaps->Free(PartitionType::Shadow, shadow.srvBaseSlot, completedFence);
+        m_descriptorHeaps->Free(m_heapTag, PartitionType::Shadow, shadow.srvBaseSlot, completedFence);
     }
     if (shadow.arrayHandle.IsValid()) {
         dsPool.Free(shadow.arrayHandle, completedFence);

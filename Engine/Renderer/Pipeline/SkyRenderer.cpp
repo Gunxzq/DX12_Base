@@ -69,14 +69,14 @@ void SkyRenderer::DrawSky(CommandList &cmdList, GeometryHandle skyboxGeometry,
         return;
     }
 
-    const TriangleMesh *mesh = m_geometryManager->GetGeometry<TriangleMesh>(skyboxGeometry);
-    if (!mesh || !mesh->isGpuReady) {
+    const auto *base = m_geometryManager->GetGeometryBase(skyboxGeometry);
+    if (!base || !base->isGpuReady) {
         return;
     }
 
     auto &gpuMgr = GpuResourceManager::GetInstance();
-    ID3D12Resource *vbResource = gpuMgr.GetResource(mesh->vertexBufferHandle);
-    ID3D12Resource *ibResource = gpuMgr.GetResource(mesh->indexBufferHandle);
+    ID3D12Resource *vbResource = gpuMgr.GetResource(base->vertexBufferHandle);
+    ID3D12Resource *ibResource = gpuMgr.GetResource(base->indexBufferHandle);
 
     if (!vbResource || !ibResource) {
         ErrorReporter::Report("SkyRenderer::DrawSky - Invalid vertex or index buffer");
@@ -85,20 +85,20 @@ void SkyRenderer::DrawSky(CommandList &cmdList, GeometryHandle skyboxGeometry,
 
     D3D12_VERTEX_BUFFER_VIEW vbView;
     vbView.BufferLocation = vbResource->GetGPUVirtualAddress();
-    vbView.StrideInBytes = mesh->vertexStride;
-    vbView.SizeInBytes = static_cast<UINT>(mesh->vertexCount * mesh->vertexStride);
+    vbView.StrideInBytes = base->vertexStride;
+    vbView.SizeInBytes = static_cast<UINT>(base->vertexCount * base->vertexStride);
 
     D3D12_INDEX_BUFFER_VIEW ibView;
     ibView.BufferLocation = ibResource->GetGPUVirtualAddress();
-    ibView.Format = mesh->indexFormat;
-    ibView.SizeInBytes = static_cast<UINT>(mesh->indexCount * (mesh->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2));
+    ibView.Format = base->indexFormat;
+    ibView.SizeInBytes = static_cast<UINT>(base->indexCount * (base->indexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2));
 
     cmdList.Get()->IASetVertexBuffers(0, 1, &vbView);
     cmdList.Get()->IASetIndexBuffer(&ibView);
-    cmdList.Get()->IASetPrimitiveTopology(mesh->topology);
+    cmdList.Get()->IASetPrimitiveTopology(base->topology);
     cmdList.Get()->SetGraphicsRootConstantBufferView(0, objectCBAddress);
 
-    cmdList.Get()->DrawIndexedInstanced(mesh->indexCount, 1, 0, 0, 0);
+    cmdList.Get()->DrawIndexedInstanced(base->indexCount, 1, 0, 0, 0);
 }
 
 void SkyRenderer::EndFrame() {

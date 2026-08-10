@@ -2,8 +2,10 @@
 
 #include "Asset/IO/Loader/DDSLoader.h"
 #include "BackgroundExecutor.h"
+#include "Renderer/RHI/Command/CommandManager.h"
 #include "Renderer/RHI/Command/Utils/CmdTextureUpload.h"
 #include "Resource/Core/DescriptorHeapCollection.h"
+#include "Resource/GpuResourceManager.h"
 #include "Resource/Texture/TextureManager.h"
 #include <d3d12.h>
 #include <string>
@@ -37,7 +39,8 @@ class TextureLoadTask {
 public:
     static LoadTask Create(const std::string &filePath, ID3D12Device *device, Renderer::CommandManager *cmdMgr,
                            Resource::TextureManager *texMgr, Resource::DescriptorHeapCollection *descHeaps,
-                           uint64_t fence, std::shared_ptr<TextureLoadOutput> outResult = nullptr) {
+                           uint64_t fence, std::shared_ptr<TextureLoadOutput> outResult = nullptr,
+                           Resource::HeapTag heapTag = Resource::HeapTag::Default) {
         LoadTask task;
         task.name = "TexLoad:" + filePath;
 
@@ -133,7 +136,7 @@ public:
         };
 
         // ── Step 3: GPU 完成（主线程）→ 分配 SRV + 注册到 TextureManager ──
-        task.onComplete = [state, device, texMgr, descHeaps, result](bool success) {
+        task.onComplete = [state, device, texMgr, descHeaps, result, heapTag](bool success) {
             if (!success || state->failed || !state->texHandle.IsValid() || !texMgr || !descHeaps) {
                 result->success = false;
                 return;
@@ -145,7 +148,7 @@ public:
                 return;
             }
 
-            uint32_t srvIndex = descHeaps->Allocate(Resource::PartitionType::Texture);
+            uint32_t srvIndex = descHeaps->Allocate(heapTag, Resource::PartitionType::Texture);
             if (srvIndex == UINT32_MAX) {
                 result->success = false;
                 return;
@@ -166,7 +169,7 @@ public:
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 
             D3D12_CPU_DESCRIPTOR_HANDLE cpuH =
-                descHeaps->GetPartitionCpuHandle(Resource::PartitionType::Texture, srvIndex);
+                descHeaps->GetPartitionCpuHandle(Resource::PartitionType::Texture, srvIndex, heapTag);
             device->CreateShaderResourceView(texRes, &srvDesc, cpuH);
 
             result->texRegHandle = texMgr->RegisterTexture(state->texHandle, srvIndex);

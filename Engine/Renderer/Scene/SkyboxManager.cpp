@@ -79,9 +79,10 @@ void SkyboxManager::ClearSkybox() {
 // ========================================================================
 
 D3D12_GPU_DESCRIPTOR_HANDLE SkyboxManager::GetCubeSRV() const {
-    if (!m_descHeaps || m_cubeSrvIndex == UINT32_MAX)
-        return {};
-    return m_descHeaps->GetPartitionGpuHandle(PartitionType::Texture, m_cubeSrvIndex, m_heapTag);
+    // 真实天空盒优先；无天空盒时返回注入的空白 Cubemap fallback（BlankTextureProvider 提供）
+    if (m_cubeSrvIndex != UINT32_MAX)
+        return m_descHeaps->GetPartitionGpuHandle(PartitionType::Texture, m_cubeSrvIndex, m_heapTag);
+    return m_fallbackCubeSRV;
 }
 
 // ========================================================================

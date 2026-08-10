@@ -46,7 +46,7 @@ public:
     // ---- 生命周期 ----
     void SetDeviceContext(D3D12DeviceContext *context);
     void Initialize(ID3D12Device *device, Resource::DescriptorHeapCollection *descriptorHeaps, uint32_t renderWidth,
-                    uint32_t renderHeight);
+                    uint32_t renderHeight, Resource::HeapTag heapTag = Resource::HeapTag::Default);
     void Shutdown();
 
     // 随机向量纹理上传（命令管理器就绪后调用）
@@ -114,6 +114,7 @@ private:
     Resource::DescriptorHeapCollection *m_descriptorHeaps = nullptr;
     bool m_initialized = false;
     bool m_bakingEnabled = false;
+    Resource::HeapTag m_heapTag = Resource::HeapTag::Default;
 
     AoAlgorithm m_currentAlgorithm = AoAlgorithm::SSAO;
     ID3D12PipelineState *m_algorithmPSOs[static_cast<uint32_t>(AoAlgorithm::Count)] = {};

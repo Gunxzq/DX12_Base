@@ -8,6 +8,12 @@ if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
 endif()
 
+# vcpkg overlay ports：assimp FBX 导出器补丁（EmissiveColor/EmissiveFactor，
+# 修复 X→FBX 链路发光材质丢失）。见 vcpkg-overlays/assimp/fbx_emissive_export.patch
+if(NOT DEFINED VCPKG_OVERLAY_PORTS)
+    set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg-overlays" CACHE STRING "" FORCE)
+endif()
+
 project(DX12_Base LANGUAGES CXX)
 
 
@@ -605,16 +611,31 @@ set(ASSET_TOOL_SHARED_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/ANIParser.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/MPDParser.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/MPDParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/MPDSceneParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/MPDSceneParser.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/ScriptSPTParser.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/ScriptSPTParser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/MapSceneConverter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/MapSceneConverter.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/TextureConverter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/TextureConverter.h"
     # Core: 合并核心
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/RobotMerger.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/RobotMerger.h"
+    # Core: 合并核心拆分（2026-08-01 适度拆分，缓解 C1060 编译堆不足）
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/RobotMergerMath.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/RobotMergerUtil.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/RobotMergerUtil.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/RobotMergerFBX.cpp"
+    # RobotMergerX.cpp（每帧 .x 导出）已废弃并删除（2026-08-01 用户定案：不输出 x，FBX 为主载体）
     # Core: IK（B 方案：FABRIK 离线验证）
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/IKSolver.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/IKSolver.h"
+    # Core: FBX → 引擎资产（fbxs2dxmesh，2026-08-01 路线定案：FBX 唯一来源）
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/FbxMeshConverter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/FbxMeshConverter.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/AnimClipConverter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AssetTool/Core/AnimClipConverter.h"
 )
 
 # ── AssetTool (CLI) ──

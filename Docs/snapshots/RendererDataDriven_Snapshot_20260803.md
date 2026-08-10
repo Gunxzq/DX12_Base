@@ -1,7 +1,7 @@
 # 渲染项收集与绑定架构推进快照 (2026-08-03)
 
 > 缓存分桶落地 + 频闪根因修复（调度器依赖缺陷）+ 渲染项统一定案 + 槽位全声明 + Constants32/CBV 数据源判别
-> 关联：`Docs/architecture/rendering/RendererDataDriven.md`（§2.2 槽位全声明 / §2.2a 根签名数据驱动 / §4.1b/c/d 缓存分桶 / §4.2a1 渲染项统一 / §6 路线图）、`Docs/architecture/rendering/OctreeCullingAndRaycaster.md`（CulledSet 粗筛）、`Docs/architecture/scene/SceneStateMachine.md`（§7.11 缓存属地）
+> 关联：`Docs/architecture/rendering/RendererDataDriven.md`（§2.2 槽位全声明 / §2.2a 根签名数据驱动 / §4.1b/c/d 缓存分桶 / §4.2a1 渲染项统一 / §6 路线图）、`Docs/architecture/culling/OctreeCullingAndRaycaster.md`（CulledSet 粗筛）、`Docs/architecture/scene/SceneStateMachine.md`（§7.11 缓存属地）
 > 待办：#22/#23/#24（材质槽链路前置，已完成）
 
 ---

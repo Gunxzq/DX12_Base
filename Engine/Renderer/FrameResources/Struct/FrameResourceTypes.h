@@ -69,14 +69,14 @@ static_assert(sizeof(SkinningConstants) % 16 == 0,
 // ============================================================================
 
 struct MaterialConstants {
-    DirectX::XMFLOAT4 BaseColor;            // 基础颜色
-    float Metallic;                         // 金属度
-    float Roughness;                        // 粗糙度
-    float Ambient;                          // 环境光遮蔽强度（固定值回退）
-    float Alpha;                            // 透明度（固定值回退）
-    DirectX::XMFLOAT4 Emissive;             // 自发光颜色
-    float AlphaCutoff;                      // 透明度阈值
-    float NormalStrength;                   // 法线强度（1.0 = 默认）
+    DirectX::XMFLOAT4 BaseColor; // 基础颜色
+    float Metallic;              // 金属度
+    float Roughness;             // 粗糙度
+    float Ambient;               // 环境光遮蔽强度（固定值回退）
+    float Alpha;                 // 透明度（固定值回退）
+    DirectX::XMFLOAT4 Emissive;  // 自发光颜色
+    float AlphaCutoff;           // 透明度阈值
+    float NormalStrength;        // 法线强度（1.0 = 默认）
 
     // ── PBR 贴图索引（0xFFFFFFFF = 无效/不采样）──
     uint32_t BaseColorTextureIndex;         // 固有色贴图
@@ -126,7 +126,11 @@ struct WaterConstants {
     uint32_t RefractionTextureIndex; // 折射纹理索引
     uint32_t DepthTextureIndex;      // 深度纹理索引
     uint32_t NormalTextureIndex;     // 法线纹理索引
-    float Pad;                       // 填充
+    float FadeRange;                 // 岸线渐隐距离（深度空间，0=禁用降级）
+    float UVTiling;                  // 世界 UV 平铺（worldPos.xz * UVTiling，纹理跨块连续）
+    float Pad2;                      // 填充
+    float Pad3;                      // 填充
+    float Pad4;                      // 填充（16 字段 = 64B，对齐 HLSL cbuffer）
 };
 
 static_assert(sizeof(WaterConstants) % 16 == 0,
@@ -175,12 +179,12 @@ static_assert(sizeof(Particle) % 16 == 0,
 // ============================================================================
 
 struct InstanceData {
-    DirectX::XMFLOAT4X4 World;             // 物体变换矩阵 (offset: 0)
-    DirectX::XMFLOAT4X4 WorldInvTranspose; // 物体逆变换矩阵的转置 (offset: 64)
+    DirectX::XMFLOAT4X4 World;             // 物体变换矩阵 (offset: 0, 64B)
+    DirectX::XMFLOAT4X4 WorldInvTranspose; // 物体逆变换矩阵的转置 (offset: 64, 64B)
     uint32_t MaterialIndex;                // 材质索引-后续可改进为材质模板
     uint32_t ReceiveShadow;                // 是否接收阴影
     uint32_t ProbeIndex;                   // 反射探针索引 (UINT32_MAX = 无反射)
-    float pad;                             // 16字节对齐填充
+    uint32_t pad0;                         // 16B 对齐补齐（140B → 144B）
 };
 
 static_assert(

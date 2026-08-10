@@ -335,8 +335,8 @@ void SsaoRenderer::ComputeAO(CommandList &cmdList, ID3D12PipelineState *aoPSO, D
 
     auto *native = cmdList.Get();
 
-    // 设置描述符堆
-    ID3D12DescriptorHeap *heap = m_descriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    // 设置描述符堆（显式传 m_heapTag：Editor 多堆模式下 AO RT/随机纹理 SRV 在 EditorViewport 堆）
+    ID3D12DescriptorHeap *heap = m_descriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, m_heapTag);
     native->SetDescriptorHeaps(1, &heap);
 
     native->SetGraphicsRootSignature(m_aoRootSig.Get());
@@ -366,7 +366,7 @@ void SsaoRenderer::BlurAO(CommandList &cmdList, ID3D12PipelineState *blurPSO, bo
 
     auto *native = cmdList.Get();
 
-    ID3D12DescriptorHeap *heap = m_descriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    ID3D12DescriptorHeap *heap = m_descriptorHeaps->GetHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, m_heapTag);
     native->SetDescriptorHeaps(1, &heap);
 
     native->SetGraphicsRootSignature(m_blurRootSig.Get());

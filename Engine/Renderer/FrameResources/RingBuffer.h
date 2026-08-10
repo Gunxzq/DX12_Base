@@ -22,16 +22,9 @@ public:
     RingBuffer &operator=(const RingBuffer &) = delete;
 
     RingBuffer(RingBuffer &&other) noexcept
-        : m_resource(std::move(other.m_resource)),
-          m_mappedData(other.m_mappedData),
-          m_gpuAddress(other.m_gpuAddress),
-          m_size(other.m_size),
-          m_head(other.m_head),
-          m_tail(other.m_tail),
-          m_allocatedSize(other.m_allocatedSize),
-          m_pending(std::move(other.m_pending)),
-          m_name(std::move(other.m_name)),
-          m_initialized(other.m_initialized) {
+        : m_resource(std::move(other.m_resource)), m_mappedData(other.m_mappedData), m_gpuAddress(other.m_gpuAddress),
+          m_size(other.m_size), m_head(other.m_head), m_tail(other.m_tail), m_allocatedSize(other.m_allocatedSize),
+          m_pending(std::move(other.m_pending)), m_name(std::move(other.m_name)), m_initialized(other.m_initialized) {
         other.m_mappedData = nullptr;
         other.m_gpuAddress = 0;
         other.m_size = 0;
@@ -86,6 +79,9 @@ public:
     void *GetCPUAddress(uint32_t offset) const;
 
     bool IsInitialized() const { return m_initialized; }
+
+    // 获取底层资源指针（供 SRV 创建：段偏移 = GPU地址 - 基址）
+    ID3D12Resource *GetResource() const { return m_resource.Get(); }
 
     // 获取 GPU 地址（基于偏移）
     D3D12_GPU_VIRTUAL_ADDRESS GetGPUAddress(uint32_t offset) const;

@@ -23,7 +23,7 @@ namespace DX12Engine::Renderer {
 //   - GS 展开：D3D12 LINELIST 无可靠线宽，GS 按屏幕空间宽度展开为四边形（2 三角形）
 //   - PSO 具备深度测试（DepthEnable=TRUE，不写深度，调试叠加层）
 //
-// 设计依据：Docs/architecture/WireframeDebugDraw.md
+// 设计依据：Docs/architecture/editor/WireframeDebugDraw.md
 //   - 管理器模式（非 ECS 组件）：调试线是瞬态命令，非场景"物体"，无属性卡需求
 //   - 收集与录制分离：Add* 任意调用者安全；录制在固定时机发生，顺序确定
 //   - 资源管理收敛在 Manager 内部，调用者零资源责任（规则 11 协作模式）

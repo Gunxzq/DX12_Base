@@ -50,7 +50,7 @@ uint32_t AssetManager::LoadTextureImpl(const std::string &path, AssetCallback on
     uint64_t fence = m_deviceContext->GetCommandManager().GetNextSequence();
     auto task =
         Async::TextureLoadTask::Create(path, m_deviceContext->GetDevice(), &m_deviceContext->GetCommandManager(),
-                                       m_texMgr, m_descHeaps, fence, result);
+                                       m_texMgr, m_descHeaps, fence, result, m_heapTag);
     auto origOnComplete = std::move(task.onComplete);
     task.onComplete = [this, sharedPath, callback, result,
                        origOnComplete = std::move(origOnComplete)](bool success) mutable {

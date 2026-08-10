@@ -6,7 +6,7 @@
 
 ## 📐 架构设计 (`architecture/`)
 
-> 目录按主题划分 6 簇：`core/`（基础设施）、`rendering/`（渲染管线）、`assets/`（资产体系）、`scene/`（场景与实体）、`editor/`（编辑器）、`animation/`（动画）。
+> 目录按主题划分 7 簇：`core/`（基础设施）、`rendering/`（渲染管线）、`culling/`（剔除系统）、`assets/`（资产体系）、`scene/`（场景与实体）、`editor/`（编辑器）、`animation/`（动画）。
 
 ### 🏗️ core/ — 基础设施与总览
 
@@ -34,8 +34,7 @@
 | **RendererDataDriven** | **渲染器数据驱动与绑定架构：PSO 集合描述（几何条件共享+变体各一）、静态描述/动态绑定分离、BeginFrame(pass)/Draw(item) 拆分、渲染项统一（全可能大渲染项 + bindings 模式 §4.2a1）、槽位全声明（§2.2，含 Constants32/CBV 数据源判别）、RenderContext 外观（get 透传+占位兜底）、几何/材质条件校验、特殊渲染器保留管理器、大型引擎（UE FMeshDrawCommand/Unity SRP）比对** | 📋 新设计 |
 | **pass** | 渲染 Pass 组织方式 | ✅ 活跃 |
 | **shadow** | 阴影贴图演进方向 | ✅ 活跃 |
-| **OctreeCullingAndRaycaster** | **八叉树空间划分 + 剔除管线 + Raycaster 统一架构（原 cull.md/Raycaster.md 已合并入本文并删除，要点见 §8）** | 📋 设计方案 |
-| **GPU-Drive** | GPU Driven 管线方向 | ✅ 活跃 |
+| **GPU-Drive** | **GPU Driven 剔除分层蓝图（2026-08-06 定稿）：L1 CPU 块级粗筛（✅）+ L2 GPU 实例级剔除（📋 待建，块内实例矩阵 + Compute 视锥 + 间接绘制）+ L3 遮挡（🔭）；集群 = 纯剔除豁免器；块配置化 blockConfig（阶段 0 ✅ 已落地）** | 📋 分层蓝图 |
 | **LOD** | LOD 系统 | ✅ 活跃 |
 | **AmbientOcclusion** | 环境光遮蔽 | ✅ 活跃 |
 | **Reflection** | 反射探针系统 | ✅ 活跃 |
@@ -44,9 +43,17 @@
 | **FrameResourceManager** | 帧资源分配器职责与配置化方向 | ✅ 活跃 |
 | **RenderDataAccess** | 渲染管线数据访问规则 | ✅ 活跃 |
 | **SubMeshMaterialSlots** | 子网格材质槽模式（#22/#23/#24） | ✅ 活跃 |
+| **EngineCoreFixedOverhead** | **引擎 CORE 固定开销记录（2026-08-10 存档）：TaskFlow 调度（dispatch ~10ms/每 Phase 重建+8 次 run+wait）、EditorBuilderUpload 执行体（块展开已引用化）、空场景 60 帧 = DWM/Vsync 同步锁、偶发 ~100ms 尖峰（资源 Purge）、Builder getComp 结论修正——下次排查帧率跳过指南** | ✅ 存档 |
 | **BillboardSystemArchitecture** | 公告牌系统架构 | ✅ 活跃 |
 | **WaterSystemArchitecture** | 水体系统架构 | ✅ 活跃 |
 | **WindowFrameResources** | 窗口帧资源（G-buffer/SceneColor/DepthStencil） | ✅ 活跃 |
+
+### 🎯 culling/ — 剔除系统
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| **InstanceCullingSystem** | **实例剔除系统架构定案（2026-08-10）：剔除系统 = 管道/生产者（空间哈希粗筛 → 预测视锥粗块候选 → 统一上传 → 剔除 CS → 剔除结果），渲染管线 = 消费者（块展开/ExecuteIndirect/材质槽/LOD）；中间层接口解耦；LOD 选择归属构建器（不跟随 CS 输出，Nanite cluster 虚拟化为未来方向记录）；动态实体 <50 CPU 视锥 + GPU 化预留；三层抽象规划（数据/资源/执行层）** | 📋 架构定案 |
+| **OctreeCullingAndRaycaster** | **八叉树空间划分 + 剔除管线 + Raycaster 统一架构（原 cull.md/Raycaster.md 已合并入本文并删除，要点见 §8）** | 📋 设计方案 |
 
 ### 📦 assets/ — 资产体系
 
@@ -108,7 +115,10 @@
 | **BugFix_ReflectionProbe_ResizeTDR** | 反射探针 Resize TDR 修复 |
 | **BugFix_RenderDoc_UnboundedTable_CaptureFail** | 无界表 RenderDoc 捕获失败修复 |
 | **BugFix_SSAO_AmbientResourceStateMismatch** | SSAO 资源状态不匹配修复 |
+| **BugFix_CityRender_UVWindingTintClamp** | City 渲染视觉异常四连修复（UV 镜像/绕序/baseColor 黑 tint/平铺 clamp） |
+| **BugFix_TextureSRV_HeapTag_CrossHeap** | 纹理 SRV 跨堆错配（Default vs EditorViewport）导致 gTextureMaps 越界修复 |
 | **terrain_debug** | 地形调试记录 + CBV 256 对齐说明 |
+| **BugFix_Editor_StaticDirtyState_And_OutlinerIssues** | 编辑器问题清单（静态实体编辑无视觉变化 worldDirty 修复 + Outliner 虚拟列表 + 未解决的首次 Tab 大纲异常） |
 
 ---
 
@@ -130,11 +140,20 @@
 
 ---
 
+## ✨ 特效笔记 (`effects/`)
+
+| 文档 | 内容 |
+|------|------|
+| **WaterRenderingTechniques** | **大型引擎水渲染技术调研：UE WaterZone/WaterInfoTexture/Gerstner、Unity HDRP Water Mask 纹理/多频带模拟、岸线深度渐隐、区域差异化、落地路径（P1-P4）** |
+| **ScreenSpaceDistortion** | 小纹理平铺扰动特效（屏幕空间扭曲核心技术） |
+
+---
+
 ## 📋 待办清单 (`todos/`)
 
 | 文档 | 内容 |
 |------|------|
-| **remaining_issues** | 全局待办清单（当前所有活跃 TODO 集中于此，含 ANI 解析器——下一会话第一任务） |
+| **remaining_issues** | 全局待办清单（当前所有活跃 TODO 集中于此，含 ANI 解析器；**§四 GPU Driven 分层剔除：阶段 0~L2b 已落地（✅ 2026-08-06~07，含 L2c readback 验证链路），阶段 5 完整间接绘制 ⏸️ 延后 GS 阶段、L3 遮挡 🔭 远期**；**§4.2 InstanceCulling RingBuffer 内存增长 + GPU TDR：✅ fmt/句柄池/扩容多段修复已落地，⚠️ 问题仍存待查**——快照见 `snapshots/GPUDriven_Snapshot_20260806.md`、`snapshots/InstanceCulling_MemoryGrowth_TDR_Snapshot_20260808.md`） |
 | **todo** | 历史待办（遗留条目） |
 | **todo6** | 历史待办（遗留条目） |
 | **todo-10** | 渲染构建器并行化与多缓冲 |

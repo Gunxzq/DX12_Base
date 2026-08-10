@@ -1,0 +1,12 @@
+- 跨文件实体引用（Prefab/场景实例化）方向：未来改为 GUID 方案（类似 Unreal FUniqueObjectGuid 或 Cocos），替代当前 session-local 的 NextPersistentId + JSON 文件内 hex 还原
+- BugFix: LightDesc 序列化结构缺少 falloffStart/falloffEnd/spotPower 字段，导致属性卡编辑的衰减/聚光参数保存后丢失。修复三端：LightDesc 结构体 + to_json/from_json + ExportToDescription + SceneConstructor
+- BugFix: SceneLoader::ParseLight 是独立手工解析函数，不共用 from_json。新增 LightDesc 字段时必须同时更新 ParseLight + from_json/to_json + ExportToDescription + SceneConstructor 四端
+- 方向：头文件依赖分析小工具（CMake custom target + Python脚本分析 .d 文件），记录热度 Top 20，指导 PCH 和前向声明优化
+- UKW 场景构建（MPD→scene.json）已放弃。天空使用半球网格+雾色非立方体贴图，需编辑器端做兼容映射。AssetTool 的 importrobot（.hod+.x 合并）已退役不调用，仅作参考；引擎资产唯一来源是 Blender 优化后的最终 FBX（fbxs2dxmesh 转换器立项 P1），武器/挂点走 socket 挂载模式不建骨骼，ANI 直解（ani2anim）只作进 Blender 的桥。
+- 项目约定：所有 JSON 表达的资产（.bone/.anim/.scene 等）都需在项目根 Schemas/ 目录配套 JSON Schema（如 animation.schema.json），引擎端按 JSON 解析易出问题，schema 用于校验
+- Engine/Asset/Definitions 中缺少很多资产定义（Animation/Character 等未定义），后续需按管线模式补全；JSON 表达的资产当前不做严格定义，但后续要处理——参考 Schemas/ 配套 schema 的约定
+- 2026-08-01 会话定案：下一阶段基于重构（AnimationViewportPanel 1200 行单文件拆分、蒙皮渲染统一、Character 加载独立化），动画功能优先级降低；重构规划见 Docs/snapshots/AnimationSystem_Snapshot_20260801.md §三
+- StaticComponent.worldDirty 修复：编辑器改 Transform（Gizmo EditorGizmoSystem.cpp IsUsing 写回 / 属性卡 TransformEditor.cpp 三处 DragFloat3）必须置 worldDirty=true + hasCachedWorldBounds=false，否则静态实体仍用烘焙矩阵渲染（视觉无变化）；EditorGizmoSystem.cpp 不在 ECS 命名空间需 DX12Engine::ECS::StaticComponent 全限定
+- SceneTagComponent 是 Editor 端自定义组件（Editor/EditorLib/ECS/SceneTagComponent.h，全局命名空间非 ECS::），组合 view<NameComponent, SceneTagComponent> 会返回空 → 必须单 view<NameComponent> + TryGetComponent<SceneTagComponent>（对齐 Dispatch 模式）；长期建议改 per-scene 实体容器
+- Outliner 首个 Tab 不显示已解决（绕过）：根因是 Engine/ECS/Core/Registry.h:58 AllEntities() 实现为 view<entt::type_list<>>（空类型列表=恒空 view），aliveCount 恒 0 致轮询失效；绕过=OutlinerPanel 改 view<NameComponent> 计数。长远 TODO：修 Registry::AllEntities 为 enTT 正确 API（view<entt::entity>/storage<entt::entity>），公共 API 语义错误是隐患
+- GTA 查询计数器模式（大型引擎 dedup）：全局查询计数器 g_queryStamp 每次查询递增，实体存 lastQueryStamp 标记，查询时比对当前计数器决定跳过——O(1) 去重，多剔除器共享（视锥/PVS/光源同帧多次查询实体只处理一次）。适用：空间哈希多格去重、PVS 多区块合并、未来光源剔除。优于每帧分配 unordered_set

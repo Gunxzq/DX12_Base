@@ -5,6 +5,7 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 
+#include "Resource/Core/DescriptorHeapCollection.h" // HeapTag（堆域标签，绑定描述符堆须与资源所在堆一致）
 #include "Resource/Struct/DescriptorHandle.h"
 
 namespace DX12Engine::Renderer {
@@ -36,6 +37,9 @@ public:
 
     void SetDeviceContext(D3D12DeviceContext *context);
     void SetDescriptorHeaps(DX12Engine::Resource::DescriptorHeapCollection *heaps);
+    /// 设置堆域标签（Editor 传 EditorViewport，Game 传 Default）——GetHeap 绑定必须与
+    /// AO RT/随机纹理 SRV 所在堆一致（规则 17），否则 GBV #646 INVALID_DESCRIPTOR_HANDLE
+    void SetHeapTag(DX12Engine::Resource::HeapTag tag) { m_heapTag = tag; }
     void Initialize();
     void Shutdown();
 
@@ -43,8 +47,8 @@ public:
                  D3D12_GPU_DESCRIPTOR_HANDLE depthSRV, D3D12_GPU_DESCRIPTOR_HANDLE normalSRV,
                  D3D12_GPU_DESCRIPTOR_HANDLE ambientSRV, D3D12_CPU_DESCRIPTOR_HANDLE ambientRTV,
                  D3D12_GPU_DESCRIPTOR_HANDLE ambient1SRV, D3D12_CPU_DESCRIPTOR_HANDLE ambient1RTV,
-                 ID3D12Resource *ambientRes0, ID3D12Resource *ambientRes1,
-                 const DirectX::XMFLOAT4X4 &view, const DirectX::XMFLOAT4X4 &proj);
+                 ID3D12Resource *ambientRes0, ID3D12Resource *ambientRes1, const DirectX::XMFLOAT4X4 &view,
+                 const DirectX::XMFLOAT4X4 &proj);
 
     // 公开 PSO 访问 + 随机纹理 SRV 注入
     ID3D12PipelineState *GetSSAOPipeline() const { return m_ssaoPSO.Get(); }
@@ -65,6 +69,7 @@ private:
 private:
     D3D12DeviceContext *m_deviceContext = nullptr;
     DX12Engine::Resource::DescriptorHeapCollection *m_descriptorHeaps = nullptr;
+    DX12Engine::Resource::HeapTag m_heapTag = DX12Engine::Resource::HeapTag::Default; // 堆域标签（AO 注入）
     bool m_initialized = false;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
