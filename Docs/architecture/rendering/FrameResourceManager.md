@@ -64,6 +64,10 @@ FrameScratchAllocator: 帧 N Allocate → 帧 N+1 Reset     (例外，仅用于�
 
 - 持久化资源**不是**通过 `FrameResourceManager` 的 RingBuffer 管理的
 - 它们走独立的 committed resource 或独立的 persistent upload heap
+- **已定稿为 v2 方案**：见 `Docs/architecture/rendering/StaticEntityPersistentBuffer.md`
+  - 资源归属：`GpuResourceManager::CreateBuffer`（长期 committed resource + fence 延迟释放）
+  - **禁止**帧/临时分配器管理静态实体持久缓冲（早期静态组件因此失败：RingBuffer Reclaim 误释放持久资源 → 资源丢失）
+  - 烘焙数据（`sceneEnvironment.precomputed`）按 persistentId 索引，save 时全量重算
 
 ### 命名考虑
 

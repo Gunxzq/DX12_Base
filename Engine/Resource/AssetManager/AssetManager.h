@@ -4,6 +4,7 @@
 #include "Core/SharedDataStore/SharedDataStore.h"
 #include "Renderer/Material/MaterialHandle.h"
 #include "Resource/Character/CharacterData.h"
+#include "Resource/Core/DescriptorHeapCollection.h" // HeapTag 枚举（m_heapTag/SetHeapTag 依赖完整定义）
 #include "Resource/Struct/ClipHandle.h"
 #include "Resource/Struct/GeometryHandle.h"
 #include "Resource/Struct/SkeletonHandle.h"
@@ -89,7 +90,7 @@ struct AssetResult {
 using AssetCallback = std::function<void(const AssetResult &result)>;
 
 // ========================================================================
-// Loader 注册表（2026-08-02 定案，见 Docs/architecture/AssetLoaderImprovement.md）
+// Loader 注册表（2026-08-02 定案，见 Docs/architecture/assets/AssetLoaderImprovement.md）
 //   以文件后缀分发加载请求，替代 switch(type)。类型由 Loader 声明（InferType 派生）。
 //   后缀匹配规则：extension() 小写 → 查表；若为 ".json" 再对 stem() 的 extension() 查表
 //   （自动覆盖 .scene.json 等双后缀）。".anim" 不注册——见 LoadAnimation 专用入口。
@@ -224,6 +225,11 @@ public:
     /// 获取缓存引用（供 SceneConstructor 查询已加载结果）
     const std::unordered_map<std::string, AssetResult> &GetCache() const { return m_cache; }
 
+    /// 设置纹理等资源的描述符堆域（编辑器多堆模式须传 HeapTag::EditorViewport，Game 用 Default）
+    /// 场景构建器（SceneConstructor）在分发加载任务前调用
+    void SetHeapTag(Resource::HeapTag tag) { m_heapTag = tag; }
+    Resource::HeapTag GetHeapTag() const { return m_heapTag; }
+
 private:
     uint32_t m_nextRequestId = 1;
     uint32_t m_nextBatchId = 1;
@@ -236,6 +242,7 @@ private:
     Resource::SkeletonManager *m_skeletonMgr = nullptr;
     Resource::AnimationManager *m_animMgr = nullptr;
     Resource::DescriptorHeapCollection *m_descHeaps = nullptr;
+    Resource::HeapTag m_heapTag = Resource::HeapTag::Default; // 资源加载目标堆域（SetHeapTag 设置）
 
     // 进行中的批量加载
     std::vector<AssetBatchPtr> m_activeBatches;
@@ -262,6 +269,9 @@ private:
     uint32_t LoadMaterialImpl(const std::string &path, AssetCallback onComplete, uint8_t priority);
     uint32_t LoadSkeletonImpl(const std::string &path, AssetCallback onComplete, uint8_t priority);
     uint32_t LoadCharacterImpl(const std::string &path, AssetCallback onComplete, uint8_t priority);
+
+    // 程序化几何体加载器（procedural:// URI scheme，不走文件后缀注册表）
+    uint32_t LoadProceduralGeometry(const std::string &uri, AssetCallback onComplete, uint8_t priority);
 };
 
 } // namespace Resource

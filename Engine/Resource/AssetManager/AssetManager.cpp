@@ -1,6 +1,9 @@
 #include "AssetManager.h"
+#include "Asset/IO/Loader/SceneDescription.h"
 #include "Background/AnimationLoadTask.h"
+#include "Background/GeometryProceduralTask.h"
 #include "Common/Common.h"
+#include "Renderer/RHI/D3D12DeviceContext.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -102,6 +105,12 @@ uint32_t AssetManager::Load(const std::string &path, AssetCallback onComplete, u
         return id;
     }
 
+    // 处理 procedural:// URI scheme（程序化几何体，不走文件后缀注册表）
+    if (path.find("procedural://") == 0) {
+        OutputDebugStringA(("[AssetManager] Load: procedural URI detected: " + path + "\n").c_str());
+        return LoadProceduralGeometry(path, std::move(onComplete), priority);
+    }
+
     // 按后缀查加载器（剥 .json 再试）；无匹配加载器则失败
     const LoaderEntry *entry = FindLoader(path);
     if (!entry) {
@@ -181,6 +190,91 @@ bool AssetManager::TryCache(const std::string &path, AssetCallback &callback) {
         return true;
     }
     return false;
+}
+
+// ========================================================================
+// LoadProceduralGeometry — 程序化几何体加载器（procedural:// URI scheme）
+//
+// URI 格式：procedural://<type>/<param1>/<param2>/...
+//   示例：procedural://grid/840/780/32/32
+//         procedural://cube
+//         procedural://sphere/radius/rings/segments
+// ========================================================================
+
+uint32_t AssetManager::LoadProceduralGeometry(const std::string &uri, AssetCallback onComplete, uint8_t priority) {
+    uint32_t id = m_nextRequestId++;
+
+    // 解析 URI：procedural://<type>/<params...>
+    std::string remain = uri;
+    // 去掉 "procedural://" 前缀
+    const std::string prefix = "procedural://";
+    if (remain.find(prefix) == 0)
+        remain = remain.substr(prefix.size());
+
+    // 按 '/' 分割
+    std::vector<std::string> parts;
+    size_t start = 0, end;
+    while ((end = remain.find('/', start)) != std::string::npos) {
+        parts.push_back(remain.substr(start, end - start));
+        start = end + 1;
+    }
+    parts.push_back(remain.substr(start));
+
+    if (parts.empty()) {
+        if (onComplete) {
+            AssetResult result;
+            result.type = AssetType::Mesh;
+            result.path = uri;
+            result.success = false;
+            onComplete(result);
+        }
+        return id;
+    }
+
+    std::string type = parts[0];
+    Resource::ProceduralGeometryDesc pgd;
+    pgd.type = type;
+
+    if (type == "grid" && parts.size() >= 3) {
+        pgd.width = std::stof(parts[1]);
+        pgd.depth = std::stof(parts[2]);
+        pgd.widthSegments = (parts.size() >= 4) ? (uint32_t)std::stoul(parts[3]) : 32;
+        pgd.depthSegments = (parts.size() >= 5) ? (uint32_t)std::stoul(parts[4]) : 32;
+    } else if (type == "sphere" && parts.size() >= 2) {
+        pgd.radius = std::stof(parts[1]);
+        pgd.rings = (parts.size() >= 3) ? (uint32_t)std::stoul(parts[2]) : 16;
+        pgd.segments = (parts.size() >= 4) ? (uint32_t)std::stoul(parts[3]) : 16;
+    }
+    // "cube" 无需额外参数
+
+    auto result = std::make_shared<Async::GeometryProceduralOutput>();
+    auto task = Async::GeometryProceduralTask::Create(
+        type, pgd,
+        m_deviceContext->GetDevice(),
+        &m_deviceContext->GetCommandManager(),
+        m_geoMgr, result);
+
+    OutputDebugStringA(("[AssetManager] LoadProceduralGeometry: " + uri + " -> task created, submitting\n").c_str());
+
+    auto sharedUri = std::make_shared<std::string>(uri);
+    auto prevOnComplete = std::move(task.onComplete);
+    task.onComplete = [this, sharedUri, onComplete = std::move(onComplete), result,
+                       prevOnComplete = std::move(prevOnComplete)](bool success) mutable {
+        // 先调用 GeometryProceduralTask 原始回调（注册几何体到 GeometryResourceManager）
+        if (prevOnComplete)
+            prevOnComplete(success);
+        AssetResult res;
+        res.type = AssetType::Mesh;
+        res.path = *sharedUri;
+        res.success = result->success;
+        res.geometryHandle = result->geometryHandle;
+        m_cache[*sharedUri] = res;
+        if (onComplete)
+            onComplete(res);
+    };
+
+    m_executor->SubmitLoadTask(std::move(task));
+    return id;
 }
 
 AssetBatchPtr AssetManager::LoadBatch(const std::vector<std::string> &paths, AssetCallback perAssetComplete,

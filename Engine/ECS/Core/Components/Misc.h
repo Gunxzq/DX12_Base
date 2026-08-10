@@ -1,4 +1,5 @@
 #pragma once
+#include "Math/BoundingVolume.h"
 #include <cstdint>
 
 namespace DX12Engine::ECS {
@@ -14,16 +15,15 @@ struct PickingComponent {
     bool showBoundingBox = false;
 };
 
-// 静态实体持久化组件（暂未启用）
+// 静态实体组件（省计算 v3：烘焙矩阵 + 世界 AABB 缓存，未脏直接复用跳过计算）
 struct StaticComponent {
-    D3D12_GPU_VIRTUAL_ADDRESS persistentCBAddress = 0;
-    D3D12_GPU_VIRTUAL_ADDRESS persistentInstanceAddress = 0;
-    uint32_t persistentInstanceSize = 0;
-    uint32_t batchInstanceIndex = UINT32_MAX;
     bool worldDirty = true;
     DirectX::XMFLOAT4X4 cachedWorld;
     DirectX::XMFLOAT4X4 cachedWorldInvTranspose;
     float cachedDistanceToCamera = 0.0f;
+    // 省计算（v3）：世界 AABB 缓存，未脏直接复用（剔除跳过每帧 GetMatrix+Transform）
+    Math::BoundingAABB cachedWorldBounds;
+    bool hasCachedWorldBounds = false;
 };
 
 } // namespace DX12Engine::ECS

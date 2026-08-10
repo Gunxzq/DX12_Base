@@ -18,6 +18,9 @@ public:
      * @brief 从 JSON 文件加载场景描述
      */
     static SceneDescription LoadFromFile(const std::filesystem::path &path);
+    /// 二进制 SOA 场景加载（.scene.bin——SCNB 格式：magic/version/count/meshCount + mesh 名表 + SOA 字段数组，
+    /// 体积 ~9% of JSON，memcpy 直接解析字段数组）
+    static SceneDescription LoadFromFileBinary(const std::filesystem::path &path);
 
     /**
      * @brief 从内存 JSON 加载场景描述（发布版走此路径）

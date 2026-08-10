@@ -69,6 +69,8 @@ struct TransformDesc {
     std::vector<float> position = {0, 0, 0};
     std::vector<float> rotation = {0, 0, 0, 1}; // 四元数 [x, y, z, w]
     std::vector<float> scale = {1, 1, 1};
+    // 剔除距离（世界空间基准；受缩放影响：有效距离 = cullDistance × maxScale，见 TransformComponent）
+    float cullDistance = 0.0f; // 0 = 不限制
 };
 
 inline void from_json(const nlohmann::json &j, TransformDesc &t) {
@@ -78,6 +80,8 @@ inline void from_json(const nlohmann::json &j, TransformDesc &t) {
         j.at("rotation").get_to(t.rotation);
     if (j.contains("scale"))
         j.at("scale").get_to(t.scale);
+    if (j.contains("cullDistance") && j["cullDistance"].is_number())
+        t.cullDistance = j["cullDistance"].get<float>();
 }
 
 inline void to_json(nlohmann::json &j, const TransformDesc &t) {
@@ -85,6 +89,8 @@ inline void to_json(nlohmann::json &j, const TransformDesc &t) {
     j["position"] = t.position;
     j["rotation"] = t.rotation;
     j["scale"] = t.scale;
+    if (t.cullDistance > 0.0f)
+        j["cullDistance"] = t.cullDistance;
 }
 
 struct MeshDesc {
@@ -98,9 +104,6 @@ inline void from_json(const nlohmann::json &j, MeshDesc &m) {
         m.geometry = j["geometry"].get<std::string>();
     if (j.contains("materials") && j["materials"].is_array()) {
         m.materials = j["materials"].get<std::vector<std::string>>();
-    } else if (j.contains("material")) {
-        // 向后兼容：旧格式 "material": "mat_body" → ["mat_body"]
-        m.materials = {j["material"].get<std::string>()};
     }
     if (j.contains("receivesShadow"))
         m.receivesShadow = j["receivesShadow"].get<bool>();
@@ -355,10 +358,16 @@ inline void to_json(nlohmann::json &j, const WaterDesc &w) {
 // ========================================================================
 
 struct ProceduralGeometryDesc {
-    std::string type;       // "cube" | "sphere"；空 = 未使用
+    std::string type;       // "cube" | "sphere" | "grid"；空 = 未使用
     float radius = 1.0f;    // 球体半径
     uint32_t rings = 16;    // 球体环数
     uint32_t segments = 16; // 球体分段数
+
+    // grid（程序化水面四边形，对齐 WaterSystemArchitecture §十 定案）
+    float width = 1.0f;          // 水面宽度（X）
+    float depth = 1.0f;          // 水面深度（Z）
+    uint32_t widthSegments = 32; // X 方向分段数
+    uint32_t depthSegments = 32; // Z 方向分段数
 };
 
 inline void from_json(const nlohmann::json &j, ProceduralGeometryDesc &p) {
@@ -366,6 +375,12 @@ inline void from_json(const nlohmann::json &j, ProceduralGeometryDesc &p) {
     p.radius = j.value("radius", 1.0f);
     p.rings = j.value("rings", 16u);
     p.segments = j.value("segments", 16u);
+    if (p.type == "grid") {
+        p.width = j.value("width", 1.0f);
+        p.depth = j.value("depth", 1.0f);
+        p.widthSegments = j.value("widthSegments", 32u);
+        p.depthSegments = j.value("depthSegments", 32u);
+    }
 }
 
 inline void to_json(nlohmann::json &j, const ProceduralGeometryDesc &p) {
@@ -375,6 +390,11 @@ inline void to_json(nlohmann::json &j, const ProceduralGeometryDesc &p) {
         j["radius"] = p.radius;
         j["rings"] = p.rings;
         j["segments"] = p.segments;
+    } else if (p.type == "grid") {
+        j["width"] = p.width;
+        j["depth"] = p.depth;
+        j["widthSegments"] = p.widthSegments;
+        j["depthSegments"] = p.depthSegments;
     }
 }
 
@@ -443,10 +463,17 @@ inline void to_json(nlohmann::json &j, const RelationshipDesc &r) {
 // 实体描述（嵌套结构，加载时递归展平）
 // ========================================================================
 
+// 水块（邻接 Sea 合并——程序化水面四边形；对齐 DxSceneFormat.h DxSceneWaterBlock——.scene 二进制/JSON 同构）
+struct WaterBlockDesc {
+    std::vector<float> min;    // [minX, minZ]——世界四边形角点
+    std::vector<float> max;    // [maxX, maxZ]
+    std::vector<float> world;  // 位置 [posX, posY, posZ] + 缩放 [scaleX, scaleY, scaleZ]
+    std::vector<float> tiling; // [tilingX, tilingZ]——纹理平铺（每 30 单位重复）
+};
+
 struct EntityDesc {
     std::string name;
     std::string persistentId; // fnv1a 64-bit 十六进制 hash 字符串
-
     std::optional<TransformDesc> transform;
     std::optional<MeshDesc> mesh;
     std::optional<TerrainDesc> terrain;
@@ -518,6 +545,26 @@ inline void to_json(nlohmann::json &j, const EnvironmentDesc &e) {
 }
 
 // ========================================================================
+// PrecomputedStaticData — 静态实体烘焙数据（save 时全量重算写入 JSON）
+//
+// 语义：静态实体（StaticComponent）的基准上传数据，按 persistentId 索引。
+//       加载时一次消费 → 上传 GpuResourceManager 长期缓冲（每帧零重算零重传）。
+//       运行时资源三来源之一（另：ECS 组件、RenderSlotCache）。
+// 见 Docs/architecture/rendering/StaticEntityPersistentBuffer.md
+// ========================================================================
+struct PrecomputedInstance {
+    std::string persistentId;             // 实体 persistentId（fnv1a hex，关联 key）
+    std::vector<float> world;             // 16 floats（行主序）
+    std::vector<float> worldInvTranspose; // 16 floats（仅 nonUniformScale=true 时存储）
+};
+
+struct PrecomputedStaticData {
+    bool nonUniformScale = false;               // 场景是否含非均匀缩放（save 时给定标记）
+    std::vector<PrecomputedInstance> instances; // 静态实体矩阵烘焙（persistentId 索引）
+    // staticWorldBounds：世界 AABB（剔除/八叉树直接消费），可按需扩展
+};
+
+// ========================================================================
 // SceneEnvironment — 管理器全局场景数据
 //
 // 语义：所有不进入 ECS Registry 的场景级全局参数（管理器特有数据）。
@@ -529,6 +576,10 @@ inline void to_json(nlohmann::json &j, const EnvironmentDesc &e) {
 struct SceneEnvironment {
     EnvironmentDesc ambient;          // 环境光全局参数
     std::optional<SkyboxDesc> skybox; // 天空盒配置
+    // 场景动静比例：未设置 StaticComponent 的实体按此默认分配（默认 "static"）
+    std::string entityMotionPolicy = "static";
+    // 静态实体烘焙数据（save 时重算；无则运行时逐实体计算兜底，向后兼容）
+    std::optional<PrecomputedStaticData> precomputed;
 
     bool HasSkybox() const { return skybox.has_value() && !skybox->texture.empty(); }
     bool HasAmbient() const { return !ambient.ambientLight.empty(); }
@@ -539,6 +590,25 @@ inline void from_json(const nlohmann::json &j, SceneEnvironment &e) {
         e.ambient = j["ambient"].get<EnvironmentDesc>();
     if (j.contains("skybox"))
         e.skybox = j["skybox"].get<SkyboxDesc>();
+    if (j.contains("entityMotionPolicy") && j["entityMotionPolicy"].is_string())
+        e.entityMotionPolicy = j["entityMotionPolicy"].get<std::string>();
+    if (j.contains("precomputed") && j["precomputed"].is_object()) {
+        PrecomputedStaticData p;
+        p.nonUniformScale = j["precomputed"].value("nonUniformScale", false);
+        if (j["precomputed"].contains("instances") && j["precomputed"]["instances"].is_array()) {
+            for (const auto &ji : j["precomputed"]["instances"]) {
+                PrecomputedInstance pi;
+                if (ji.contains("persistentId"))
+                    pi.persistentId = ji["persistentId"].get<std::string>();
+                if (ji.contains("world"))
+                    pi.world = ji["world"].get<std::vector<float>>();
+                if (ji.contains("worldInvTranspose"))
+                    pi.worldInvTranspose = ji["worldInvTranspose"].get<std::vector<float>>();
+                p.instances.push_back(std::move(pi));
+            }
+        }
+        e.precomputed = std::move(p);
+    }
 }
 
 inline void to_json(nlohmann::json &j, const SceneEnvironment &e) {
@@ -546,6 +616,100 @@ inline void to_json(nlohmann::json &j, const SceneEnvironment &e) {
     j["ambient"] = e.ambient;
     if (e.skybox)
         j["skybox"] = *e.skybox;
+    if (!e.entityMotionPolicy.empty())
+        j["entityMotionPolicy"] = e.entityMotionPolicy;
+    if (e.precomputed) {
+        nlohmann::json jp = nlohmann::json::object();
+        jp["nonUniformScale"] = e.precomputed->nonUniformScale;
+        jp["instances"] = nlohmann::json::array();
+        for (const auto &pi : e.precomputed->instances) {
+            nlohmann::json jpi = nlohmann::json::object();
+            jpi["persistentId"] = pi.persistentId;
+            jpi["world"] = pi.world;
+            if (!pi.worldInvTranspose.empty())
+                jpi["worldInvTranspose"] = pi.worldInvTranspose;
+            jp["instances"].push_back(std::move(jpi));
+        }
+        j["precomputed"] = std::move(jp);
+    }
+}
+
+// ========================================================================
+// BlockConfigDesc — 块划分配置（2026-08-06，UE World Partition 模式，`GPU-Drive.md` §4.1）
+//
+// 语义：场景级块划分参数（blockConfig，scene.json 顶层可选节）。
+//       全字段 0 = 未配置（推导模式）——加载时按地图范围自动推导
+//       cellSize = clamp(mapExtent / blocksPerAxis)，blocksPerAxis 默认 4，
+//       上下限兜底小图/大图。缺省不写文件，保存时由 ExportToDescription 固化。
+// 关联：08_MapScenePipeline.md §8.7、GPU-Drive.md §4.1/§五 阶段 0
+// ========================================================================
+struct BlockConfigDesc {
+    float cellSize = 0.0f;    // 块边长（0 = 未配置 → 加载推导）
+    int blocksPerAxis = 0;    // 每轴目标块数（0 = 用默认 4）
+    float minCellSize = 0.0f; // 推导下限（0 = 用默认 100）
+    float maxCellSize = 0.0f; // 推导上限（0 = 用默认 1000）
+
+    bool IsConfigured() const { return cellSize > 0.0f; }
+};
+
+inline void from_json(const nlohmann::json &j, BlockConfigDesc &b) {
+    if (j.contains("cellSize") && j["cellSize"].is_number())
+        b.cellSize = j["cellSize"].get<float>();
+    if (j.contains("blocksPerAxis") && j["blocksPerAxis"].is_number_integer())
+        b.blocksPerAxis = j["blocksPerAxis"].get<int>();
+    if (j.contains("minCellSize") && j["minCellSize"].is_number())
+        b.minCellSize = j["minCellSize"].get<float>();
+    if (j.contains("maxCellSize") && j["maxCellSize"].is_number())
+        b.maxCellSize = j["maxCellSize"].get<float>();
+}
+
+inline void to_json(nlohmann::json &j, const BlockConfigDesc &b) {
+    j = nlohmann::json::object();
+    if (b.cellSize > 0.0f)
+        j["cellSize"] = b.cellSize;
+    if (b.blocksPerAxis > 0)
+        j["blocksPerAxis"] = b.blocksPerAxis;
+    if (b.minCellSize > 0.0f)
+        j["minCellSize"] = b.minCellSize;
+    if (b.maxCellSize > 0.0f)
+        j["maxCellSize"] = b.maxCellSize;
+}
+
+// ========================================================================
+// WorldConfigDesc — Octree 空间索引世界范围配置（worldConfig，scene.json 顶层可选节）
+// ========================================================================
+// 语义：空间索引（OctreeSystem）的世界范围参数。全字段 0 = 未配置（推导模式）——
+//       加载时按实体 worldBounds 全范围推导 worldSize = max(spanX,spanY,spanZ) * 1.2
+//       + 包围盒中心（与 OctreeSystem::Build 阶段 1 同款；缺失也永不越界）。
+//       缺省不写文件，保存时由 ExportToDescription 固化。
+// 背景：Editor.cpp 曾硬编码 Initialize({0,0,0}, 3000)，worldSize 小于 City 场景范围
+//       → 逐实体 AddEntity 触发动态扩容 O(N²) 卡死（2026-08-09 阻塞；worldSize 与地图
+//       脱钩是根因之一）。对齐大型引擎：UE World Partition 网格尺寸可配置 / Unity 场景边界。
+// 关联：OctreeCullingAndRaycaster.md §7.5、GPU-Drive.md §4.1
+// ========================================================================
+struct WorldConfigDesc {
+    float worldSize = 0.0f;               // 空间索引世界范围（0 = 未配置 → 加载推导）
+    float center[3] = {0.0f, 0.0f, 0.0f}; // 世界中心（可选；全 0 = 按实体分布推导）
+
+    bool IsConfigured() const { return worldSize > 0.0f; }
+};
+
+inline void from_json(const nlohmann::json &j, WorldConfigDesc &w) {
+    if (j.contains("worldSize") && j["worldSize"].is_number())
+        w.worldSize = j["worldSize"].get<float>();
+    if (j.contains("center") && j["center"].is_array() && j["center"].size() >= 3) {
+        w.center[0] = j["center"][0].get<float>();
+        w.center[1] = j["center"][1].get<float>();
+        w.center[2] = j["center"][2].get<float>();
+    }
+}
+
+inline void to_json(nlohmann::json &j, const WorldConfigDesc &w) {
+    j = nlohmann::json::object();
+    if (w.worldSize > 0.0f)
+        j["worldSize"] = w.worldSize;
+    if (w.center[0] != 0.0f || w.center[1] != 0.0f || w.center[2] != 0.0f)
+        j["center"] = {w.center[0], w.center[1], w.center[2]};
 }
 
 // 顶层场景描述
@@ -557,6 +721,11 @@ struct SceneDescription {
     SceneDependencies dependencies;
     std::unordered_map<std::string, Resource::MaterialDesc> materials;
     std::vector<EntityDesc> entities;
+    std::vector<WaterBlockDesc> waterBlocks; // 水块（邻接 Sea 合并——程序化水面四边形，.scene 二进制/JSON 同构）
+    // 块划分配置（可选；缺失 = 推导模式，加载时按地图范围自动推导；保存时固化，见 §0c/0d）
+    std::optional<BlockConfigDesc> blockConfig;
+    // 空间索引世界范围配置（可选；缺失 = 推导模式，加载时按实体 worldBounds 推导；保存时固化）
+    std::optional<WorldConfigDesc> worldConfig;
 
     // 场景内容 hash（FNV-1a 64-bit 十六进制字符串，可选）
     // 加载时可为空，由工具链或编辑器在后续流程中填充
@@ -570,6 +739,10 @@ inline void to_json(nlohmann::json &j, const SceneDescription &d) {
         j["metadata"] = d.metadata;
     if (!d.baseURL.empty())
         j["baseURL"] = d.baseURL;
+    if (d.blockConfig)
+        j["blockConfig"] = *d.blockConfig;
+    if (d.worldConfig)
+        j["worldConfig"] = *d.worldConfig;
     j["sceneEnvironment"] = d.sceneEnvironment;
     if (!d.dependencies.meshes.empty() || !d.dependencies.textures.empty() || !d.dependencies.terrains.empty())
         j["dependencies"] = d.dependencies;

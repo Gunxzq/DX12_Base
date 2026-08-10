@@ -17,6 +17,50 @@
             "description": "所有依赖路径的前缀（相对项目根），如 \"Content/City\"。引擎加载时拼接为 root + baseURL + depPath",
             "type": "string"
         },
+        "blockConfig": {
+            "description": "块划分配置（UE World Partition 模式，可选；缺失时加载按地图范围自动推导 cellSize = clamp(mapExtent / blocksPerAxis)）。详见 08_MapScenePipeline.md §8.7",
+            "type": "object",
+            "properties": {
+                "cellSize": {
+                    "type": "number",
+                    "minimum": 1,
+                    "description": "块边长（可选；缺失则按地图范围自动推导）"
+                },
+                "blocksPerAxis": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "每轴目标块数（与 cellSize 二选一，cellSize 优先）"
+                },
+                "minCellSize": {
+                    "type": "number",
+                    "minimum": 1,
+                    "description": "推导下限（小图防过度细分，默认 100）"
+                },
+                "maxCellSize": {
+                    "type": "number",
+                    "minimum": 1,
+                    "description": "推导上限（大图防整图一块，默认 1000）"
+                }
+            }
+        },
+        "worldConfig": {
+            "description": "空间索引世界范围配置（OctreeSystem，可选；缺失时加载按实体 worldBounds 推导 worldSize = max(span)*1.2 + 中心）。详见 OctreeCullingAndRaycaster.md §7.5",
+            "type": "object",
+            "properties": {
+                "worldSize": {
+                    "type": "number",
+                    "minimum": 1,
+                    "description": "空间索引世界范围边长（可选；缺失则按实体包围盒推导）"
+                },
+                "center": {
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "description": "世界中心 [x, y, z]（可选；缺失或全 0 则按实体分布推导）"
+                }
+            }
+        },
         "metadata": {
             "type": "object",
             "properties": {
@@ -54,7 +98,47 @@
                         }
                     }
                 },
-                "skybox": { "$ref": "#/definitions/SkyboxDesc" }
+                "skybox": { "$ref": "#/definitions/SkyboxDesc" },
+                "precomputed": {
+                    "description": "静态实体烘焙数据（PrecomputedStaticData——save 时全量重算写入 JSON；加载时一次消费上传长期缓冲，每帧零重算；无则运行时逐实体计算兜底）",
+                    "type": "object",
+                    "properties": {
+                        "nonUniformScale": {
+                            "type": "boolean",
+                            "description": "场景是否含非均匀缩放（save 时给定标记——true 时 instances 存储 worldInvTranspose）"
+                        },
+                        "instances": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "persistentId": {
+                                        "type": "string",
+                                        "description": "实体 persistentId（fnv1a hex，关联 key）"
+                                    },
+                                    "world": {
+                                        "type": "array",
+                                        "items": { "type": "number" },
+                                        "minItems": 16,
+                                        "maxItems": 16,
+                                        "description": "世界矩阵（16 floats，行主序）"
+                                    },
+                                    "worldInvTranspose": {
+                                        "type": "array",
+                                        "items": { "type": "number" },
+                                        "minItems": 16,
+                                        "maxItems": 16,
+                                        "description": "逆变换转置（仅 nonUniformScale=true 时存储）"
+                                    }
+                                },
+                                "required": ["persistentId", "world"],
+                                "additionalProperties": false
+                            }
+                        }
+                    },
+                    "required": ["nonUniformScale", "instances"],
+                    "additionalProperties": false
+                }
             }
         },
         "dependencies": {
@@ -83,7 +167,18 @@
         "entities": {
             "description": "场景实体列表。加载时展平为扁平 ECS，子实体递归遍历并累积变换。",
             "type": "array",
-            "items": { "$ref": "#/definitions/Entity" }
+            "items": { "$ref": "#/definitions/Entity" },
+            "contains": {
+                "description": "场景必须包含至少一个非环境光光源（light 组件：directional/point/spot），否则直接光照（direct）无贡献，场景仅剩环境光/自发光",
+                "type": "object",
+                "required": ["components"],
+                "properties": {
+                    "components": {
+                        "type": "object",
+                        "required": ["light"]
+                    }
+                }
+            }
         }
     },
 
@@ -351,13 +446,13 @@
         },
 
         "ProceduralGeometryDesc": {
-            "description": "程序化几何体参数。type='cube' 时忽略其余字段；type='sphere' 时使用 radius/rings/segments",
+            "description": "程序化几何体参数。type='cube' 时忽略其余字段；type='sphere' 时使用 radius/rings/segments；type='grid' 时使用 width/depth/widthSegments/depthSegments（程序化水面四边形）",
             "type": "object",
             "required": ["type"],
             "properties": {
                 "type": {
                     "type": "string",
-                    "enum": ["cube", "sphere"],
+                    "enum": ["cube", "sphere", "grid"],
                     "description": "几何体类型"
                 },
                 "radius": {
@@ -377,6 +472,30 @@
                     "default": 16,
                     "minimum": 3,
                     "description": "球体分段数（仅 sphere 类型使用）"
+                },
+                "width": {
+                    "type": "number",
+                    "default": 1.0,
+                    "minimum": 0.1,
+                    "description": "水面宽度 X（仅 grid 类型使用）"
+                },
+                "depth": {
+                    "type": "number",
+                    "default": 1.0,
+                    "minimum": 0.1,
+                    "description": "水面深度 Z（仅 grid 类型使用）"
+                },
+                "widthSegments": {
+                    "type": "integer",
+                    "default": 32,
+                    "minimum": 1,
+                    "description": "X 方向分段数（仅 grid 类型使用）"
+                },
+                "depthSegments": {
+                    "type": "integer",
+                    "default": 32,
+                    "minimum": 1,
+                    "description": "Z 方向分段数（仅 grid 类型使用）"
                 }
             }
         },

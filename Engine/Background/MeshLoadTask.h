@@ -52,8 +52,10 @@ public:
             uint32_t vertexCount = 0;
             uint32_t indexCount = 0;
             uint32_t vertexStride = 0;
+            uint32_t flags = 0;
             DXGI_FORMAT indexFormat = DXGI_FORMAT_R32_UINT;
             Math::BoundingAABB localBounds;
+            std::vector<Resource::SubMeshInfo> subMeshes;
             bool failed = false;
         };
         auto state = std::make_shared<SharedState>();
@@ -93,6 +95,28 @@ public:
             state->indexCount = header->indexCount;
             state->vertexStride = header->vertexStride;
             state->indexFormat = (header->indexSize == 2) ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+            state->flags = header->flags;
+
+            // 读取 SubMesh 表
+            // 统一语义：所有网格按子网格处理；无子网格表时视为 1 个子网格（整个索引区间）
+            // （见 SubMeshMaterialSlots.md §2.3，消费方不再判空）
+            if (header->subMeshCount > 0) {
+                const auto *subTable = DxMesh_GetSubMeshTable(header);
+                state->subMeshes.reserve(header->subMeshCount);
+                for (uint32_t i = 0; i < header->subMeshCount; ++i) {
+                    Resource::SubMeshInfo info;
+                    info.startIndex = subTable[i].indexOffset;
+                    info.indexCount = subTable[i].indexCount;
+                    info.startVertex = static_cast<int32_t>(subTable[i].vertexOffset);
+                    state->subMeshes.push_back(info);
+                }
+            } else {
+                Resource::SubMeshInfo whole;
+                whole.startIndex = 0;
+                whole.indexCount = header->indexCount;
+                whole.startVertex = 0; // 索引已绝对化，BaseVertexLocation 恒 0
+                state->subMeshes.push_back(whole);
+            }
 
             state->vertexData.resize(vtxSize);
             state->indexData.resize(idxSize);
@@ -114,13 +138,16 @@ public:
             uint32_t vtxSize = state->vertexCount * state->vertexStride;
             uint32_t idxSize = state->indexCount * (state->indexFormat == DXGI_FORMAT_R16_UINT ? 2u : 4u);
 
-            // DEFAULT VB/IB
+            // DEFAULT VB/IB（初始 COMMON——COPY 命令列表 CopyResource 目标必须以 COMMON 创建，
+            // 不能用 COPY_DEST：GBV #942 "Resources used in COPY command lists must start out in the
+            // D3D12_RESOURCE_STATE_COMMON state. This includes Resources created in a COPY_SOURCE or COPY_DEST state."
+            // 目标状态（VB/IB）由 DIRECT 队列 barrier 转出）
             auto vb = gpuMgr.CreateBuffer(device, vtxSize, L"Mesh_VB_Default", D3D12_HEAP_TYPE_DEFAULT,
-                                          D3D12_RESOURCE_STATE_COPY_DEST);
+                                          D3D12_RESOURCE_STATE_COMMON);
             if (!vb.IsValid())
                 return nullptr;
             auto ib = gpuMgr.CreateBuffer(device, idxSize, L"Mesh_IB_Default", D3D12_HEAP_TYPE_DEFAULT,
-                                          D3D12_RESOURCE_STATE_COPY_DEST);
+                                          D3D12_RESOURCE_STATE_COMMON);
             if (!ib.IsValid()) {
                 gpuMgr.Release(vb, 0);
                 return nullptr;
@@ -172,7 +199,7 @@ public:
             cpCmd.Get()->CopyResource(gpuMgr.GetResource(ib), upIBRes);
             cpCmd.Close();
 
-            // DIRECT 队列：COPY_DEST → VB/IB
+            // DIRECT 队列：COMMON → VB/IB（资源初始为 COMMON，barrier 必须从 COMMON 转出）
             uint64_t directCompleted = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
             uint64_t directFence = cmdMgr->GetNextSequence();
             auto drAllocH = cmdMgr->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(directCompleted);
@@ -180,9 +207,9 @@ public:
             auto drCmdH = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(drAlloc);
             auto drCmd = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(drCmdH);
             D3D12_RESOURCE_BARRIER barriers[2] = {
-                CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(vb), D3D12_RESOURCE_STATE_COPY_DEST,
+                CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(vb), D3D12_RESOURCE_STATE_COMMON,
                                                      D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER),
-                CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(ib), D3D12_RESOURCE_STATE_COPY_DEST,
+                CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(ib), D3D12_RESOURCE_STATE_COMMON,
                                                      D3D12_RESOURCE_STATE_INDEX_BUFFER)};
             drCmd.Get()->ResourceBarrier(2, barriers);
             drCmd.Close();
@@ -201,8 +228,10 @@ public:
             triMesh->vertexStride = state->vertexStride;
             triMesh->indexFormat = state->indexFormat;
             triMesh->topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+            triMesh->flags = state->flags;
             triMesh->isGpuReady = true;
             triMesh->localBounds = state->localBounds;
+            triMesh->subMeshes = std::move(state->subMeshes);
 
             item->copyCmdListHandle = cpCmdH;
             item->copyAllocatorHandle = cpAllocH;

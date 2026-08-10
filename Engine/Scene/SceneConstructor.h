@@ -63,6 +63,22 @@ struct SceneConstructData {
     std::optional<Resource::SkyboxDesc> skybox;
     std::optional<Resource::EnvironmentDesc> environment;
 
+    // 水块（邻接 Sea 合并——程序化水面四边形——.scene 二进制/JSON 同构；OnSceneConstructReady 消费）
+    std::vector<Resource::WaterBlockDesc> waterBlocks;
+
+    // 完整场景环境（precomputed/entityMotionPolicy；静态函数无法访问 SceneConstructor::m_desc，
+    // ConstructEntity 需显式传入此引用）
+    Resource::SceneEnvironment sceneEnvironment;
+
+    // 块划分配置（UE World Partition 模式：JSON 显式配置或加载时推导——缺失则按实体世界范围
+    // 推导 cellSize = clamp(mapExtent / blocksPerAxis)；Phase C 区块划分消费，见 GPU-Drive.md §4.1）
+    std::optional<Resource::BlockConfigDesc> blockConfig;
+
+    // 空间索引世界范围（OctreeSystem：JSON 显式配置或加载时推导——缺失则按实体 worldBounds
+    // 推导 worldSize = max(span)*1.2 + 中心；OctreeCullingSystem 初始化消费，见
+    // OctreeCullingAndRaycaster.md §7.5）
+    std::optional<Resource::WorldConfigDesc> worldConfig;
+
     // 天空盒 GPU 资源句柄（Tab 切换时重建天空盒用）
     Resource::GpuResourceHandle skyboxTextureHandle;
     Resource::GeometryHandle skyboxGeometryHandle;
@@ -96,10 +112,12 @@ public:
     bool IsLoading() const { return m_loading; }
 
     /// 构造单个 entity（递归处理 children），供 SceneConstructSystem 调用
+    /// @param sceneEnv 场景环境（precomputed/entityMotionPolicy；静态函数无法访问 m_desc，须显式传入）
     static void ConstructEntity(ECS::Entity entity, const Resource::EntityDesc &eDesc,
                                 const std::unordered_map<std::string, Resource::GeometryHandle> &geoMap,
                                 const std::unordered_map<std::string, Resource::MaterialHandle> &matMap,
-                                ECS::Registry *registry, Boot::GameContext *context);
+                                const Resource::SceneEnvironment &sceneEnv, ECS::Registry *registry,
+                                Boot::GameContext *context);
 
 private:
     // 依赖加载完成后的处理

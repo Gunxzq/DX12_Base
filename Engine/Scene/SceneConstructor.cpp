@@ -5,6 +5,7 @@
 #include "Core/SharedDataStore/SharedDataStore.h"
 #include "ECS/Core/Components/Camera.h"
 #include "ECS/Core/Components/Light.h"
+#include "ECS/Core/Components/Misc.h" // StaticComponent（静态实体持久化）
 #include "ECS/Core/Components/Name.h"
 #include "ECS/Core/Components/ReflectionProbe.h"
 #include "ECS/Core/Components/Relationship.h"
@@ -17,6 +18,8 @@
 #include "Event/MessageDispatcher.h"
 #include "Logger/Logger.h"
 #include "Renderer/Core/LODSystem.h"
+#include "Renderer/Core/RenderSlotCache.h"
+#include "Renderer/Core/ShaderRoute.h"
 #include "Renderer/FrameResources/FrameResourceManager.h"
 #include "Renderer/FrameResources/Struct/FrameResourceTypes.h"
 #include "Renderer/Material/MaterialManager.h"
@@ -30,11 +33,15 @@
 #include "Resource/GpuResourceManager.h"
 #include "Resource/Manager/GeometryResourceManager.h"
 #include "Resource/Texture/TextureManager.h"
+#include <algorithm> // std::clamp/std::min/std::max（blockConfig 推导，阶段 0c）
+#include <cmath>     // std::isfinite（worldConfig 推导防御，2026-08-10）
+#include <cstring>
 #include <filesystem>
 
 namespace DX12Engine::Scene {
 
 using namespace DX12Engine::Resource;
+using namespace DX12Engine::Renderer; // ShaderType/ParseShaderType（材质路由，RendererDataDriven.md §4.1a）
 
 void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext *context, HeapTag heapTag,
                                  Callback onComplete, const std::string &sceneFilePath) {
@@ -71,6 +78,9 @@ void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext
     auto resolve = [&root, &baseURL](const std::string &path) -> std::string {
         if (path.empty())
             return path;
+        // procedural:// URI 不走文件路径解析
+        if (path.find("procedural://") == 0)
+            return path;
         if (std::filesystem::path(path).is_absolute())
             return std::filesystem::path(path).generic_string();
         if (!baseURL.empty())
@@ -87,6 +97,14 @@ void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext
     }
     for (const auto &[key, path] : desc.dependencies.terrains) {
         assets.emplace_back(resolve(path));
+    }
+
+    // 收集 entities 中 mesh.geometry 的 procedural:// URI（不存于 dependencies.meshes）
+    for (const auto &entity : desc.entities) {
+        if (entity.mesh && !entity.mesh->geometry.empty() && entity.mesh->geometry.find("procedural://") == 0) {
+            assets.emplace_back(entity.mesh->geometry);
+            log->Info("[SceneConstructor] Collected procedural URI: {}", entity.mesh->geometry);
+        }
     }
 
     // 存储解析后的路径映射（用于 OnDependenciesLoaded 中查缓存）
@@ -111,6 +129,8 @@ void SceneConstructor::LoadScene(const SceneDescription &desc, Boot::GameContext
               desc.dependencies.meshes.size(), desc.dependencies.textures.size(), desc.dependencies.terrains.size());
 
     // 提交批量加载（SceneConstructor 由 GameWorld 持有，生命周期足够长）
+    // 分发任务前同步 heapTag（编辑器多堆模式：纹理 SRV 必须落在渲染绑定的 EditorViewport 堆）
+    AssetManager::GetInstance().SetHeapTag(m_heapTag);
     m_batch = AssetManager::GetInstance().LoadBatch(assets, nullptr, [this]() {
         auto *l = m_context ? m_context->Logging : nullptr;
         if (l)
@@ -157,6 +177,20 @@ void SceneConstructor::OnDependenciesLoaded() {
             geoMap[key] = it->second.geometryHandle;
         } else {
             log->Warn("[SceneConstructor] Mesh '{}' not loaded: {}", key, path);
+        }
+    }
+
+    // 收集 procedural:// URI 几何体（内联于实体 mesh.geometry，不存于 dependencies.meshes）
+    for (const auto &entity : m_desc.entities) {
+        if (entity.mesh && !entity.mesh->geometry.empty() && entity.mesh->geometry.find("procedural://") == 0) {
+            auto it = cache.find(entity.mesh->geometry);
+            if (it != cache.end() && it->second.success) {
+                geoMap[entity.mesh->geometry] = it->second.geometryHandle;
+                log->Info("[SceneConstructor] Procedural geometry loaded: {} -> handle(idx={})", entity.mesh->geometry,
+                          it->second.geometryHandle.index);
+            } else {
+                log->Warn("[SceneConstructor] Procedural geometry '{}' not loaded", entity.mesh->geometry);
+            }
         }
     }
 
@@ -243,7 +277,6 @@ void SceneConstructor::OnDependenciesLoaded() {
         else
             log->Error("[SceneConstructor] Skybox texture '{}' not found", sb.texture);
 
-        GeometryHandle skyGeo;
         if (sb.procedural.type.empty()) {
             log->Warn("[SceneConstructor] Skybox geometry type not specified, procedural default will be used");
             // 降级使用程序化立方体
@@ -308,6 +341,86 @@ void SceneConstructor::OnDependenciesLoaded() {
     // 携带场景环境数据（供 SceneConstructSystem 设置到 SceneManager）
     sceneData->skybox = m_desc.sceneEnvironment.skybox;
     sceneData->environment = m_desc.sceneEnvironment.ambient;
+    // 完整场景环境（静态实体烘焙 precomputed / entityMotionPolicy，ConstructEntity 消费）
+    sceneData->sceneEnvironment = m_desc.sceneEnvironment;
+    sceneData->waterBlocks = m_desc.waterBlocks; // 水块（邻接 Sea 合并——程序化水面四边形）
+
+    // 块划分配置（UE World Partition 模式，GPU-Drive.md §4.1）：
+    // JSON 显式配置（blockConfig.cellSize>0）直接用；缺失则按实体世界范围推导
+    // cellSize = clamp(mapExtent / blocksPerAxis)，blocksPerAxis 默认 4，上下限 100~1000
+    {
+        if (m_desc.blockConfig && m_desc.blockConfig->IsConfigured()) {
+            sceneData->blockConfig = m_desc.blockConfig;
+        } else {
+            const int bpa =
+                (m_desc.blockConfig && m_desc.blockConfig->blocksPerAxis > 0) ? m_desc.blockConfig->blocksPerAxis : 4;
+            const float minCell = (m_desc.blockConfig && m_desc.blockConfig->minCellSize > 0.0f)
+                                      ? m_desc.blockConfig->minCellSize
+                                      : 100.0f;
+            const float maxCell = (m_desc.blockConfig && m_desc.blockConfig->maxCellSize > 0.0f)
+                                      ? m_desc.blockConfig->maxCellSize
+                                      : 1000.0f;
+
+            float minX = 1e30f, maxX = -1e30f, minZ = 1e30f, maxZ = -1e30f;
+            for (const auto &e : m_desc.entities) {
+                if (e.transform && e.transform->position.size() >= 3) {
+                    minX = (std::min)(minX, e.transform->position[0]);
+                    maxX = (std::max)(maxX, e.transform->position[0]);
+                    minZ = (std::min)(minZ, e.transform->position[2]);
+                    maxZ = (std::max)(maxZ, e.transform->position[2]);
+                }
+            }
+            Resource::BlockConfigDesc bc;
+            bc.blocksPerAxis = bpa;
+            bc.minCellSize = minCell;
+            bc.maxCellSize = maxCell;
+            if (maxX > minX || maxZ > minZ) {
+                const float mapExtent = (std::max)(maxX - minX, maxZ - minZ);
+                bc.cellSize = (std::clamp)(mapExtent / static_cast<float>(bpa), minCell, maxCell);
+            }
+            sceneData->blockConfig = bc;
+        }
+    }
+
+    // 空间索引世界范围（OctreeSystem，OctreeCullingAndRaycaster.md §7.5）：
+    // JSON 显式配置（worldConfig.worldSize>0）直接用；缺失则按实体 worldBounds 全范围推导
+    // worldSize = max(spanX,spanY,spanZ) * 1.2 + 包围盒中心（与 OctreeSystem::Build 阶段 1 同款，
+    // 保证 Octree 初始化即覆盖全场景，逐实体 AddEntity 不再触发动态扩容 O(N²) 卡死）
+    {
+        if (m_desc.worldConfig && m_desc.worldConfig->IsConfigured()) {
+            sceneData->worldConfig = m_desc.worldConfig;
+        } else {
+            Resource::WorldConfigDesc wc;
+            float cMinX = 1e30f, cMaxX = -1e30f, cMinY = 1e30f, cMaxY = -1e30f, cMinZ = 1e30f, cMaxZ = -1e30f;
+            for (const auto &e : m_desc.entities) {
+                if (e.transform && e.transform->position.size() >= 3) {
+                    // 防御性修复（2026-08-10）：跳过非有限 position——NaN/Inf 参与 min/max 会污染
+                    // 包围盒推断（cMinX..cMaxZ 变 NaN）→ worldSize NaN → halfCells (int)ceil(NaN) UB
+                    // → 格子遍历爆炸。此处仅初始化推断（口径 = 实体位置点，不含 mesh radius）；
+                    // 完整覆盖由 OctreeSystem::Build 阶段 1 按真实 worldBounds 兜底（max 取大）。
+                    const float px = e.transform->position[0];
+                    const float py = e.transform->position[1];
+                    const float pz = e.transform->position[2];
+                    if (!std::isfinite(px) || !std::isfinite(py) || !std::isfinite(pz))
+                        continue;
+                    cMinX = (std::min)(cMinX, px);
+                    cMaxX = (std::max)(cMaxX, px);
+                    cMinY = (std::min)(cMinY, py);
+                    cMaxY = (std::max)(cMaxY, py);
+                    cMinZ = (std::min)(cMinZ, pz);
+                    cMaxZ = (std::max)(cMaxZ, pz);
+                }
+            }
+            if (cMaxX > cMinX || cMaxY > cMinY || cMaxZ > cMinZ) {
+                wc.center[0] = (cMinX + cMaxX) * 0.5f;
+                wc.center[1] = (cMinY + cMaxY) * 0.5f;
+                wc.center[2] = (cMinZ + cMaxZ) * 0.5f;
+                const float spanX = cMaxX - cMinX, spanY = cMaxY - cMinY, spanZ = cMaxZ - cMinZ;
+                wc.worldSize = (std::max)({spanX, spanY, spanZ}) * 1.2f;
+            }
+            sceneData->worldConfig = wc;
+        }
+    }
 
     // 携带原始依赖/materials/baseURL（供编辑器重新导出用）
     sceneData->originalDependencies = m_originalDependencies;
@@ -366,9 +479,12 @@ void SceneConstructor::OnDependenciesLoaded() {
             auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
             size_t bufSize = gpuData.size() * sizeof(Renderer::MaterialConstants);
 
-            // DEFAULT 堆，初始 COPY_DEST 状态（COPY 队列可直接写入）
+            // DEFAULT 堆，初始 COMMON 状态（COPY 命令列表 CopyResource 目标必须以 COMMON 创建，
+            // 不能用 COPY_DEST：GBV #942 "Resources used in COPY command lists must start out in the
+            // D3D12_RESOURCE_STATE_COMMON state. This includes Resources created in a COPY_SOURCE or COPY_DEST state."
+            // SRV 状态由 DIRECT 队列 barrier 转出）
             auto bufH = gpuMgr.CreateBuffer(device, bufSize, L"Scene_MatBuf", D3D12_HEAP_TYPE_DEFAULT,
-                                            D3D12_RESOURCE_STATE_COPY_DEST);
+                                            D3D12_RESOURCE_STATE_COMMON);
             if (!bufH.IsValid())
                 return nullptr;
             shared->defaultBufHandle = bufH;
@@ -398,16 +514,16 @@ void SceneConstructor::OnDependenciesLoaded() {
             cpCmd.Get()->CopyResource(gpuMgr.GetResource(bufH), upRes);
             cpCmd.Close();
 
-            // DIRECT 屏障命令（COPY_DEST → SRV）
+            // DIRECT 屏障命令（COMMON → SRV；资源初始为 COMMON，barrier 必须从 COMMON 转出）
             uint64_t directCompleted = cmdMgr->GetCompletedFenceValue(D3D12_COMMAND_LIST_TYPE_DIRECT);
             uint64_t directFence = cmdMgr->GetNextSequence();
             auto drAllocH = cmdMgr->AcquireAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(directCompleted);
             auto *drAlloc = cmdMgr->GetAllocator<D3D12_COMMAND_LIST_TYPE_DIRECT>(drAllocH);
             auto drCmdH = cmdMgr->AcquireCommandListHandle<D3D12_COMMAND_LIST_TYPE_DIRECT>(drAlloc);
             auto drCmd = cmdMgr->GetCommandList<D3D12_COMMAND_LIST_TYPE_DIRECT>(drCmdH);
-            auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                gpuMgr.GetResource(bufH), D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(gpuMgr.GetResource(bufH), D3D12_RESOURCE_STATE_COMMON,
+                                                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
+                                                                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
             drCmd.Get()->ResourceBarrier(1, &barrier);
             drCmd.Close();
 
@@ -525,7 +641,8 @@ void SceneConstructor::OnSceneReady(uint64_t sceneId) {
 void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::EntityDesc &eDesc,
                                        const std::unordered_map<std::string, GeometryHandle> &geoMap,
                                        const std::unordered_map<std::string, MaterialHandle> &matMap,
-                                       ECS::Registry *registry, Boot::GameContext *context) {
+                                       const Resource::SceneEnvironment &sceneEnv, ECS::Registry *registry,
+                                       Boot::GameContext *context) {
     auto *log = context->Logging;
     auto *geoMgr = context->GeometryResourceManager;
 
@@ -543,6 +660,38 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
         registry->AddComponent<ECS::NameComponent>(entity, std::move(nameComp));
     }
 
+    // 0a. StaticComponent — 静态实体持久化（v2 方案，见 StaticEntityPersistentBuffer.md）
+    //     加载时按 persistentId 从 precomputed 取回烘焙矩阵（基准值，仅首次加载消费）；
+    //     运行时依赖 worldDirty / 缓存矩阵 / 持久缓冲地址（Step3 填充）
+    {
+        const auto &env = sceneEnv;
+        const Resource::PrecomputedStaticData *pre = env.precomputed ? &*env.precomputed : nullptr;
+        bool isStatic = false;
+        ECS::StaticComponent sc;
+        if (pre && !eDesc.persistentId.empty()) {
+            for (const auto &pi : pre->instances) {
+                if (pi.persistentId == eDesc.persistentId) {
+                    if (pi.world.size() >= 16)
+                        std::memcpy(&sc.cachedWorld, pi.world.data(), sizeof(DirectX::XMFLOAT4X4));
+                    if (pi.worldInvTranspose.size() >= 16) {
+                        std::memcpy(&sc.cachedWorldInvTranspose, pi.worldInvTranspose.data(),
+                                    sizeof(DirectX::XMFLOAT4X4));
+                    } else {
+                        sc.cachedWorldInvTranspose = sc.cachedWorld; // 均匀缩放：worldInvTranspose = world
+                    }
+                    sc.worldDirty = false; // 烘焙值就绪，无需运行时重算
+                    isStatic = true;
+                    break;
+                }
+            }
+        }
+        // 未在 precomputed 命中 → 按场景默认动静策略分配（默认 static）
+        if (!isStatic && env.entityMotionPolicy == "static")
+            isStatic = true;
+        if (isStatic)
+            registry->AddComponent<ECS::StaticComponent>(entity, std::move(sc));
+    }
+
     // 1. Transform
     if (eDesc.transform) {
         const auto &t = *eDesc.transform;
@@ -551,7 +700,8 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
             t.rotation.size() >= 4 ? t.rotation[0] : 0.0f, t.rotation.size() >= 4 ? t.rotation[1] : 0.0f,
             t.rotation.size() >= 4 ? t.rotation[2] : 0.0f, t.rotation.size() >= 4 ? t.rotation[3] : 1.0f);
         DirectX::XMFLOAT3 scl(t.scale[0], t.scale[1], t.scale[2]);
-        registry->AddComponent<ECS::TransformComponent>(entity, pos, rot, scl);
+        // 剔除距离（MPD @CullFar，承载于变换组件；缩放联动见 TransformComponent::GetEffectiveCullDistance）
+        registry->AddComponent<ECS::TransformComponent>(entity, pos, rot, scl, t.cullDistance);
     }
 
     // 2. Mesh
@@ -561,6 +711,9 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
         if (it != geoMap.end() && it->second.IsValid()) {
             GeometryHandle geoHandle = it->second;
             geoMgr->Retain(geoHandle);
+
+            log->Debug("[SceneConstructor] Entity '{}' mesh geometry='{}' found in geoMap, handle(idx={})", eDesc.name,
+                       m.geometry, geoHandle.index);
 
             ECS::MeshComponent meshComp;
             LODMesh lodMesh;
@@ -572,24 +725,71 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
                 meshComp.localBounds = *bounds;
             }
 
-            // 查找材质（数组化，索引 = SubMesh 索引）
-            if (!m.materials.empty()) {
-                meshComp.materialSlots.reserve(m.materials.size());
-                for (const auto &matKey : m.materials) {
-                    auto matIt = matMap.find(matKey);
-                    if (matIt != matMap.end() && matIt->second.IsValid()) {
-                        meshComp.materialSlots.push_back(matIt->second);
-                        log->Info("[SceneConstructor][Diag] Entity '{}' slot#{}: '{}' -> handleIndex={}", eDesc.name,
-                                  meshComp.materialSlots.size() - 1, matKey, matIt->second.index);
-                    } else {
-                        log->Warn("[SceneConstructor][Diag] Entity '{}' slot#{}: '{}' NOT FOUND in matMap", eDesc.name,
-                                  meshComp.materialSlots.size(), matKey);
-                        meshComp.materialSlots.push_back(Resource::MaterialHandle::Invalid());
+            // 渲染槽位：填充单个 RenderSlotComponent（§4.1b/c/d，Slot.shaderType = 渲染器标记）
+            // 取代已废弃的三材质组件分发挂载（§4.1a PBRMaterialComponent 等）
+            const std::vector<SubMeshInfo> *subMeshes = geoMgr->GetSubMeshInfo(geoHandle);
+            log->Debug("[SceneConstructor] Entity '{}' GetSubMeshInfo: {} subMeshes (ptr={})", eDesc.name,
+                       subMeshes ? subMeshes->size() : 0, (void *)subMeshes);
+            ECS::RenderSlotComponent slotComp;
+            // 按材质 key 聚合（定案 7.2a，2026-08-08）：同材质的多个子网格区间并入同一槽位，
+            // 取消"槽位 i ↔ 子网格 i 一对一"——子网格不应决定槽位/桶粒度（否则桶=子网格数，
+            // ExecuteIndirect 命令爆炸）。槽位粒度 = 材质（渲染器），subMeshRanges 聚合多段。
+            for (size_t i = 0; i < m.materials.size(); ++i) {
+                auto matIt = matMap.find(m.materials[i]);
+                if (matIt == matMap.end() || !matIt->second.IsValid()) {
+                    log->Warn("[SceneConstructor][Diag] Entity '{}' slot#{}: '{}' NOT FOUND in matMap", eDesc.name, i,
+                              m.materials[i]);
+                    continue;
+                }
+
+                // 路由键：MaterialData.name = .mat shader 字符串（MaterialLoadTask L78）
+                const MaterialData *md =
+                    context->MaterialMgr ? context->MaterialMgr->GetMaterial(matIt->second) : nullptr;
+                ShaderType st = md ? ParseShaderType(md->name) : ShaderType::Unknown;
+
+                // 查找同材质槽位（materials 数量小，线性查找；用索引避免 push_back 失效指针）
+                int slotIdx = -1;
+                for (size_t j = 0; j < slotComp.slots.size(); ++j) {
+                    if (slotComp.slots[j].material == matIt->second) {
+                        slotIdx = static_cast<int>(j);
+                        break;
                     }
                 }
-            } else {
-                log->Warn("[SceneConstructor][Diag] Entity '{}' mesh has NO materials array (materials.empty)",
-                          eDesc.name);
+                if (slotIdx < 0) {
+                    ECS::RenderSlot newSlot;
+                    newSlot.material = matIt->second;
+                    newSlot.shaderType = st;
+                    slotComp.slots.push_back(std::move(newSlot));
+                    slotIdx = static_cast<int>(slotComp.slots.size() - 1);
+                }
+
+                log->Debug("[SceneConstructor] Entity '{}' slot#{}: material='{}' handleIdx={} shaderType={}",
+                           eDesc.name, i, m.materials[i], matIt->second.index, static_cast<int>(st));
+
+                // 子网格区间并入该材质槽（同材质多子网格 → subMeshRanges 多段聚合）
+                if (subMeshes && i < subMeshes->size()) {
+                    slotComp.slots[slotIdx].subMeshRanges.push_back(
+                        {(*subMeshes)[i].startIndex, (*subMeshes)[i].indexCount});
+                    log->Debug("[SceneConstructor] Entity '{}' slot#{}: subMeshRange({},{}) from GetSubMeshInfo",
+                               eDesc.name, i, (*subMeshes)[i].startIndex, (*subMeshes)[i].indexCount);
+                } else if (subMeshes && !subMeshes->empty()) {
+                    slotComp.slots[slotIdx].subMeshRanges.push_back(
+                        {(*subMeshes)[0].startIndex, (*subMeshes)[0].indexCount});
+                } else {
+                    log->Warn("[SceneConstructor] Entity '{}' slot#{}: NO submesh info, skipping", eDesc.name, i);
+                }
+                // [Diag] 槽位子网格区间统计（验证聚合是否生效：slotRanges>1 表示同材质多段聚合成功；
+                // 恒 1 → 多子网格实体只画第 1 段 → 与 Builder multiSegBuckets=0 交叉印证）
+                log->Info(
+                    "[SceneConstructor][Diag] Entity '{}' slot#{}: '{}' -> handleIndex={} shaderType={} slotRanges={}",
+                    eDesc.name, i, m.materials[i], matIt->second.index, static_cast<int>(st),
+                    slotComp.slots[slotIdx].subMeshRanges.size());
+            }
+            if (slotComp.IsValid()) {
+                registry->AddComponent<ECS::RenderSlotComponent>(entity, std::move(slotComp));
+                // §4.1b/c/d：实体 CRUD → 缓存表 MarkDirty（下帧 Builder 检查后重建）
+                if (context && context->RenderSlotCache)
+                    context->RenderSlotCache->MarkDirty();
             }
 
             registry->AddComponent<ECS::MeshComponent>(entity, std::move(meshComp));
@@ -686,38 +886,29 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
     if (eDesc.water) {
         const auto &wd = *eDesc.water;
 
+        // 调试：检查 mesh 和 materials 状态
+        if (eDesc.mesh) {
+            log->Debug("[SceneConstructor] Water '{}' mesh geometry='{}' materials.size={}", eDesc.name,
+                       eDesc.mesh->geometry, eDesc.mesh->materials.size());
+        } else {
+            log->Debug("[SceneConstructor] Water '{}' has no mesh component", eDesc.name);
+        }
+
         // 查找材质（MeshDesc 中有 materials[]，用第一个 key 查找 matMap）
         if (eDesc.mesh && !eDesc.mesh->materials.empty()) {
             auto matIt = matMap.find(eDesc.mesh->materials[0]);
             if (matIt != matMap.end() && matIt->second.IsValid()) {
-                // 分配持久 ObjectConstants CB（UPLOAD 堆，贯穿生命周期）
-                D3D12_GPU_VIRTUAL_ADDRESS cbAddr = 0;
-                if (context && context->DeviceContext) {
-                    auto &gpuMgr = Resource::GpuResourceManager::GetInstance();
-                    ID3D12Device *device = context->DeviceContext->GetDevice();
-                    auto cbBuf =
-                        gpuMgr.CreateBuffer(device, sizeof(Renderer::ObjectConstants), L"WaterObjCB_Persistent",
-                                            D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
-                    if (cbBuf.IsValid()) {
-                        ID3D12Resource *cbRes = gpuMgr.GetResource(cbBuf);
-                        void *mapped = nullptr;
-                        cbRes->Map(0, nullptr, &mapped);
-                        memset(mapped, 0, sizeof(Renderer::ObjectConstants));
-                        cbRes->Unmap(0, nullptr);
-                        cbAddr = cbRes->GetGPUVirtualAddress();
-                    }
-                }
-
+                // 不再创建持久 ObjectConstants CB（§10.5 数据上传铁律：Builder 填 CPU 数据，
+                // FrameSync 每帧 RingBuffer 上传，禁止 ConstructEntity 分配 GPU 资源）
                 ECS::WaterComponent waterComp;
                 waterComp.materialHandle = matIt->second;
                 waterComp.amplitude = wd.amplitude;
                 waterComp.frequency = wd.frequency;
                 waterComp.speed = wd.speed;
                 waterComp.direction = wd.direction;
-                waterComp.objectCBAddress = cbAddr;
                 registry->AddComponent<ECS::WaterComponent>(entity, waterComp);
-                log->Info("[SceneConstructor] WaterComponent added to '{}': wave=({},{},{},{}) cbAddr={:#x}",
-                          eDesc.name, wd.amplitude, wd.frequency, wd.speed, wd.direction, cbAddr);
+                log->Info("[SceneConstructor] WaterComponent added to '{}': wave=({},{},{},{})", eDesc.name,
+                          wd.amplitude, wd.frequency, wd.speed, wd.direction);
             }
         } else {
             log->Warn("[SceneConstructor] Water '{}' has no material, skipped", eDesc.name);
@@ -733,7 +924,7 @@ void SceneConstructor::ConstructEntity(ECS::Entity entity, const Resource::Entit
     // 7. 递归 children
     for (const auto &childDesc : eDesc.children) {
         ECS::Entity child = registry->CreateEntity();
-        ConstructEntity(child, childDesc, geoMap, matMap, registry, context);
+        ConstructEntity(child, childDesc, geoMap, matMap, sceneEnv, registry, context);
     }
 }
 
