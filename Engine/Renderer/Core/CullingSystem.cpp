@@ -6,12 +6,15 @@
 namespace DX12Engine::Renderer {
 
 void CullingSystem::SetCamera(const PredictedCameraData &camera) {
-    // 构建剔除视锥（宽远平面：CullFarPlane）
-    m_cullFrustum.BuildFromCamera(camera.Position, camera.Forward, camera.Up, camera.FOV, camera.AspectRatio,
+    // 构建剔除视锥（宽远平面 CullFarPlane + FOV 扩展余量）
+    // 大型引擎惯例：剔除视锥 > 渲染视锥，侧平面外扩留 margin，
+    // 避免视野边缘内容（AABB 恰跨平面）被误剔后画面闪烁/缺内容
+    const float cullFov = camera.FOV * 1.1f; // 10% FOV 扩展（可调）
+    m_cullFrustum.BuildFromCamera(camera.Position, camera.Forward, camera.Up, cullFov, camera.AspectRatio,
                                   camera.NearPlane, camera.CullFarPlane);
     m_hasCullFrustum = true;
 
-    // 构建渲染视锥（紧远平面：FarPlane）
+    // 构建渲染视锥（紧远平面 FarPlane，原始 FOV）
     m_renderFrustum.BuildFromCamera(camera.Position, camera.Forward, camera.Up, camera.FOV, camera.AspectRatio,
                                     camera.NearPlane, camera.FarPlane);
 }

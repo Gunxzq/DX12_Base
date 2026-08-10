@@ -302,6 +302,44 @@ FrameDriver 已有 `ExecutePhase(TaskPhase::PreCulling)`，且剔除结果天然
 
 这样动静分离后，后台构建只处理动态单元，静态单元复用上一次的结果，大幅降低构建频率。
 
+> **2026-08-06 补充（块配置化，UE World Partition 模式）**：查询格子粒度不硬编码——`OctreeSystem::m_cellSize=250`（查询单元）与块 cellSize（数据组织单元）**解耦**：块大小由场景 JSON `blockConfig` 决定（缺失时加载按地图范围推导），查询格子可保持 250 或随块联动。块跨格子正常（格子级视锥剪枝仍生效）。详见 `08_MapScenePipeline.md` §8.7、`GPU-Drive.md` §4.1。
+
+> **2026-08-10 定案（空间索引维护双轨制——静态 Build + 动态 AddEntity）**：
+>
+> **背景**：Editor 场景加载（City 6854 实体）曾逐实体 `AddEntity` 重建 → 动态扩容逐实体触发（worldSize=3000 小于 City 场景范围 X 0~1875、Z -1905~0，且扩容中心化基准与入格基准不一致）→ O(N²) 全量重哈希卡死（`InstanceCulling_L2c_Todo.md` §11 阻塞，2026-08-09）。
+>
+> **定案**（对齐大型引擎：UE World Partition 静态预计算 / Unity 空间哈希静态烘焙）：
+>
+> | 轨 | API | 场景 | 语义 |
+> |:--|:--|:--|:--|
+> | **静态轨（预计算）** | `Build(entries)` | 场景加载/重建、Tab 切换（内容确定） | 阶段 1 按全部实体包围盒一次算定 `worldCenter/worldSize`（覆盖 + 1.2 余量，封顶 65536）；阶段 2 批量 `InsertEntry`，**O(N) 零扩容** |
+> | **动态轨（增量）** | `AddEntity(...)` | 运行时 spawn/编辑器拖入新实体（低频） | 保留动态扩容兜底（须相对 worldCenter 基准 + isfinite 防御 + worldSize 封顶） |
+>
+> **约束**：
+> - ❌ 禁止场景加载/重建路径逐实体 `AddEntity`（O(N²) 扩容卡死，2026-08-09 事故）；
+> - ✅ 场景加载必须收集全部 `CulledSet::Entry` → 一次 `Build()`；剔除元数据（`cullDistance` @CullFar / `forceVisible`）由 `SetEntityCullData` 在 Build 后补录（语义与 AddEntity 一致）；
+> - ✅ Game 端无空间索引管线时用 `RenderSlotCache::DispatchAll` 全量兜底（粗筛=全量，Builder 内部精筛），不依赖 Octree；
+> - ✅ `AddEntity` 仅限运行时动态添加，扩容带 worldSize 上限 + NaN/Inf 防御 + 相对 worldCenter 基准。
+>
+> **实现**（2026-08-10 落地）：`OctreeSystem::Build` 两阶段化 + `SetEntityCullData`；`Editor.cpp` `EditorOctreeCulling` 重建改收集后一次 `Build()`（块实体 clusterBounds + 散实体 worldBounds 均收进 Entry 列表）。
+>
+> **2026-08-10 补充（worldConfig——Octree 世界范围基于地图可配置）**：
+>
+> **背景**：`Editor.cpp` 曾硬编码 `Initialize({0,0,0}, 3000)`，worldSize=3000 小于 City 场景范围（X 0~1875、Z -1905~0）→ 逐实体 AddEntity 触发动态扩容 → O(N²) 卡死（2026-08-09 阻塞）。worldSize 与地图范围脱钩是根因之一。
+>
+> **定案**（对齐大型引擎：UE World Partition 网格尺寸 WorldSettings 可配置 / Unity 场景边界显式或推导）：
+> - **显式配置优先**：`scene.json` 顶层可选 `worldConfig { worldSize, center[3] }`（缺失 = 推导模式）；
+> - **缺失推导**：按实体 worldBounds 全范围推导 `worldSize = max(spanX,spanY,spanZ) * 1.2` + 包围盒中心（与 `Build` 阶段 1 同款，SceneConstructor 复用 mapExtent 逻辑扩展 3D）；
+> - **四端一致**（规则 #23）：`WorldConfigDesc`（SceneDescription.h）+ `ParseWorldConfig`（SceneLoader.cpp）+ SceneConstructor 推导/复用 + `ExportToDescription` 固化写回；`Schemas/scene.schema.json` 加 `worldConfig` 定义；
+> - **兜底**：`OctreeSystem::Build` 两阶段已按全部实体包围盒算覆盖（+1.2 余量），JSON 未配置也永不越界。
+>
+> **实现**（2026-08-10 落地）：`Editor.cpp:365` 硬编码 3000 → 从场景配置读（EditorSceneManager 提供当前场景 worldConfig，缺失回退 Build 自动推导）。
+>
+> **2026-08-10 记录（资产转换器导出说明）**：
+> - **现状**：资产转换器（AssetTool 等）**不导出 worldSize/worldConfig**——场景 JSON 不含空间哈希划分参数；
+> - **引擎兜底**：SceneConstructor（SceneConstructor.cpp:386-422）推导——JSON 显式 worldConfig 优先，缺失按实体 position 包围盒推导 `worldSize = max(spanX,spanY,spanZ)*1.2` + 中心（NaN/Inf 防御），Build 阶段 1 按真实 worldBounds 取大兜底（永不越界、不触发扩容卡死）——**无导出时影响不大**（2026-08-10 检查确认）；
+> - **后续转换器推算（待办）**：后续资产转换器导出场景时**应推算此部分**——按实体 worldBounds 全范围推导 `worldSize = max(span)*1.2` + 中心，写入 scene JSON 顶层 `worldConfig { worldSize, center[3] }`（显式配置优先，引擎四端一致消费——规则 #23）——与 SceneConstructor 推导同口径，保证空间哈希划分范围与地图一致。
+
 ### 7.6 Raycaster 抽象层
 
 `VisibleRaycaster` 将改造为可见集驱动，不再直接遍历 `ECS::Registry`：
@@ -334,7 +372,7 @@ Editor 端：传入 EditorViewport 的可见集（已按 sceneId 过滤）
 | **方向三：Job 化 + 结果广播** | 保持独立 Culling/LODSystem 并行执行，结果合并为按实体索引的紧凑数组，Builder 屏障等待就绪 | ✅ 对应本文 §7 线程化方案（后台构建 + atomic 交换 + 延迟一帧） |
 | **方向四：构建器流水线 + 帧延迟容忍** | 本帧剔除结果用上一帧，剔除与构建完全并行 | ✅ 对应本文 §7.4（FrameDriver 阶段分离天然延迟一帧） |
 
-**演进路径（cull.md 原表）**：`CullingResult` 扁平位集 → CullingSystem 内部并行 → 空间划分（网格/八叉树）→ 静态场景 PVS → GPU 剔除（Compute+Indirect Draw）。现状：空间划分已由 OctreeSystem（本文）落地；PVS 见 `Docs/architecture/core/EngineOverview.md`（场景级缓存）与 `GPU-Drive.md`；扁平位集/GPU 剔除为远期（规模未到，§7.10 缓行结论一致）。
+**演进路径（cull.md 原表）**：`CullingResult` 扁平位集 → CullingSystem 内部并行 → 空间划分（网格/八叉树）→ 静态场景 PVS → GPU 剔除（Compute+Indirect Draw）。现状：空间划分已由 OctreeSystem（本文）落地；**分层剔除蓝图已定稿（2026-08-06，`GPU-Drive.md`）**——L1 CPU 块级粗筛（本文，✅）+ L2 GPU 实例级剔除（Compute+Indirect Draw，📋 待建，块内实例矩阵 + 视锥剔除 + 间接绘制）+ L3 遮挡（远期，HZB/保守化 PVS）。PVS 降级为 L3 远期可选项（上版失败教训见 `BugFix_Editor_StaticDirtyState_And_OutlinerIssues.md` §五，重做须保守化：只剔小物体、排除地块）。
 
 ### 8.2 Raycaster.md 要点（阶段任务划分）
 
