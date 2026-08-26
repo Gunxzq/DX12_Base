@@ -39,7 +39,7 @@ public:
                     D3D12_GPU_DESCRIPTOR_HANDLE worldPosSrv, D3D12_GPU_DESCRIPTOR_HANDLE emissiveSrv,
                     D3D12_GPU_DESCRIPTOR_HANDLE ssaoSrv, D3D12_GPU_DESCRIPTOR_HANDLE envMapSrv = {},
                     D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySrv = {}, D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV = {},
-                    D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = {});
+                    D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV = {}, D3D12_GPU_DESCRIPTOR_HANDLE depthSrv = {});
 
     /// 绘制全屏 Quad（4 顶点 TRIANGLESTRIP）
     void Draw(CommandList &cmdList);

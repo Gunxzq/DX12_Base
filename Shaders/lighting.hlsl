@@ -43,6 +43,7 @@ Texture2D gNormalRT : register(t21);
 Texture2D gMaterialRT : register(t22);
 Texture2D gWorldPosRT : register(t23);
 Texture2D gEmissiveRT : register(t24);
+Texture2D gDepthMap : register(t25); // 主相机深度（2026-08-13：worldPos 深度重建——标准延迟光照，光照 PASS 输入主深度）
 Texture2D gSsaoMap : register(t16);
 
 SamplerState gSamplerPointClamp : register(s3);
@@ -89,9 +90,15 @@ float4 PS(QuadOut pin) : SV_Target
     float3 N = normalize(gNormalRT.Sample(gSamplerPointClamp, pin.UV).xyz * 2.0f - 1.0f);
     float4 mat = gMaterialRT.Sample(gSamplerPointClamp, pin.UV);
     float metallic = mat.r, roughness = mat.g, ao = mat.b;
-    float3 worldPos = gWorldPosRT.Sample(gSamplerPointClamp, pin.UV).xyz;
+
+    // NDC 坐标（UV→[-1,1] Y 翻转 + 深度 z∈[0,1]）经 gInvViewProj 逆变换 → 世界坐标。
+    // 替代 gWorldPosRT 读取（保留声明兼容，半精度 RT 精度有限 + 标准做法需深度输入）
+    float depth = gDepthMap.Sample(gSamplerPointClamp, pin.UV).r;
+    float4 ndc = float4(pin.UV.x * 2.0f - 1.0f, 1.0f - pin.UV.y * 2.0f, depth, 1.0f);
+    float4 worldPosH = mul(ndc, gInvViewProj);
+    float3 worldPos = worldPosH.xyz / worldPosH.w;
     float3 V = normalize(gCameraPos - worldPos);
-    float ssao = gSsaoMap.SampleLevel(gSamplerPointClamp, pin.UV, 0.0f).r; // 2026-08-10：直采——未启用 SSAO 时 gSsaoMap 为 white2D fallback（采样 .r=1 无影响）
+    float ssao = gSsaoMap.SampleLevel(gSamplerPointClamp, pin.UV, 0.0f).r;
     float3 ambient = gAmbientLight.xyz * gAmbientLight.w * albedo * ao * ssao;
     float3 direct = 0;
 

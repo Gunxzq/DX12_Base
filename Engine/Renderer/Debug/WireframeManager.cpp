@@ -183,8 +183,14 @@ void WireframeManager::UpdateAndUpload(uint64_t fence, const Camera &camera) {
         cbData.lineWidth = m_lineWidth;
         cbData.referenceDistance = m_referenceDistance;
 
-        void *mapped;
-        cbRes->Map(0, nullptr, &mapped);
+        void *mapped = nullptr;
+        HRESULT mapHr = cbRes->Map(0, nullptr, &mapped);
+        // 2026-08-19 防御加固：Map 失败（HRESULT 失败 / mapped 为 nullptr）时资源【从未被映射】——
+        // 绝不 Unmap（#310）也不 memcpy（写 0x0 崩溃），跳过上传并记录
+        if (FAILED(mapHr) || !mapped) {
+            Logger::Logger::GetInstance()->Warn("[WireframeManager] LineCB Map failed: hr=0x{:08X}", (unsigned)mapHr);
+            return;
+        }
         memcpy(mapped, &cbData, sizeof(cbData));
         cbRes->Unmap(0, nullptr);
     }
@@ -198,8 +204,13 @@ void WireframeManager::UpdateAndUpload(uint64_t fence, const Camera &camera) {
     if (byteSize > m_vbCapacityBytes)
         byteSize = m_vbCapacityBytes; // 截断保护（理论上不会触发）
 
-    void *mapped;
-    vbRes->Map(0, nullptr, &mapped);
+    void *mapped = nullptr;
+    HRESULT mapHr = vbRes->Map(0, nullptr, &mapped);
+    // 2026-08-19 防御加固：Map 失败时绝不 Unmap（#310）/memcpy（写 0x0），跳过并记录
+    if (FAILED(mapHr) || !mapped) {
+        Logger::Logger::GetInstance()->Warn("[WireframeManager] LineVB Map failed: hr=0x{:08X}", (unsigned)mapHr);
+        return;
+    }
     if (byteSize > 0) {
         memcpy(mapped, m_lines.data(), byteSize);
     }

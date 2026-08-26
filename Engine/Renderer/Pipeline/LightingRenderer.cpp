@@ -87,12 +87,13 @@ void LightingRenderer::CreateRootSignature() {
     //   slot 9: t15 ReflectionCubemapArray                  (SRV 描述符表)
     //   slot 10: t11,space1 ShadowParams                       (SRV 描述符表)
     //   slot 11: t14,space1 gShadowMaps[]                      (无界纹理数组 SRV)
-    CD3DX12_ROOT_PARAMETER params[12];
+    //   slot 12: t25 DepthMap                                  (SRV 描述符表——主相机深度，2026-08-13 worldPos 重建)
+    CD3DX12_ROOT_PARAMETER params[13];
 
     params[0].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
     params[1].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_PIXEL);
 
-    CD3DX12_DESCRIPTOR_RANGE rtRanges[10];
+    CD3DX12_DESCRIPTOR_RANGE rtRanges[11];
     for (uint32_t i = 0; i < 5; ++i)
         rtRanges[i].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 20 + i, 0); // t20..t24: G-buffer 5 张
     rtRanges[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 16, 0);         // t16: SSAO
@@ -100,7 +101,8 @@ void LightingRenderer::CreateRootSignature() {
     rtRanges[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 15, 0);         // t15: Cubemap Array
     rtRanges[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 11, 1);         // t11,space1: ShadowParams
     rtRanges[9].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 14, 1);  // t14,space1: gShadowMaps[] (无界)
-    for (uint32_t i = 0; i < 10; ++i)
+    rtRanges[10].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 25, 0);        // t25: DepthMap（主相机深度，2026-08-13）
+    for (uint32_t i = 0; i < 11; ++i)
         params[2 + i].InitAsDescriptorTable(1, &rtRanges[i], D3D12_SHADER_VISIBILITY_PIXEL);
 
     // 静态采样器 s3: PointClamp, s10: EnvMap 线性 Clamp, s11: 阴影比较
@@ -114,7 +116,7 @@ void LightingRenderer::CreateRootSignature() {
                            D3D12_COMPARISON_FUNC_LESS_EQUAL, D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK);
 
     CD3DX12_ROOT_SIGNATURE_DESC rsDesc;
-    rsDesc.Init(12, params, 3, staticSamplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    rsDesc.Init(13, params, 3, staticSamplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     Microsoft::WRL::ComPtr<ID3DBlob> signature, error;
     HRESULT hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error);
@@ -169,7 +171,8 @@ void LightingRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRES
                                   D3D12_GPU_DESCRIPTOR_HANDLE worldPosSrv, D3D12_GPU_DESCRIPTOR_HANDLE emissiveSrv,
                                   D3D12_GPU_DESCRIPTOR_HANDLE ssaoSrv, D3D12_GPU_DESCRIPTOR_HANDLE envMapSrv,
                                   D3D12_GPU_DESCRIPTOR_HANDLE cubemapArraySrv,
-                                  D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV) {
+                                  D3D12_GPU_DESCRIPTOR_HANDLE shadowDataSRV, D3D12_GPU_DESCRIPTOR_HANDLE shadowMapSRV,
+                                  D3D12_GPU_DESCRIPTOR_HANDLE depthSrv) {
     if (!m_pso || !m_rootSignature)
         return;
 
@@ -209,6 +212,10 @@ void LightingRenderer::BeginFrame(CommandList &cmdList, D3D12_GPU_VIRTUAL_ADDRES
     // slot 11: 阴影贴图无界数组 gShadowMaps[]（方向光/点光源共用）
     if (shadowMapSRV.ptr != 0)
         cmdList.Get()->SetGraphicsRootDescriptorTable(11, shadowMapSRV);
+
+    // slot 12: 主相机深度（2026-08-13：worldPos 深度重建——标准延迟光照，光照 PASS 输入主深度）
+    if (depthSrv.ptr != 0)
+        cmdList.Get()->SetGraphicsRootDescriptorTable(12, depthSrv);
 }
 
 void LightingRenderer::Draw(CommandList &cmdList) {

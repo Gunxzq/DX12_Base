@@ -1,4 +1,5 @@
 #include "SsaoRenderer.h"
+#include "Logger/Logger.h" // 2026-08-19：Map 失败防御日志（统一 Map/Unmap 加固）
 #include "Renderer/RHI/Command/CommandList/CommandList.h"
 #include "Renderer/RHI/D3D12DeviceContext.h"
 #include "Renderer/Utils/ShaderUtils.h"
@@ -81,7 +82,13 @@ void SsaoRenderer::Initialize() {
                                         nullptr, IID_PPV_ARGS(&m_ssaoCB));
         if (m_ssaoCB) {
             m_ssaoCB->SetName(L"SsaoCB");
-            m_ssaoCB->Map(0, nullptr, &m_ssaoCBMapped);
+            // 2026-08-19 防御加固：Map 失败时不设置 m_ssaoCBMapped（保持 null）——
+            // 后续使用点/Shutdown 已有判空保护，绝不 Unmap 未映射资源（#310）
+            HRESULT mapHr = m_ssaoCB->Map(0, nullptr, &m_ssaoCBMapped);
+            if (FAILED(mapHr) || !m_ssaoCBMapped) {
+                Logger::Logger::GetInstance()->Warn("[SsaoRenderer] SsaoCB Map failed: hr=0x{:08X}", (unsigned)mapHr);
+                m_ssaoCBMapped = nullptr;
+            }
         }
     }
 
