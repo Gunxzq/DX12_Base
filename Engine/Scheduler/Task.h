@@ -24,6 +24,7 @@ enum class TaskPhase : uint8_t {
     PreCulling,  // 剔除准备：视锥剔除 + LOD 计算（拆分自 PreRender）
     PostCulling, // 剔除后处理：射线检测、遮挡查询等（使用可见集）
     PreRender,   // 渲染准备：构建器并行生成渲染队列
+    FrameSync,   // 帧同步计算
     Render,      // 渲染提交（单线程）
     PostRender,  // 渲染后处理
     Count

@@ -1,5 +1,6 @@
 #include "SkyboxManager.h"
 #include "Common/ThrowHelper.h"
+#include "Logger/Logger.h" // 2026-08-19：Map 失败防御日志（统一 Map/Unmap 加固）
 #include "Resource/Core/DescriptorHeapCollection.h"
 #include "Resource/GpuResourceManager.h"
 #include <DirectXMath.h>
@@ -145,7 +146,12 @@ void SkyboxManager::AllocateObjectCB() {
     }
 
     void *mapped = nullptr;
-    cbRes->Map(0, nullptr, &mapped);
+    HRESULT mapHr = cbRes->Map(0, nullptr, &mapped);
+    // 2026-08-19 防御加固：Map 失败时绝不 Unmap（#310）/memcpy（写 0x0），跳过并记录
+    if (FAILED(mapHr) || !mapped) {
+        Logger::Logger::GetInstance()->Warn("[SkyboxManager] ObjectCB Map failed: hr=0x{:08X}", (unsigned)mapHr);
+        return;
+    }
     memcpy(mapped, &identity, sizeof(DirectX::XMFLOAT4X4));
     cbRes->Unmap(0, nullptr);
 

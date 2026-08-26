@@ -31,8 +31,8 @@ void CameraManager::Initialize(uint32_t initialWidth, uint32_t initialHeight) {
     m_mainCamera.FOV = XMConvertToRadians(60.0f);
     m_mainCamera.AspectRatio = static_cast<float>(initialWidth) / static_cast<float>(initialHeight);
     m_mainCamera.NearPlane = 0.5f;
-    m_mainCamera.FarPlane = 100.0f;
-    m_mainCamera.CullFarPlane = 1000.0f;
+    m_mainCamera.FarPlane = 2500.0f;     // 渲染远平面上限（实际画图边界；Camera.h 默认同步——场景可调小）
+    m_mainCamera.CullFarPlane = 4500.0f; // 剔除远平面上限（计算可见列表边界，> 渲染——边界安全防 pop-in）
     m_mainCamera.Position = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
     // 初始计算一次矩阵

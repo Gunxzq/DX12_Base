@@ -8,7 +8,8 @@ namespace DX12Engine::Renderer {
 
 RingBuffer::~RingBuffer() { Shutdown(); }
 
-bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, const std::wstring &name, D3D12_HEAP_TYPE heapType) {
+bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, const std::wstring &name, D3D12_HEAP_TYPE heapType,
+                            D3D12_RESOURCE_FLAGS flags, D3D12_RESOURCE_STATES initialState) {
     if (m_initialized) {
         Shutdown();
     }
@@ -18,24 +19,38 @@ bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, const std::wstr
     }
 
     m_name = name;
+    m_heapType = heapType;
+    m_initialState = initialState;
 
     CD3DX12_HEAP_PROPERTIES heapProps(heapType);
     auto desc = CD3DX12_RESOURCE_DESC::Buffer(size);
+    desc.Flags = flags;
 
-    HRESULT hr = device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_resource));
+    HRESULT hr = device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc, initialState, nullptr,
+                                                 IID_PPV_ARGS(&m_resource));
 
     if (FAILED(hr)) {
+        wchar_t msg[256];
+        swprintf_s(msg, L"[RingBuffer] CreateCommittedResource failed: hr=0x%08X\n", hr);
+        OutputDebugStringW(msg);
         return false;
     }
 
     if (!m_name.empty())
         m_resource->SetName(m_name.c_str());
 
-    hr = m_resource->Map(0, nullptr, &m_mappedData);
-    if (FAILED(hr)) {
-        m_resource.Reset();
-        return false;
+    if (m_heapType == D3D12_HEAP_TYPE_UPLOAD || m_heapType == D3D12_HEAP_TYPE_READBACK) {
+        hr = m_resource->Map(0, nullptr, &m_mappedData);
+        if (FAILED(hr)) {
+            m_resource.Reset();
+            // 输出错误信息
+            wchar_t msg[512];
+            swprintf_s(msg, L"[RingBuffer] Map failed: hr=0x%08X\n", hr);
+            OutputDebugStringW(msg);
+            return false;
+        }
+    } else {
+        m_mappedData = nullptr; // DEFAULT 堆不可 Map
     }
 
     m_gpuAddress = m_resource->GetGPUVirtualAddress();
@@ -49,6 +64,7 @@ bool RingBuffer::Initialize(ID3D12Device *device, uint32_t size, const std::wstr
     }
 
     m_initialized = true;
+
     return true;
 }
 
@@ -78,6 +94,10 @@ void RingBuffer::Shutdown() {
     m_initialized = false;
 }
 
+bool RingBuffer::IsMappable() const {
+    return m_heapType == D3D12_HEAP_TYPE_UPLOAD || m_heapType == D3D12_HEAP_TYPE_READBACK;
+}
+
 void RingBuffer::Reclaim(uint64_t completedFence) {
     while (!m_pending.empty() && m_pending.front().fence <= completedFence) {
         const auto &alloc = m_pending.front();
@@ -92,44 +112,48 @@ D3D12_GPU_VIRTUAL_ADDRESS RingBuffer::Allocate(uint32_t size, uint64_t fence, ui
         return 0;
     }
 
-    // 对齐当前写指针
-    // 注意：必须用算术对齐（除乘），不能用位运算 (x+align-1) & ~(align-1)——后者只对 2 的幂有效。
-    // 实例段按 sizeof(GPUInstanceData)=96B 对齐（96 非 2 幂），位运算会错位 → SRV FirstElement 错位（频闪根因）
-    uint32_t alignedHead = ((m_head + alignment - 1) / alignment) * alignment;
-    uint32_t alignedSize = size + (alignedHead - m_head);
+    // 1. 计算物理偏移（取模）
+    uint32_t physicalHead = m_head % m_size;
+    uint32_t alignedPhysicalHead = ((physicalHead + alignment - 1) / alignment) * alignment;
+    uint32_t alignedSize = size + (alignedPhysicalHead - physicalHead);
 
-    // 检查是否需要回绕
-    bool needsWrap = (alignedHead + alignedSize > m_size);
-
-    if (needsWrap) {
-        // 需要回绕到开头
+    // 2. 检查是否需要回绕
+    if (alignedPhysicalHead + alignedSize > m_size) {
+        // 空间不足？
         if (alignedSize > m_tail) {
-            return 0; // 空间不足
+            wchar_t msg[256];
+            swprintf_s(msg, L"[RingBuffer] Allocate failed: name=%s, size = %d, fence = %d, alignment = %d\n",
+                       m_name.c_str(), size, fence, alignment);
+            OutputDebugStringW(msg);
+            return 0;
         }
 
         // 记录尾部的浪费空间
-        uint32_t wastedSpace = m_size - m_head;
+        uint32_t wastedSpace = m_size - alignedPhysicalHead;
         if (wastedSpace > 0) {
             m_pending.push({wastedSpace, fence});
             m_allocatedSize += wastedSpace;
         }
 
-        // 在开头分配
+        // 在开头分配（物理偏移 0）
         D3D12_GPU_VIRTUAL_ADDRESS result = m_gpuAddress;
         m_pending.push({size, fence});
-        m_head = size;
+        m_head += wastedSpace + size; // 逻辑偏移增加
         m_allocatedSize += size;
 
+        if (IsMappable() && m_mappedData) {
+            memset(static_cast<uint8_t *>(m_mappedData), 0, size);
+        }
         return result;
     } else {
-        // 正常在尾部分配
-        if (alignedHead + alignedSize > m_size) {
+        // 正常尾部分配
+        if (alignedPhysicalHead + alignedSize > m_size) {
             return 0;
         }
 
-        D3D12_GPU_VIRTUAL_ADDRESS result = m_gpuAddress + alignedHead;
+        D3D12_GPU_VIRTUAL_ADDRESS result = m_gpuAddress + alignedPhysicalHead;
         m_pending.push({alignedSize, fence});
-        m_head = alignedHead + size;
+        m_head += alignedSize; // 逻辑偏移增加
         m_allocatedSize += alignedSize;
 
         return result;
@@ -138,6 +162,11 @@ D3D12_GPU_VIRTUAL_ADDRESS RingBuffer::Allocate(uint32_t size, uint64_t fence, ui
 
 D3D12_GPU_VIRTUAL_ADDRESS RingBuffer::AllocateUpload(const void *data, uint32_t size, uint64_t fence,
                                                      uint32_t alignment) {
+
+    if (!IsMappable()) {
+        return 0;
+    }
+
     D3D12_GPU_VIRTUAL_ADDRESS address = Allocate(size, fence, alignment);
     if (address == 0) {
         return 0;

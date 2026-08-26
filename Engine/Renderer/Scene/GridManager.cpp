@@ -1,4 +1,5 @@
 #include "GridManager.h"
+#include "Logger/Logger.h" // 2026-08-19：Map 失败防御日志（统一 Map/Unmap 加固）
 #include "Resource/GpuResourceManager.h"
 
 namespace DX12Engine::Renderer {
@@ -43,10 +44,15 @@ void GridManager::Initialize(ID3D12Device *device) {
 
     ID3D12Resource *vbRes = gpuMgr.GetResource(m_quadVB);
     if (vbRes) {
-        void *mapped;
-        vbRes->Map(0, nullptr, &mapped);
-        memcpy(mapped, verts, sizeof(verts));
-        vbRes->Unmap(0, nullptr);
+        void *mapped = nullptr;
+        HRESULT mapHr = vbRes->Map(0, nullptr, &mapped);
+        // 2026-08-19 防御加固：Map 失败时绝不 Unmap（#310）/memcpy（写 0x0），跳过并记录
+        if (FAILED(mapHr) || !mapped) {
+            Logger::Logger::GetInstance()->Warn("[GridManager] QuadVB Map failed: hr=0x{:08X}", (unsigned)mapHr);
+        } else {
+            memcpy(mapped, verts, sizeof(verts));
+            vbRes->Unmap(0, nullptr);
+        }
     }
 
     // ── Quad IB（2 个三角形） ──
@@ -59,10 +65,15 @@ void GridManager::Initialize(ID3D12Device *device) {
 
     ID3D12Resource *ibRes = gpuMgr.GetResource(m_quadIB);
     if (ibRes) {
-        void *mapped;
-        ibRes->Map(0, nullptr, &mapped);
-        memcpy(mapped, indices, sizeof(indices));
-        ibRes->Unmap(0, nullptr);
+        void *mapped = nullptr;
+        HRESULT mapHr = ibRes->Map(0, nullptr, &mapped);
+        // 2026-08-19 防御加固：Map 失败时绝不 Unmap（#310）/memcpy（写 0x0），跳过并记录
+        if (FAILED(mapHr) || !mapped) {
+            Logger::Logger::GetInstance()->Warn("[GridManager] QuadIB Map failed: hr=0x{:08X}", (unsigned)mapHr);
+        } else {
+            memcpy(mapped, indices, sizeof(indices));
+            ibRes->Unmap(0, nullptr);
+        }
     }
 
     m_initialized = true;
@@ -152,8 +163,13 @@ void GridManager::UpdateAndUpload(uint64_t fence, const DirectX::XMMATRIX &viewP
     cbData.snapZ = m_cameraSnapZ;
     cbData.gridHalfSize = m_gridHalfSize;
 
-    void *mapped;
-    cbRes->Map(0, nullptr, &mapped);
+    void *mapped = nullptr;
+    HRESULT mapHr = cbRes->Map(0, nullptr, &mapped);
+    // 2026-08-19 防御加固：Map 失败时绝不 Unmap（#310）/memcpy（写 0x0），跳过并记录
+    if (FAILED(mapHr) || !mapped) {
+        Logger::Logger::GetInstance()->Warn("[GridManager] GridCB Map failed: hr=0x{:08X}", (unsigned)mapHr);
+        return;
+    }
     memcpy(mapped, &cbData, sizeof(cbData));
     cbRes->Unmap(0, nullptr);
 

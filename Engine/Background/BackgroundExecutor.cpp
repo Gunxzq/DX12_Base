@@ -55,10 +55,11 @@ void BackgroundExecutor::SubmitGraph(Scheduler::TaskGraph graph) {
 
     for (size_t i = 0; i < tasks.size(); ++i) {
         const auto &task = tasks[i];
-        if (task.dependencies.empty())
+        const auto &deps = graph.GetDependencies(task.id);
+        if (deps.empty())
             continue;
 
-        for (auto depId : task.dependencies) {
+        for (auto depId : deps) {
             for (size_t j = 0; j < tasks.size(); ++j) {
                 if (tasks[j].id == depId && j < tfTasks.size() && i < tfTasks.size()) {
                     tfTasks[j].precede(tfTasks[i]);

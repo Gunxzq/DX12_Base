@@ -25,10 +25,11 @@ struct Camera {
     // 正交参数
     float OrthoSize = 10.0f; // 正交视图的高度一半
 
-    // 通用裁剪面
+    // 通用裁剪面（2026-08-12 定案：渲染 < 剔除，双裁剪面分离——行业标准）
+    // 注意：以下为**上限 + 推荐默认值**，具体场景（室内/开放世界）可按需调小
     float NearPlane = 0.5f;
-    float FarPlane = 100.0f;      // 渲染视锥远平面（紧，用于投影矩阵/深度缓冲/SSAO）
-    float CullFarPlane = 1000.0f; // 剔除视锥远平面（宽，用于 CPU 视锥剔除）
+    float FarPlane = 2500.0f;      // 渲染视锥远平面上限（紧，投影矩阵/深度缓冲/SSAO——实际画图边界）
+    float CullFarPlane = 4500.0f;  // 剔除视锥远平面上限（宽，CPU/L2 GPU 剔除——计算可见列表边界）
 
     XMFLOAT3 Position = {0.0f, 0.0f, 0.0f};
     XMFLOAT3 Rotation = {0.0f, 0.0f, 0.0f}; // Pitch, Yaw, Roll (弧度)

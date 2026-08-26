@@ -59,7 +59,13 @@ public:
     }
 
     bool Initialize(ID3D12Device *device, uint32_t size, const std::wstring &name,
-                    D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_UPLOAD);
+                    D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_UPLOAD,
+                    D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE,
+                    D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_GENERIC_READ);
+
+    bool IsMappable() const;
+    D3D12_RESOURCE_STATES GetInitialState() const { return m_initialState; }
+
     void Shutdown();
     void Reset();
 
@@ -101,6 +107,8 @@ private:
     };
 
 private:
+    D3D12_RESOURCE_STATES m_initialState = D3D12_RESOURCE_STATE_GENERIC_READ;
+    D3D12_HEAP_TYPE m_heapType = D3D12_HEAP_TYPE_UPLOAD;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_resource;
     void *m_mappedData = nullptr;
     D3D12_GPU_VIRTUAL_ADDRESS m_gpuAddress = 0;

@@ -68,17 +68,6 @@ void WaterManager::CollectFromECS(ECS::Registry *registry) {
         uint32_t idx = static_cast<uint32_t>(m_waveParams.size());
         m_waveParams.push_back(wp);
     }
-
-    // 调试日志：输出收集到的波浪参数
-    if (m_waveParams.size() > 0) {
-        auto *logger = Logger::Logger::GetInstance();
-        logger->Info("[WaterManager] CollectFromECS: {} water bodies", m_waveParams.size());
-        for (size_t i = 0; i < m_waveParams.size(); ++i) {
-            const auto &wp = m_waveParams[i];
-            logger->Info("[WaterManager]  water[{}]: amplitude={:.2f} frequency={:.2f} speed={:.2f} direction={:.2f}",
-                         i, wp.amplitude, wp.frequency, wp.speed, wp.direction);
-        }
-    }
 }
 
 void WaterManager::UpdateAndUpload(uint64_t fence) {

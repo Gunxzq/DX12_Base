@@ -383,6 +383,8 @@ MeshDesc SceneLoader::ParseMesh(const nlohmann::json &j) {
     }
     if (j.contains("receivesShadow"))
         m.receivesShadow = j["receivesShadow"].get<bool>();
+    if (j.contains("castsShadow"))
+        m.castsShadow = j["castsShadow"].get<bool>();
     return m;
 }
 

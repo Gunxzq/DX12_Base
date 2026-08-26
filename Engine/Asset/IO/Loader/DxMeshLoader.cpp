@@ -1,5 +1,6 @@
 #include "DxMeshLoader.h"
 #include "Asset/Definitions/Mesh/DxMeshFormat.h"
+#include "Logger/Logger.h" // 2026-08-19：Map 失败防御日志（统一 Map/Unmap 加固）
 #include "Resource/Core/GpuHandlePool.h"
 #include "Resource/Geometry/TriangleMesh.h"
 #include "Resource/GpuResourceManager.h"
@@ -61,8 +62,12 @@ bool DxMeshLoader::LoadFromFile(const std::wstring &filePath, ID3D12Device *devi
     ID3D12Resource *vbResource = gpuMgr.GetResource(vbHandle);
     if (vbResource) {
         void *mapped = nullptr;
-        CD3DX12_RANGE readRange(0, 0);
-        vbResource->Map(0, &readRange, &mapped);
+        HRESULT mapHr = vbResource->Map(0, nullptr, &mapped);
+        // 2026-08-19 防御加固：Map 失败时绝不 Unmap（#310）/memcpy（写 0x0），跳过并记录
+        if (FAILED(mapHr) || !mapped) {
+            Logger::Logger::GetInstance()->Warn("[DxMeshLoader] VB Map failed: hr=0x{:08X}", (unsigned)mapHr);
+            return false;
+        }
         memcpy(mapped, vertexData, vertexDataSize);
         vbResource->Unmap(0, nullptr);
     }
@@ -77,8 +82,12 @@ bool DxMeshLoader::LoadFromFile(const std::wstring &filePath, ID3D12Device *devi
     ID3D12Resource *ibResource = gpuMgr.GetResource(ibHandle);
     if (ibResource) {
         void *mapped = nullptr;
-        CD3DX12_RANGE readRange(0, 0);
-        ibResource->Map(0, &readRange, &mapped);
+        HRESULT mapHr = ibResource->Map(0, nullptr, &mapped);
+        // 2026-08-19 防御加固：Map 失败时绝不 Unmap（#310）/memcpy（写 0x0），跳过并记录
+        if (FAILED(mapHr) || !mapped) {
+            Logger::Logger::GetInstance()->Warn("[DxMeshLoader] IB Map failed: hr=0x{:08X}", (unsigned)mapHr);
+            return false;
+        }
         memcpy(mapped, indexData, indexDataSize);
         ibResource->Unmap(0, nullptr);
     }

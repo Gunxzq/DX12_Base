@@ -95,8 +95,9 @@ inline void to_json(nlohmann::json &j, const TransformDesc &t) {
 
 struct MeshDesc {
     std::string geometry;
-    std::vector<std::string> materials; // [subMeshIndex] = material key, 向后兼容单材质
-    bool receivesShadow = true;
+    std::vector<std::string> materials;
+    bool receivesShadow = false; // 接收阴影（光照阶段采样阴影贴图）
+    bool castsShadow = false;    // 投射阴影（进入阴影剔除 → 阴影贴图渲染；地形/树/山可关闭）
 };
 
 inline void from_json(const nlohmann::json &j, MeshDesc &m) {
@@ -107,6 +108,8 @@ inline void from_json(const nlohmann::json &j, MeshDesc &m) {
     }
     if (j.contains("receivesShadow"))
         m.receivesShadow = j["receivesShadow"].get<bool>();
+    if (j.contains("castsShadow"))
+        m.castsShadow = j["castsShadow"].get<bool>();
 }
 
 inline void to_json(nlohmann::json &j, const MeshDesc &m) {
@@ -116,6 +119,8 @@ inline void to_json(nlohmann::json &j, const MeshDesc &m) {
         j["materials"] = m.materials;
     if (!m.receivesShadow)
         j["receivesShadow"] = false;
+    if (!m.castsShadow)
+        j["castsShadow"] = false;
 }
 
 struct TerrainDesc {
@@ -576,8 +581,10 @@ struct PrecomputedStaticData {
 struct SceneEnvironment {
     EnvironmentDesc ambient;          // 环境光全局参数
     std::optional<SkyboxDesc> skybox; // 天空盒配置
+
     // 场景动静比例：未设置 StaticComponent 的实体按此默认分配（默认 "static"）
     std::string entityMotionPolicy = "static";
+
     // 静态实体烘焙数据（save 时重算；无则运行时逐实体计算兜底，向后兼容）
     std::optional<PrecomputedStaticData> precomputed;
 

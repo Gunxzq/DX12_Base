@@ -158,6 +158,11 @@ bool FrameDriver::Tick() {
     ExecuteImmediate();
 
     // ========================================================================
+    // 上传渲染阶段需要使用的数据
+    // ========================================================================
+    FrameSync();
+
+    // ========================================================================
     // 渲染阶段 (Render Phase)
     // 读取的是【上一帧】在 FrameSync 中准备好的数据 (Slot N-1)
     // ========================================================================
@@ -169,13 +174,22 @@ bool FrameDriver::Tick() {
 
     // B. 提交命令列表到 GPU
     // 注意：此时 GPU 开始执行第 N-1 帧的渲染任务
-    ExecuteRenderPhase(RenderPhase::PrePass, 0); // 清屏（ClearSystem）
+    ExecuteRenderPhase(RenderPhase::Dispatch, 0);
+    // 2026-08-15 派生渲染项阶段（用户定案）：派生渲染项（阴影为首例，未来贴花/程序化派生等）
+    // 收集+渲染显式先于 PrePass——阴影贴图须在 PrePass 消费前写好，与 Dispatch 输出衔接
+    ExecuteRenderPhase(RenderPhase::DerivedCollect, 0);
+    ExecuteRenderPhase(RenderPhase::PrePass, 0); // 清屏 + 遮挡剔除（消费【上一帧】HZB = 早期 HZB）
 
-    ExecuteRenderPhase(RenderPhase::Opaque, 0); // G-buffer 写入（当前渲染不透明物体到 G-buffer）
+    ExecuteRenderPhase(RenderPhase::Opaque, 0); // G-buffer 写入（当前渲染不透明物体到 G-buffer；生成当前帧深度图）
+
+    // 构建 HZB：消费本帧 Opaque 深度图 → mip 链（供本帧 SSR/接触阴影 + 下一帧遮挡剔除）
+    ExecuteRenderPhase(RenderPhase::HZB_Build, 0);
 
     ExecuteRenderPhase(RenderPhase::DynamicAOcclusion, 0); // 动态屏幕空间环境光遮蔽（G-buffer 法线 + 深度就绪后执行）
 
     ExecuteRenderPhase(RenderPhase::Lighting, 0); // 延迟光照 Pass（读取 G-buffer + SSAO，输出到交换链）
+
+    ExecuteRenderPhase(RenderPhase::SSR, 0); // 屏幕空间反射：G-buffer 法线/深度/粗糙度 + HZB 层级步进 → 半分辨率反射图
 
     ExecuteRenderPhase(RenderPhase::Billboard, 0); // 复用 Opaque 深度，不写深度
     ExecuteRenderPhase(RenderPhase::Transparent, 0);
@@ -202,11 +216,10 @@ bool FrameDriver::Tick() {
     // PreRender：构建器生成渲染队列
     ExecutePhase(TaskPhase::PreRender);
 
-    // ========================================================================
-    // 4. 帧同步 (FrameSync)
-    // 将 Slot N 的数据"冻结"并标记为"可读"，准备供下一帧 Render 使用
-    // ========================================================================
-    FrameSync();
+    // 2026-08-15 FrameSync 显式阶段（用户定案）：FrameSync 计算 system（accum 聚合 + 扁平化）
+    // 在此执行（PreRender 后、FrameSync() 回调前）——消除"计算在 PreRender、回调在主线程隐式点"
+    // 的阶段割裂；计算完成后 FrameSync() 回调（主线程上传）消费 m_frame* 成员
+    ExecutePhase(TaskPhase::FrameSync);
 
     // ========================================================================
     // 帧结束：调用 DeviceContext 进行 Present 和帧推进
