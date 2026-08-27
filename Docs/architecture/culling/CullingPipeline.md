@@ -1,7 +1,10 @@
 # 实例剔除系统架构（Instance Culling System）
 
 > 日期：2026-08-10
-> 状态：📋 架构定案（流程/边界/LOD 归属已定，代码拆分待排期）
+> 状态：⚠️ 部分过时（管道/生产者边界框架仍有效；桶接口 `GetBucketMapSRV`/`GetBucketOffsets` 等
+> 随 2026-08-18 无桶流程废弃——现行中间层接口 = `SetCullData` + `SetSegmentTables` 两张段表）
+> **阶段定位**：S1（空间粗筛）/ S3（CPU 构建器）/ S4（拼接上传）/ S5（GPU 剔除 CS）总体架构——
+> 剔除系统 = 管道/生产者，渲染管线 = 消费者。阶段表见本目录 `README.md`
 > 关联：`../rendering/GPU-Drive.md`（L1/L2/L3 分层蓝图）、`OctreeCullingAndRaycaster.md`（空间哈希 + CulledSet + 双轨制）、
 > `../rendering/RendererDataDriven.md`（Builder 桶模式 + FrameSync 统一上传）、`../rendering/LOD.md`（LOD 系统）、
 > `../core/EventSystemAndDataLayer.md`（SharedDataStore 中间层先例——本系统三层抽象的设计参照）
@@ -17,21 +20,23 @@
 **剔除系统 = 资源的生产者（管道）**：消费 ECS 实体 → 空间划分 → 视锥粗筛 → 统一上传 → GPU 剔除 →
 **产出剔除结果**（AppendBuffer 存活实例 / IndirectArgs 桶实例数）。它不负责"画"，只负责"决定画什么"。
 
-**渲染管线 = 消费者**：块展开、ExecuteIndirect 绘制、材质槽、LOD 选择均属渲染管线。
+**渲染管线 = 消费者**：ExecuteIndirect 绘制、材质槽、LOD 选择均属渲染管线。
+**块展开（块→成员）归剔除层**（2026-08-10 定案，见 `GPU-Drive.md §4.3`）——区块生成/存储/
+展开都是空间哈希（剔除层）的任务。
 两者通过**中间层接口**交换数据，渲染系统不感知剔除内部实现。
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        剔除系统（管道/生产者）                          │
 │                                                                     │
-│  ① 空间哈希粗块划分   ② 预测视锥粗块候选集   ③ 统一上传   ④ 剔除 CS      │
-│  (Octree Build)      (QueryFrustum)        (FrameSync+Upload) (Dispatch)│
+│  ① 空间哈希粗块划分   ② 预测视锥粗块候选集   ③ 块展开   ④ 统一上传  ⑤ 剔除 CS │
+│  (SpatialHashGrid)   (QueryFrustum)     (块→成员)  (FrameSync) (Dispatch)│
 │                                                                     │
 │         ▼ 中间层接口：CulledSet / GetInstanceSRV / GetBucketMapSRV    │
 │            GetBufferAddress / GetBucketOffsets / GetInstanceCount     │
 ├─────────────────────────────────────────────────────────────────────┤
 │                        渲染管线（消费者）                              │
-│  A 块展开（RenderSlotCache）→ Builder 渲染项 → ExecuteIndirect 绘制     │
+│  Builder 渲染项（消费成员实体）→ ExecuteIndirect 绘制                   │
 │  LOD 选择（PickLOD）· 材质槽（RenderSlotCache/Builder）                │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -42,17 +47,28 @@
 
 ### 主流程（与实现对照）
 
+> **2026-08-27 注**：③④⑤ 与下方补充 A/B/D 描述的是 **2026-08-18 之前的桶流程**（Builder 消费桶 +
+> 实例数据/桶偏移表统一上传 + 每桶 `ExecuteIndirect`），现已被**无桶流程**取代：Builder 产出
+> `CullData[]`（逐实例 1:1 不合批，`groupId` = 段内命令索引）+ `IndirectCommand[]`（每 BatchKey 一条
+> 完整命令）→ FrameSync 拼接上传（`SetCullData` + `SetSegmentTables` 两张段表）→ CS 只原子累加
+> InstanceCount → **一次 `ExecuteIndirect`**。①②（空间哈希粗筛）仍为现行。
+
 | # | 环节 | 实现 | 阶段 | 状态 |
 |:--|:--|:--|:--|:--|
-| ① | 空间哈希粗块划分（块实体 clusterBounds 入格，双轨制静态 Build） | `OctreeSystem::Build` | PreCulling | ✅ |
+| ① | 空间哈希粗块划分（块实体入格——clusterBounds 大包围盒，双轨制静态 Build） | `SpatialHashGrid::Build` | PreCulling | ✅ |
 | ② | 预测视锥剔除 → 粗块候选集（相机静止复用 coarse） | `QueryFrustum` → `m_octreeCoarse` | PreCulling | ✅ |
-| ③ | 构建器从候选集得渲染项（含补充 A 块展开） | `RenderSlotCache::Dispatch` + `OpaqueRenderItemBuilder` | PreRender | ✅ |
+| ③ | 构建器从候选集得渲染项（块展开在渲染管线侧完成，见补充 A） | `RenderSlotCache::Dispatch` + `OpaqueRenderItemBuilder` | PreRender | ✅（块展开归属见补充 A） |
 | ④ | 统一上传阶段（实例数据 + 桶偏移表） | FrameSync `SetFlatInstances` + 立即回调 `Upload` | FrameSync | ✅ |
 | ⑤ | 剔除 CS 执行（视锥球测试 → AppendBuffer/IndirectArgs） | `DispatchCulling` | Render（PrePass） | ✅ |
 
 ### 补充环节（职责归属定案）
 
-- **补充 A · 块展开**：粗筛候选是块实体（clusterBounds），Builder 消费的是块内成员展开——`RenderSlotCache::Rebuild` 的 `m_blockExpanded` 完成块实体 → 成员 Entry 展开。**归属渲染管线**（渲染槽缓存/桶分发的一部分），非剔除系统。
+- **补充 A · 块展开**：粗筛候选是块条目（CulledSet 简洁引用 `{blockIndex, clusterBounds, sceneId}`），
+  Builder 消费的是块内成员展开——**2026-08-11 终版：块展开缓存归渲染管线侧**
+  （`RenderSlotCache::m_blockExpanded`，Rebuild `view<BlockComponent>` 构建驻留、Dispatch 每帧引用——
+  对齐 UE FMeshDrawCommand CachedMeshDrawCommands：AddToScene 预构建、每帧只选命令）。
+  块 = ECS 组件（区块组件，持 memberEntities + clusterBounds），**不预展开**（CulledSet 只引用
+  blockIndex，避免每帧成员拷贝浪费——Builder 并行消费桶不读 CulledSet）。详见 `GPU-Drive.md §4.3`。
 - **补充 B · 剔除结果消费**：`gIndirectArgs`（每桶 InstanceCount）→ 每桶 `ExecuteIndirect`（OpaqueRenderer `DrawInstancedGBufferIndirect`）→ VS 从 `gAppendBuffer` 读存活实例。**归属渲染管线**（绘制阶段），非剔除系统。
 - **补充 C · 动态实体并行路径**：机体/子弹/特效 <50 → **CPU 视锥 + 每帧上传**（GPU-Drive.md 定案，不进 L2）。架构预留 GPU 化通道（见 §五）。
 - **补充 D · 辅助环节**：readback 可见数验证（`ReadbackVisibleCount` + Verify 日志）、剔除资源生命周期（SRV/段地址/AppendBuffer 扩容）、相机静止缓存（②复用 coarse）。
@@ -63,12 +79,17 @@
 
 | 子系统 | 内容 | 归属 |
 |:--|:--|:--|
-| **剔除系统（管道/生产者）** | 空间哈希粗筛 → 预测视锥粗块候选 → 统一上传 → 剔除 CS → 剔除结果输出；剔除用 SRV/UAV/缓冲（AppendBuffer/IndirectArgs/CullParams/实例 SRV/bucketMap SRV/readback/桶偏移表）；相机复用缓存（复用 L1 coarse） | `Engine/Renderer/Culling/`（规划） |
-| **渲染管线（消费者）** | 块展开（A）、ExecuteIndirect 绘制（B）、材质槽、LOD 选择 | `Pipeline/` + Builder |
-| **中间层接口** | CulledSet / GetInstanceSRV / GetBucketMapSRV / GetBufferAddress / GetBucketOffsets / GetInstanceCount——渲染系统不感知剔除内部 | — |
+| **剔除系统（管道/生产者）** | 空间哈希粗筛（块实体入格）→ 预测视锥粗块候选 → 统一上传 → 剔除 CS → 剔除结果输出；剔除用 SRV/UAV/缓冲（AppendBuffer/IndirectArgs/CullParams/实例 SRV/bucketMap SRV/readback/桶偏移表）；相机复用缓存（复用 L1 coarse） | `Engine/Renderer/Culling/`（规划） |
+| **渲染管线（消费者）** | 块展开（A，块→成员 Entry，RenderSlotCache::m_blockExpanded）、ExecuteIndirect 绘制（B）、材质槽、LOD 选择 | `Pipeline/` + Builder |
+| **中间层接口** | CulledSet（块条目简洁引用 {blockIndex, clusterBounds, sceneId}）/ GetInstanceSRV / GetBucketMapSRV / GetBufferAddress / GetBucketOffsets / GetInstanceCount——渲染系统不感知剔除内部（⚠️ `GetBucketMapSRV`/`GetBucketOffsets` 已废弃，2026-08-18 无桶流程 → `SetCullData` + `SetSegmentTables` 两张段表） | — |
 
 **关键原则**：剔除系统是"管道/生产者"，只决定"画什么"；渲染管线消费结果并绘制。两者经中间层接口解耦
 （本次会话 SRV 生命周期跨帧断裂根因：数据扁平化与 dispatch 生命周期耦合——中间层化后不可能再犯）。
+**块展开归属**（2026-08-11 终版，`GPU-Drive.md §4.3`）：块 = ECS 组件（区块组件，持 memberEntities +
+clusterBounds）；块展开缓存归**渲染管线侧**（`RenderSlotCache::m_blockExpanded`，Rebuild
+`view<BlockComponent>` 构建驻留、Dispatch 每帧引用——对齐 UE FMeshDrawCommand CachedMeshDrawCommands）；
+**不预展开**（CulledSet 块条目只引用 blockIndex，成员 ID 驻留块组件，避免每帧拷贝浪费）。
+历史 2026-08-10 定案"块展开归剔除层 + 查询展开成员"因预展开拷贝浪费废弃。
 
 ---
 
@@ -122,7 +143,7 @@ UpdatePrimitiveTransform / Unity BRG dynamic batch）均支持动态实体进 GP
 
 ```
 Engine/Renderer/Culling/（规划）
-├── OctreeSystem.h/.cpp            ← 空间哈希粗筛（粗筛层，双轨制 Build/AddEntity）
+├── SpatialHashGrid.h/.cpp         ← 空间哈希粗筛（原 OctreeSystem 改名，粗筛层，双轨制 Build/AddEntity）
 ├── CullingDataStore.h/.cpp        ← 数据层：InstanceData/bucketMap/桶偏移表/段地址（数据扁平化与 GPU 解耦）
 ├── CullingResourceManager.h/.cpp  ← 资源层：AppendBuffer/IndirectArgs/CullParams/readback 生命周期
 └── InstanceCullingRenderer.h/.cpp ← 执行层：CS dispatch/PSO/根签名/readback 统计（对齐 IRenderer 契约）
@@ -136,7 +157,7 @@ Engine/Renderer/Culling/（规划）
 
 ### 6.1 剔除层对外接口定案（2026-08-10 讨论定案）
 
-**核心认知**：**剔除层 = 门面（Facade）**——包装剔除系统中的模块（OctreeSystem / CullingDataStore /
+**核心认知**：**剔除层 = 门面（Facade）**——包装剔除系统中的模块（SpatialHashGrid（原 OctreeSystem）/ CullingDataStore /
 CullingResourceManager / InstanceCullingRenderer）及其方法，对外统一暴露。渲染管线（构建器/渲染器）
 只与剔除层交互，不感知内部模块。
 
@@ -146,7 +167,7 @@ CullingResourceManager / InstanceCullingRenderer）及其方法，对外统一�
 | **ECS 数据连接** | `void BindWorld(ECS::World &world);`（内部 GetRegistry 遍历） | 方案 C（注入 + 内部遍历）；需处理**场景 ID**：编辑器端多 World 对应多场景——每 World 映射 sceneId |
 | **system 注册** | `void RegisterSystems(FrameDriver &driver);` + `static const char *GetTaskName(...)` | 剔除层自注册；**暴露稳定唯一 task name 供构建器 `DependsOn`**（防同名混淆，串行保证） |
 | **上传阶段** | `void Upload(FrameResourceManager *frameResMgr);`（立即回调后）/ `SetFlatInstances(...)`（FrameSync）/ `EndFrame(fence)`（帧末） | 时序契约：**上传先于消费**（立即回调上传 → 本帧 dispatch 消费，对齐 FrameDriver 时序：Render 读上一帧 FrameSync 数据） |
-| **消费输出** | `GetCoarseSet()` / `GetInstanceSRV()` / `GetBucketMapSRV()` / `GetBufferAddress()` / `GetBucketOffsets()` / `GetInstanceCount()` | 中间层聚合现有模块（OctreeSystem + InstanceCullingBuffer）统一暴露；实例数据 bindless（对齐 GPUScene） |
+| **消费输出** | `GetCoarseSet()` / `GetInstanceSRV()` / `GetBucketMapSRV()` / `GetBufferAddress()` / `GetBucketOffsets()` / `GetInstanceCount()` | 中间层聚合现有模块（SpatialHashGrid + InstanceCullingBuffer）统一暴露；实例数据 bindless（对齐 GPUScene）（⚠️ `GetBucketMapSRV()`/`GetBucketOffsets()` 已废弃，2026-08-18 无桶流程 → `SetCullData`/`SetSegmentTables`） |
 
 **基础设施强化（2026-08-10 检查定案）**：
 - `SystemId = TaskId`（SystemTypes.h:26）已有唯一 ID——剔除层 system 可特化唯一 ID；
@@ -177,7 +198,7 @@ CullingResourceManager / InstanceCullingRenderer）及其方法，对外统一�
 ## 八、已知缺陷与后续（记录）
 
 1. **剔除结果消费**（补充 B）：ExecuteIndirect 链路已存在（OpaqueRenderer:232），readback 统计节流运行——需持续验证可见数正确性；
-2. **allInstances 波动**：FrameSync 扁平化实例数随相机/粗筛波动（279~358），桶偏移表 total 可能 > 实例数（多桶展开）——语义核查待办；
+2. **allInstances 波动**：FrameSync 扁平化实例数随相机/粗筛波动（279~358），桶偏移表 total 可能 > 实例数（多桶展开）——语义核查待办（⚠️ 桶偏移表已随 2026-08-18 无桶流程废弃，本条桶语义不再适用，保留为历史）；
 3. **动态实体 GPU 化**（§五）：数量增长时并入 L2（CullingDataStore 预留）；
 4. **Nanite 模式**（§四记录）：虚拟化几何 + cluster 剔除为未来演进方向，当前不实施；
 5. **三层抽象拆分**（§六）：目录骨架暂不建立，待代码拆分排期。

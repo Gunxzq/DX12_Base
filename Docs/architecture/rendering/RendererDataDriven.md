@@ -870,7 +870,7 @@ RDG 对我们 = **L2 屏障优化 + 实体级条件入图 + CPU 并行录制**�
 
 ### 7.11 定案：RDG 思想分散化——编译分层、缓存属地（2026-08-02 讨论收敛）
 
-> 关联：`SceneStateMachine.md`（场景级缓存生命周期管理者）、`../culling/OctreeCullingAndRaycaster.md`（PVS 预计算，原 cull.md 已并入）、`Reflection.md`（烘焙光照/光照探针）
+> 关联：`SceneStateMachine.md`（场景级缓存生命周期管理者）、`../culling/S1_SpatialCulling.md`（PVS 预计算，原 cull.md 已并入）、`Reflection.md`（烘焙光照/光照探针）
 
 **澄清"编译缓存"的完整含义**：RDG 语境下的"编译缓存"不是单一物，而是**全局范围资源图的三层编译产物**——内容与 PSO 并不完全一致：
 

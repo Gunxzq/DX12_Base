@@ -1,7 +1,15 @@
 # 八叉树空间划分 + 剔除管线 + Raycaster 统一架构
 
 > 日期：2026-07-25
-> 状态：设计方案，待实施
+> 状态：⚠️ 历史设计方案（2026-07-25 实施前设计——空间哈希已落地为 `SpatialHashGrid`、
+> 双轨制/粗筛候选集等核心思路已实现；本文保留设计时形态，代码实现以 `SpatialHashGrid.h` 为准）
+> **阶段定位**：S1 L1 CPU 空间粗筛（空间划分：块划分 → 视锥查询 → 候选集）+ Raycaster（编辑器拾取）
+> ——阶段表见本目录 `README.md`
+> **改名注记（2026-08-10）**：本文中的 `OctreeSystem` 在实现中已更名为 `SpatialHashGrid`
+> （`Engine/Renderer/CullingLayer/SpatialHashGrid.h`："原 OctreeSystem 改名，基于实际行为——均匀格子哈希，
+> 非八叉树"）。本文为历史设计方案，保留设计时命名；代码引用以 `SpatialHashGrid` 为准。
+> 另见 2026-08-10 定案（`GPU-Drive.md §4.3`）：集群（BlockComponent）≠ 区块（空间哈希块），
+> 场景构建器不再生产 BlockComponent，区块由剔除层空间哈希模块生成。
 > **合并声明（2026-08-03）**：`cull.md`（剔除并行化演进方向）与 `Raycaster.md`（阶段任务划分残留片段）已并入本文并**删除**，要点浓缩见 §八。关联演进：`cull.md` 的"方向一：每个构建器独立做剔除+LOD"已被 **RendererDataDriven.md §4.1b/c/d 缓存分桶**落地（集中粗筛选 + CulledSet 分发 + Builder 消费桶精筛）；"延迟一帧"与 FrameDriver 阶段分离一致（§7.4）。Raycaster 的"UI→Visible→Scene 三级分支"（原 Raycaster.md）已纳入 §7.6 抽象层设计。
 
 ---

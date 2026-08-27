@@ -1,6 +1,18 @@
 # 水实体重构阶段 1-2 分析清单
 
 > 日期：2026-08-04
+> **状态（2026-08-27 实现细节核对 + 复订）：✅ 阶段 1/2 已投入使用**（部分形态与本清单计划不同，见分节注记）：
+> - **总体定案（2026-08-27）**：`waterBlocks[]` 已废弃——旧二进制 .scene 格式极其落后，**不考虑使用、不考虑兼容性**（用户定案）。
+>   水实体现行主路径 = **JSON 标准实体模式**（复合标准实体：`mesh.geometry = "procedural://grid/W/H/segX/segZ"` + `materials: ["Water"]` + `water` 组件），
+>   走 Engine `SceneConstructor` **标准构建流**（procedural URI → AssetManager 虚拟资产 → 标准组装 MeshComponent/RenderSlotComponent + 水组件）
+> - **阶段 1（waterBlocks 解析 + JSON 往返）**：曾按本清单位置实施（§3.1）——但 to_json 缺口以**不同形式**闭合：`WaterBlockDesc` 仍无 struct to_json，`SceneLoader.cpp` 手工构建 waterBlocks JSON；**2026-08-27 该 JSON 解析/序列化已随 N11 清理删除**（废弃格式，二进制侧读取保留、属 N12 无限延期）
+> - **水实体构建路径**：⚠️ **非**本清单设想的 waterBlocks[] 转换——JSON 标准实体走 Engine SceneConstructor 标准路径；
+>   `EditorSceneManager.cpp:1130` 的 waterBlocks 消费循环（同步建实体+TransformComponent，异步 `GeometryProceduralTask` 生成网格后 onComplete 组装 MeshComponent+RenderSlotComponent）
+>   是**不走标准构建流的旧二进制格式遗留路径**（JSON 场景 waterBlocks 恒空、循环永不触发），属非标准行为——**2026-08-27 已清理**（`remaining_issues.md` N11 ✅；二进制格式本体见 N12 无限延期）
+> - **阶段 2（GeometryProceduralTask）**：✅ 已实施——实际文件 `Engine/Background/GeometryProceduralTask.h`（非 `Resource/Procedural/` 路径）；接口 = `Create()` **三段式异步任务**（cpuWork 生成 CPU 网格 → gpuWork 建 GPU 资源+COPY → onComplete 注册 GeometryResourceManager），非 §4.1a 的同步 `Execute()` 设计
+> - **阶段 2（程序化几何接入）**：⚠️ 形态变化——`MeshDesc.procedural` 字段 + `geometry: string|object` oneOf 方案**未采用**，改为 **`procedural://` URI 约定**（`MeshDesc.geometry` 保持 string，SceneConstructor 收集 URI → AssetManager 虚拟资产 → 标准组装）
+> - **Schema（§4.3）**：`ProceduralGeometryDesc` 定义 ✅（scene.schema.json:448）；`water` 组件 / `waterBlocks` 场景级属性 / `cullDistance` 定义**未补**
+> - 本清单已归档为历史分析文档，调试日志插入（§6）随当时实施。
 > 目标：分析当前 City.scene.json 与 schema 的 gap，明确阶段 1（MPD .scene 解析→水实体构建）
 > 和阶段 2（GeometryProceduralTask）需要的改动点，以及调试日志的插入位置。
 > 关联：`Docs/architecture/rendering/RenderPipelineSpecification.md` §8、
@@ -113,6 +125,9 @@
 
 ### 3.1 SceneLoader 改动
 
+> **2026-08-27 核对**：3.1a（二进制解析 `SceneLoader.cpp:70-82`）/ 3.1b（JSON 解析 `SceneLoader.cpp:181-195`）✅ 已实施；
+> 3.1c（to_json）以不同形式闭合——`WaterBlockDesc` 仍无 struct to_json，`SceneLoader.cpp:255-267` 手工构建 waterBlocks JSON（往返可用）。
+
 **目标**：二进制 .scene 的 waterBlocks 解析 + JSON 序列化
 
 #### 3.1a 验证二进制 .scene 的 waterBlocks 解析
@@ -188,6 +203,12 @@ for (size_t i = 0; i < desc.waterBlocks.size(); ++i) {
 ```
 
 ### 3.2 SceneConstructor 改动
+
+> **2026-08-27 核对**：⚠️ 本节的 waterBlocks[] 转换方案**已废弃**（2026-08-27 用户定案：二进制 .scene 格式极其落后，
+> 不考虑使用、不考虑兼容性）——水实体现行主路径 = **JSON 标准实体模式**（procedural:// URI + water 组件，
+> 走 Engine SceneConstructor 标准构建流）。核查中发现的"水实体构建"即 `Editor/EditorLib/Scene/EditorSceneManager.cpp:1130` 的
+> waterBlocks 循环（同步建实体+TransformComponent，异步 `GeometryProceduralTask` 后 onComplete 组装 MeshComponent+RenderSlotComponent）——
+> 属**旧二进制 .scene 格式的遗留路径、不走标准构建流**（JSON 场景 waterBlocks 恒空、循环永不触发），非标准行为，清理候选（`remaining_issues.md` N11）。
 
 **目标**：`OnSceneConstructReady` 中将 `waterBlocks[]` 转换为标准实体
 
@@ -270,6 +291,11 @@ for (auto ent : waterView) {
 
 ### 4.1 GeometryProceduralTask（新建）
 
+> **2026-08-27 核对**：✅ 已实施——实际文件 `Engine/Background/GeometryProceduralTask.h`（非下文 `Resource/Procedural/` 路径）；
+> 接口 = `static LoadTask Create(type, params, device, cmdMgr, geoMgr, outResult)` **三段式异步任务**
+> （cpuWork: GeometryGenerator → CPU MeshData；gpuWork: 建 DEFAULT VB/IB + UPLOAD 中转 → 录 COPY + barrier；
+> onComplete: 注册 GeometryResourceManager），非 §4.1a 的同步 `Execute()` 接口设计。
+
 **文件**：`Engine/Resource/Procedural/GeometryProceduralTask.h/.cpp`
 
 #### 4.1a 接口设计
@@ -321,6 +347,11 @@ log->Info("[GeometryProceduralTask] Registered geometry handle: index={} generat
 ```
 
 ### 4.2 SceneConstructor 改造（MeshComponent 支持 procedural）
+
+> **2026-08-27 核对**：⚠️ 形态变化——§4.2c 的 `MeshDesc.procedural` 字段 + `geometry: string|object` oneOf 方案**未采用**，
+> 改为 **`procedural://` URI 约定**：`MeshDesc.geometry` 保持 string（`SceneDescription.h:96-98`），
+> SceneConstructor 收集实体中的 `procedural://` URI（`SceneConstructor.cpp:103-109/184-190`）→ AssetManager 虚拟资产 → 标准组装；
+> oneOf（string|object）形态目前仅 `SkyboxDesc` 使用（`SceneDescription.h:420-426`）。
 
 **文件**：`Engine/Scene/SceneConstructor.cpp`，`ConstructEntity` 的 mesh 分支
 
@@ -385,6 +416,11 @@ if (!m.geometry.empty()) {
 ```
 
 ### 4.3 Schema 改动
+
+> **2026-08-27 核对**：部分落地——`ProceduralGeometryDesc` 定义 ✅（scene.schema.json:448）；
+> 4.3a/4.3b（`water` 组件定义）/ 4.3d（`waterBlocks` 场景级属性）/ 4.3e（WaterBlockDesc 定义）/
+> 4.3f（allOf water 约束）/ 4.3g（`cullDistance`）**schema 未见、未补**（C++ 端 `WaterDesc` 序列化已落地；
+> schema 补齐对齐项目约定"JSON 资产 schema 用于校验、后续处理"）。
 
 **文件**：`Schemas/scene.schema.json`
 

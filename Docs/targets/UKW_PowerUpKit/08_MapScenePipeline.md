@@ -162,11 +162,18 @@ AssetTool mpd2scene <map_dir> <out_dir>
 
 ---
 
-## 八、区块化聚合（BlockComponent chunk，2026-08-05 定案）
+## 八、区块化聚合（2026-08-05 定案，2026-08-10 修订并已实施：区块归空间哈希生成）
 
+> **2026-08-10 修订（已实施）**：区块（空间哈希块）与集群（BlockComponent）职责分离（`CullingBlueprint.md §4.3`）——
+> **场景构建器（Phase C）不再生产 BlockComponent**（✅ 已移除，编辑器字段/schema 未准备，集群功能暂缓）；
+> 区块由**剔除层空间哈希模块**按 `blockConfig` 自动生成（✅ `SpatialHashGrid::SetBlocks` + Editor OctreeCulling
+> 构建时分组），格存成员实体 ID；块展开缓存归剔除层（✅ `RenderSlotCache::m_blockExpanded` 已迁出）。
+> 以下 §8.1-8.7 保留 2026-08-05/08-06 历史定案原文，
+> 标注 ⚠️ 的条目为已被 2026-08-10 修订取代的表述。
+>
 > 动机与收益详见 `Docs/bugs/BugFix_Editor_StaticDirtyState_And_OutlinerIssues.md` §八
-> 关联：`Engine/ECS/Core/Components/Block.h`（BlockComponent——集群/区块 Phase C）、
-> `Editor/EditorLib/Scene/EditorSceneManager.cpp:983`（Phase C 自动划分，500 单位区块分组）
+> 关联：`Engine/ECS/Core/Components/Block.h`（BlockComponent——集群 Phase C，2026-08-10 起不再由场景构建器生产）、
+> `Editor/EditorLib/Scene/EditorSceneManager.cpp`（⚠️ Phase C 已移除——区块划分迁入剔除层空间哈希模块）
 
 ### 8.1 背景：实体数量级爆炸
 
@@ -196,7 +203,7 @@ AssetTool mpd2scene <map_dir> <out_dir>
 
 - **1000 单位过大**：9/10 地图退化为 1 块（整图一个实体，块级剔除失效）
 - **500 单位是甜点**：8/10 地图 = 4 块（2×2），块内 ~1000-4600 实例；City_tac（2100×2070 大图）36 块——唯一"超视距"场景，块级剔除真正生效
-- 与现有 `EditorSceneManager.cpp:983` Phase C 的 500 单位区块划分**完全一致**——复用现有实现，零新概念
+- ⚠️ 与现有 `EditorSceneManager.cpp:983` Phase C 的 500 单位区块划分**完全一致**——复用现有实现，零新概念（2026-08-10 修订：区块划分迁入剔除层空间哈希模块，Phase C 不再产出 BlockComponent）
 
 ### 8.4 聚合收益
 
@@ -211,11 +218,11 @@ AssetTool mpd2scene <map_dir> <out_dir>
 
 ### 8.5 落地路径（资产侧聚合）
 
-- **MapSceneConverter 按 500 单位输出块实体**（每块持 piece 句柄 + 实例矩阵数组），`.scene` SOA 二进制同步瘦身（15489 条实例记录 → 块内数组）
-- 块实体照常入 Editor 空间哈希：小图块级粗筛≈全可见（无精度损失），City_tac 大图块级剔除生效
+- ⚠️ **MapSceneConverter 按 500 单位输出块实体**（每块持 piece 句柄 + 实例矩阵数组），`.scene` SOA 二进制同步瘦身（15489 条实例记录 → 块内数组）（2026-08-10 修订：区块数据由剔除层空间哈希模块组织，块内实例矩阵仍保留）
+- ⚠️ 块实体照常入 Editor 空间哈希：小图块级粗筛≈全可见（无精度损失），City_tac 大图块级剔除生效（2026-08-10 修订：空间哈希按 `blockConfig` 生成区块、格存成员实体）
 - 实例矩阵在块实体上保留（实例化渲染仍拿到 228× 显存缩减），不做顶点焊接（破坏材质/纹理边界，§三 定案）
 
-### 8.6 分层剔除衔接（2026-08-06，见 `GPU-Drive.md` 蓝图）
+### 8.6 分层剔除衔接（2026-08-06，见 `CullingBlueprint.md` 蓝图）
 
 > 认知澄清：**ECS 实体数减少（15489→5 块），渲染实例数据量不减（仍 15489 个实例矩阵）**——
 > 聚合解决 ECS 遍历/管理开销，**精细剔除从 Builder（CPU）下放 GPU**（Compute 逐实例视锥 + 间接绘制），两者正交衔接。
@@ -230,8 +237,8 @@ L1 CPU 块级粗筛（✅ 已有）：空间哈希 → 块视锥 → cullDistanc
 - 树本质是"略微旋转的交叉 quad"（24 顶点/14 三角形），公告牌表达成立 → L2 理想输入
 - 建筑（bill00~08，~900）半静态：矩阵持久化，损伤 `_d` 切换走渲染项替换，不进 L2
 - 动态物（机体/特效 <50）CPU 视锥 + 每帧上传，被静态世界遮挡（L3 远期）
-- **集群职责（2026-08-06 定案，`GPU-Drive.md` §4.2）**：BlockComponent = **纯剔除豁免器**（对抗远近裁剪面，非对抗实体数——实体数已由块聚合解决）。`forceVisible` 只让**块实体进候选集**（粗筛豁免），块内实例的 L2 GPU 视锥剔除**照常**——集群与区块/L2 正交可叠加。适用山/远距建筑群/地形边界
-- 完整数据流/缓冲布局/实施阶段见 `Docs/architecture/rendering/GPU-Drive.md`
+- **集群职责（2026-08-06 定案，`CullingBlueprint.md` §4.2）**：BlockComponent = **纯剔除豁免器**（对抗远近裁剪面，非对抗实体数——实体数已由块聚合解决）。`forceVisible` 只让**块实体进候选集**（粗筛豁免），块内实例的 L2 GPU 视锥剔除**照常**——集群与区块/L2 正交可叠加。适用山/远距建筑群/地形边界（2026-08-10 修订：集群暂缓——场景构建器不再生产 BlockComponent，编辑器字段/schema 未准备）
+- 完整数据流/缓冲布局/实施阶段见 `Docs/architecture/rendering/CullingBlueprint.md`
 
 ### 8.7 块配置化（2026-08-06 定案 + 阶段 0 落地 ✅）
 
@@ -253,7 +260,7 @@ L1 CPU 块级粗筛（✅ 已有）：空间哈希 → 块视锥 → cullDistanc
 
 - 缺失 `blockConfig` → **加载时自动推导**：`cellSize = clamp(mapExtent / blocksPerAxis)`，`blocksPerAxis` 默认 4（对齐 §8.3 实测：500 单位块在 8/10 地图 = 2×2 = 4 块）
 - 推导公式/阈值参照 §8.3 实测表：City_tac（2100×2070）→ 36 块，是唯一"超视距"大图，块级剔除真正生效；In（210×210）小图自动回落下限
-- **不硬编码**：引擎内部 `OctreeSystem::m_cellSize=250`（查询单元）与块大小（数据组织单元）分离，块由场景决定
+- **不硬编码**：引擎内部 `SpatialHashGrid::m_cellSize=250`（查询单元）与块大小（数据组织单元）分离，块由场景决定
 
 #### 8.7.2 引擎侧加载链路（四端一致性，规则 #23，✅ 阶段 0 已落地）
 
@@ -261,14 +268,14 @@ L1 CPU 块级粗筛（✅ 已有）：空间哈希 → 块视锥 → cullDistanc
 |:--|:--|:--:|
 | `SceneDescription.h` | 新增 `BlockConfigDesc`（cellSize/blocksPerAxis/minCellSize/maxCellSize，默认 0 = 未配置）+ `to_json`/`from_json`；`SceneDescription::blockConfig` 可选字段 | ✅ 0a |
 | `SceneLoader.cpp` | 新增 `ParseBlockConfig`（`j.contains("blockConfig")` 检查，缺失则全 0 = 推导模式）+ SaveToJSON 输出 | ✅ 0b |
-| `SceneConstructor` | 加载时读 blockConfig：已配置直接用；未配置 → 从实体世界范围推导 cellSize（`clamp(mapExtent/blocksPerAxis)`）→ Phase C 消费 `blockCellSize`（复用 `EditorSceneManager.cpp` Phase C 划分逻辑） | ✅ 0c（待人工编译） |
+| `SceneConstructor` | 加载时读 blockConfig：已配置直接用；未配置 → 从实体世界范围推导 cellSize（`clamp(mapExtent/blocksPerAxis)`）→ ⚠️ Phase C 消费 `blockCellSize`（复用 `EditorSceneManager.cpp` Phase C 划分逻辑——2026-08-10 修订：区块划分迁入剔除层空间哈希模块，blockConfig 推导保留） | ✅ 0c（待人工编译） |
 | `ExportToDescription` | 编辑器保存时写回 `blockConfig`（`SceneSnapshot` 缓存 + 固化推导结果，下次加载零重算） | ✅ 0d |
 | `Schemas/scene.schema.json` | `blockConfig` 属性定义（4 字段，JSON 校验通过） | ✅ 0e |
 
 #### 8.7.3 与空间哈希/剔除的衔接
 
-- 块实体入空间哈希 → 块级 CulledSet → 桶存块条目 → 块内实例矩阵作为 GPU 剔除输入（详见 `GPU-Drive.md` §四）
-- `blockConfig.cellSize` 是**数据组织单元**（块实体划分）；空间哈希格子（`OctreeSystem::m_cellSize`）是**查询单元**——两者解耦：块跨格子正常（格子级视锥剪枝仍生效），查询单元可保持 250 或随块大小联动
+- ⚠️ 块实体入空间哈希 → 块级 CulledSet → 桶存块条目 → 块内实例矩阵作为 GPU 剔除输入（详见 `CullingBlueprint.md` §四）（2026-08-10 修订：空间哈希格存成员实体 → CulledSet 输出成员实体 → 块展开缓存归剔除层，RenderSlotCache 回归纯材质槽）
+- `blockConfig.cellSize` 是**数据组织单元**（区块划分，2026-08-10 起由空间哈希模块生成）；空间哈希格子（`SpatialHashGrid::m_cellSize`）是**查询单元**——两者解耦：块跨格子正常（格子级视锥剪枝仍生效），查询单元可保持 250 或随块大小联动
 
 ---
 

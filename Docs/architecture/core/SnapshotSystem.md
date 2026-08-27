@@ -101,6 +101,12 @@ Snapshot System 是顶层的组合者——三层的职责独立，但一次 Com
 
 记录用户的操作意图，而非操作结果。
 
+> **命令序列与录制功能紧密联系（2026-08-11 用户补充）**：录制（OperationRecorder /
+> `CameraCommandRecorder`）产出**命令序列**（有序 Operation / 相机增量命令），命令序列是
+> **回放与对比的共同载体**——单帧步进（`SingleFrameStep.md` §2.5）按帧重演相机命令触发
+> 相机移动、SnapshotSystem 游戏进程回放按帧重演操作序列，二者都消费录制的命令序列；
+> 录制 ↔ 命令序列 ↔ 回放是一体三态，同一模式的两个实例（操作级 vs 相机输入级）。
+
 ```cpp
 // 记录的操作类型（示例）
 enum class OperationType {

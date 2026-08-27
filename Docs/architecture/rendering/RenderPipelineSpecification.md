@@ -1,8 +1,16 @@
 # 渲染管线规范
 
 > 日期：2026-08-04
-> 状态：📋 规范文档
+> 状态：📋 规范文档（2026-08-27 更新）
 > 范围：渲染管线全流程、材质槽机制、水实体规范、扩展步骤、约束铁律
+>
+> **状态注记（2026-08-27）**：
+> - 5 层模型主体（材质槽 → shaderType 桶 → Builder → Renderer → FrameDriver）为现行活跃规范；标准构建器/管线仍属早期模式（缺乏改造和利用）。
+> - §10.6 桶编号/偏移铁律：**整节失效**——属 L2c 桶体系，被 **2026-08-18 无桶流程定案**取代（无桶/无槽、两张段表运行时生成、ExecuteIndirect 一次调用），保留为历史。
+> - §6.1/§6.2 RenderPhase 为 2026-08-12 快照；权威枚举以 **`Engine/Scheduler/RenderPhase.h`** 为准（后续新增 `Dispatch` GPU 剔除 + `DerivedCollect` 派生渲染项阶段，阴影等挂 DerivedCollect）。
+> - 公告牌：**环境公告牌管线**（EnvironmentBillboardRenderer）已废弃（2026-08-26）；`RenderPhase::Billboard` 阶段保留，标准公告牌构建器/管线属早期模式。
+> - §11 已知缺陷：#2（Game 透明队列无消费）/#5（Game/Editor 阶段不一致）**已修复**；#1/#3/#4/#6 仍未修复。
+> - §4.2 合批键：实际为 **5 字段 BatchKey**（含 startVertex）——CullData 不合批（1:1 实例），间接绘制命令按 key 合批（2026-08-27 用户确认）。
 
 ---
 
@@ -183,6 +191,11 @@ struct BatchKey {
 };
 ```
 
+> **2026-08-27 用户确认代码形态**：实际 `BatchKey` 为 **5 字段**——`geometry / materialIdx / startIndex / startVertex (int32_t) / indexCount`
+> （+ `operator==` 全字段比较），上方列表缺 `startVertex`。合批条件 = 完整 5 字段 key：
+> - **CullData 不合批**（剔除票与实例 1:1）；
+> - **间接绘制命令存在合批**（同 5 字段 key 的实体合并 instance 数组）——主要依据就是 key。
+
 - 相同 `BatchKey` 的实体跨实体合批（实例化 `DrawIndexedInstanced`）
 - `startVertex` 恒为 0（索引已绝对化，`BaseVertexLocation` 必须传 0）
 - 每个 `subMeshRange` 生成一个 BatchKey，不同区间不能合并
@@ -256,14 +269,21 @@ SystemRegistry::Register({
 
 ### 6.1 RenderPhase 枚举
 
+> ⚠️ **状态（2026-08-27）**：下列为 2026-08-12 快照。权威枚举以 `Engine/Scheduler/RenderPhase.h` 为准——
+> 现行版本含 **`Dispatch`**（GPU 剔除 dispatch，首阶段）与 **`DerivedCollect`**（派生渲染项收集+渲染显式阶段，
+> Dispatch 后、PrePass 前，阴影为首例）；PrePass 注释亦收敛为"清屏"。
+
 ```cpp
+// 顺序 = FrameDriver::Tick 提交顺序（2026-08-12 重排，对齐 Tick 执行序列；HZB_Build 单开保证串行）
 enum class RenderPhase : uint8_t {
-    PrePass,           // 清屏、阴影 Pass
-    DynamicAOcclusion, // SSAO（G-buffer 就绪后）
-    Lighting,          // 延迟光照（G-buffer + SSAO → 交换链）
-    Opaque,            // G-buffer 写入（不透明物体）
+    PrePass,           // 清屏、阴影、遮挡剔除（消费【上一帧】HZB）+ G-buffer
+    Opaque,            // G-buffer 写入（不透明物体；生成当前帧深度图）
+    HZB_Build,         // 构建 HZB（消费本帧深度图 → mip 链；供本帧 SSR/接触阴影 + 下一帧遮挡剔除）
+    DynamicAOcclusion, // SSAO（G-buffer 就绪后；直接采样深度，不依赖 HZB）
+    Lighting,          // 延迟光照（G-buffer + SSAO + 本帧 HZB → 交换链）
+    SSR,               // 屏幕空间反射（Lighting 后、Transparent 前：G-buffer 法线/深度/粗糙度 + HZB 层级步进 → 半分辨率反射图 + 全场景菲涅尔合成，2026-08-12）
     Billboard,         // 公告牌（复用 Opaque 深度）
-    Transparent,       // 透明物体（含水）
+    Transparent,       // 透明物体（含水；水采样 SSR 反射图）
     PostProcess,       // 后处理、天空盒
     FSR3_Upscale,      // 超采样
     UI,                // 界面
@@ -273,11 +293,19 @@ enum class RenderPhase : uint8_t {
 
 ### 6.2 执行顺序（FrameDriver::Tick）
 
+> ⚠️ **状态（2026-08-27）**：下列为 2026-08-12 快照；实际执行顺序以 FrameDriver::Tick 为准——
+> 现行版本在开头含 `ExecuteRenderPhase(Dispatch, 0)`（GPU 剔除）与 `ExecuteRenderPhase(DerivedCollect, 0)`
+> （阴影等派生渲染项，见 §10.7）。
+
 ```
 ExecuteRenderPhase(PrePass, 0)
-ExecuteRenderPhase(Opaque, 0)           ← G-buffer 写入
+ExecuteRenderPhase(Opaque, 0)           ← G-buffer 写入（生成当前帧深度图）
+ExecuteRenderPhase(HZB_Build, 0)        ← 构建 HZB（消费本帧深度图 → mip 链）
 ExecuteRenderPhase(DynamicAOcclusion, 0) ← SSAO（依赖 G-buffer 法线+深度）
-ExecuteRenderPhase(Lighting, 0)         ← 延迟光照到交换链
+ExecuteRenderPhase(Lighting, 0)         ← 延迟光照到交换链（SSR/接触阴影消费本帧 HZB）
+ExecuteRenderPhase(SSR, 0)              ← 屏幕空间反射（2026-08-12）：HZB 层级步进 → 半分辨率反射图
+                                          + 全场景合成（CompositePS：基底 sceneColor 拷贝 + 反射图 +
+                                          G-buffer 粗糙度 → 菲涅尔叠加写回 sceneColor；水在 Transparent 采样反射图）
 ExecuteRenderPhase(Billboard, 0)        ← 公告牌
 ExecuteRenderPhase(Transparent, 0)      ← 透明物体 / 水（Lighting 之后）
 ExecuteRenderPhase(PostProcess, 0)      ← 天空盒 / 后处理
@@ -289,15 +317,17 @@ ExecuteRenderPhase(UI, 0)
 
 | 渲染器 | 阶段 | 备注 |
 |:--|:--|:--|
-| 不透明物体（PBR/NPR） | `Opaque` | 写 G-buffer |
+| 不透明物体（PBR/NPR） | `Opaque` | 写 G-buffer（生成当前帧深度图） |
 | 蒙皮不透明物体 | `Opaque` | 写 G-buffer |
 | 地形 | `Opaque` | 写 G-buffer |
-| 公告牌 | `Billboard` | Lighting 之后，不写深度 |
+| HZB 构建 | `HZB_Build` | Opaque 之后：深度图 → mip 链（CS downsample；供本帧 SSR/接触阴影 + 下一帧遮挡剔除） |
+| 公告牌 | `Billboard` | Lighting 之后，不写深度（2026-08-27：环境公告牌管线已废弃、阶段保留；标准公告牌构建器/管线属早期模式） |
 | 透明物体（玻璃等） | `Transparent` | Lighting 之后，透明混合 |
 | 水 | `Transparent` | Lighting 之后，透明混合 |
 | 天空盒 | `PostProcess` | 最后覆盖 |
 | 调试线框 | `PostProcess` | 天空盒之后（最上层） |
-| SSAO | `DynamicAOcclusion` | Opaque 之后、Lighting 之前 |
+| SSAO | `DynamicAOcclusion` | Opaque 之后、Lighting 之前（直接采样深度，不依赖 HZB） |
+| SSR（屏幕空间反射） | `SSR` | Lighting 之后、Transparent 前（2026-08-12）：SsrManager/SsrRenderer 全屏 quad——HZB 层级步进 → 半分辨率反射图 + CompositePS 菲涅尔合成写回 sceneColor（全场景光滑表面） |
 | UI | `UI` | 最后 |
 
 ---
@@ -374,6 +404,10 @@ SceneConstructor::ConstructEntity:
 | **桶（绘制命令）** | `{geometry, materialIdx}`（不含 startIndex/indexCount）；同材质多段并入一桶，`ExecuteIndirect MaxCommandCount=段数` 一次提交 | 材质段级 |
 
 **关键认知**：材质切换必须分桶（无法一个 Indirect 画两种材质）——目标不是"1 条命令"，而是 **命令数 = 材质段数、剔除票 = 实体数**。
+
+> ⚠️ **2026-08-27 修正**：上表"桶（绘制命令）= {geometry, materialIdx}（不含 startIndex/indexCount）、同材质多段并入一桶"
+> 为 2026-08-08 历史定案，**不适用于现状**——实际合批条件为 **5 字段 BatchKey**（含 startIndex/startVertex/indexCount，见 §4.2），
+> **不同子网格区间不合批**；CullData 不合批（1:1 实例），间接绘制命令按 key 合批。
 
 ### 7.3 材质路由
 
@@ -576,6 +610,40 @@ SystemRegistry::Register({
 - ❌ **禁止在 `ConstructEntity` / `SceneConstructor` 中创建持久 CB 承载 World 矩阵**——水渲染早期旁路（`WaterObjCB_Persistent`）即因此只填 `MaterialIndex`、`World` 恒 0，导致 VS 输出全 0/NaN（RenderDoc 实测）。正确路径：Builder 填 `worldMatrix`/`materialIndex` → FrameSync `Allocate` 上传 → `DrawWater` 绑定地址
 - ❌ **禁止 Renderer 拿 `worldMatrix` 参数但不写入上传数据**（数据必须落地上传，不能丢弃）
 
+### 10.6 桶编号 / 偏移设计铁律（2026-08-15 新增，防偏移设计问题复发）
+
+> ⚠️ **状态（2026-08-27）：整节失效**。本节（桶编号 FrameSync 单点分配/桶偏移表前缀和/bucketMap/每桶 args）
+> 属 L2c 桶体系，已被 **2026-08-18 无桶流程定案**取代——无桶/无槽（旧桶段区/bucketIndex/槽位数组/桶偏移表全部废弃）、
+> 回调同步只需拼接、两张段表（culldata 段表 + 批次段表前缀和）运行时生成、ExecuteIndirect 一次调用
+> （MaxCommandCount=总命令数）。正文铁律保留为历史，不再适用。
+> （这也解决了 `BlockBaking.md` 曾留的"§10.6 字面表述需修订"注记——整节失效后无需再修订。）
+
+**背景**：阴影错乱排查（BugFix_ShadowMap_SubMeshSplit_StaticArgs）暴露"偏移设计"反复出错的根因——桶编号与偏移表的多点重复设计。以下铁律约束所有构建器/渲染器/剔除层：
+
+- ✅ **桶按材质（shaderType）全局划分，仅一份**：`RenderSlotCache.m_buckets[shaderType]`（材质段级），不存在"消费桶子集"——构建器按 `ForEachBucket(rendererName)` 路由**完整消费**桶（Opaque→opaque、Water→water 等，无重叠无拆分）
+- ✅ **桶编号（bucketIndex）全局唯一，单点分配**：唯一分配点为 `FrameSync`（`assignedBucket` 全局递增，Editor.cpp），**禁止构建器/渲染器自行分配桶编号**（并行构建器各自分配会冲突 → CS 桶段语义分裂 → 偏移错位）
+- ✅ **偏移表（桶偏移表前缀和）全局一份，共享 COPY**：`CullingDataStore::ComputeBucketOffsets` 遍历全局 `m_bucketMap` 生成一份前缀和；主视口 COPY 到 `gIndirectArgs` 尾部、阴影 COPY 到 `shadowIndirectArgs` 尾部（**数据同源，资源隔离**）——禁止每构建器独立偏移表
+- ✅ **构建器并行颗粒度为构建器级，禁止构建器内部分块（chunk）**：各构建器为独立 Worker system（TaskFlow 线程池并行），内部**单次完整遍历**桶；分块设计（BuildTypedChunk/MergeChunk）每 chunk 遍历完整桶 → 遍历重复浪费（8 次完整桶遍历导致 CPU 60%），已删除
+- ✅ **PendingBatch 是构建器→FrameSync 的完整数据载体（非旧遗留）**：`instances/entities/instanceRadii` → allInstances/cullData、`queueIndex` → 回填渲染项、`bucketIndex` → 分配桶编号——FrameSync 逐字段消费，撤销 chunk 后仍必需
+- ✅ **构建器可自处理渲染项内部局部偏移**（tempSlot/queueIndex/实例段局部索引，§4.2 自包含）；**跨构建器聚合（桶编号/bucketMap/allInstances/cullData）必须单点 FrameSync**——主线程不做构建工作，只做全局聚合
+- ❌ **禁止新构建器/渲染器引入独立桶编号空间或独立偏移表**（同一桶被编号两次 → CS 桶段错位，阴影错乱同源问题）
+- ❌ **禁止在构建器内部做分块遍历**（每 chunk 遍历完整桶，遍历重复浪费——2026-08-15 实证 8 次完整桶遍历致 CPU 60%）
+
+### 10.7 FrameSync 回调语义铁律（2026-08-15 用户定案）
+
+> ⚠️ **状态（2026-08-27）**：无桶流程（2026-08-18 定案）后 FrameSync 回调**只需拼接**——stg1/stg2
+> （accum 聚合/扁平化）工作大半消亡（两张段表运行时生成）。本节"主线程 + 仅上传、并行必须走 system/TaskFlow、
+> 派生渲染项挂 `DerivedCollect` 显式阶段（已在 `RenderPhase.h` 枚举确认存在）"等核心语义**仍有效**；
+> stg1/stg2 的具体描述为历史记录。
+
+**背景**：FrameSync 主线程耗时 5.5ms（stg1 accum 聚合 + stg2 扁平化）曾被 std::async 并行化（负优化，已回退），后 system 化移入 `EditorFrameAccumFlatten`（PreRender/Worker，TaskFlow 并行）→ 主线程回调仅剩 0.33-0.47ms。**FrameSync 回调保留的语义是主线程 + 仅上传**，禁止改造为 system：
+
+- ✅ **FrameSync 回调 = 主线程 + 仅上传语义**：立即回调保留因语义差异——主线程同步点（FrameDriver PreRender 之后执行）且**只包含上传语义**（RingBuffer Allocate/memcpy/SetCullData/SetFlatInstances/SetShadowBucketDrawArgs）——禁止将其计算逻辑改造为 system（上传必须在主线程同步点，GPU 消费顺序依赖）
+- ✅ **计算逻辑（stg1 accum 聚合 + stg2 扁平化）应移入 Worker system**（`EditorFrameAccumFlatten`，PreRender/Worker + TaskFlow 并行）——主线程关键路径只留消费/上传；产出经共享成员（m_frame*）交回调消费
+- ✅ **并行化必须复用引擎 system/TaskFlow 机制**：**禁止 std::async/裸线程**绕过 system 做并行（每帧线程创建 + 小数据分块 + 合并成本 → 负优化实证：FrameSync 5.5→6.7-9.9ms、帧率下降）；system 化后 FrameSync 5.5→0.33ms、帧率回升（18:26 段 58.3 FPS）
+- ✅ **派生渲染项（阴影为首例）必须单开显式 RenderPhase 阶段**：`RenderPhase::DerivedCollect`（Dispatch 后、PrePass 前）——阴影贴图/未来贴花/程序化派生等派生渲染项统一挂此显式阶段，**禁止假定只有阴影存在此需求**；阴影渲染 system 的 `.renderPhase` 与 `SubmitRenderCommand(phase)` 必须一致（规则 24）
+- ❌ **禁止 FrameSync 回调内做重计算**（聚合/扁平化/几何解析——5.1ms 已移出）；回调只消费 m_frame* 成员（SetCullData/ApplyBucketIndices/上传）
+
 ---
 
 ## 11. 已知缺陷登记
@@ -588,7 +656,7 @@ SystemRegistry::Register({
 - **修复方向**：拆出独立 `EditorWaterRenderSystem`，注册 `RenderPhase::Transparent`
 - **优先级**：P1
 
-### #2 Game 端透明实体队列无消费系统
+### #2 Game 端透明实体队列无消费系统 ✅ 已修复（2026-08-27 用户确认）
 
 - **问题**：`m_transparentQueue` 由 `TransparentRenderItemBuilder` 构建 + `FrameSync` 上传 ObjectConstants，但**没有任何渲染系统消费它**（搜不到 `TransparentRenderSystem`）
 - **影响**：透明实体（玻璃等）JSON 定义后可见但永远不渲染
@@ -609,7 +677,7 @@ SystemRegistry::Register({
 - **修复方向**：`GeometryProceduralTask` 实现后，`SceneConstructor::ConstructEntity` 增加 `mesh.procedural` 分支（生成→注册→挂组件）
 - **优先级**：P1
 
-### #5 Game 与 Editor 渲染阶段不一致
+### #5 Game 与 Editor 渲染阶段不一致 ✅ 已修复（2026-08-27 用户确认）
 
 - **问题**：Game 端水在 `RenderPhase::Transparent`，Editor 端水在 `RenderPhase::Opaque`
 - **影响**：相同场景在 Game 和 Editor 中渲染结果不同
